@@ -5,16 +5,19 @@
 
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
+import { RestoreButton } from "@/components/restore-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useCurrentRole } from "@/hooks/use-current-role";
 import { useTriggerVerify } from "@/hooks/use-mutations";
 import { useArtifacts } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { formatBytes } from "@/lib/format";
+import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 
-function ArtifactRow({ artifact }: { artifact: Artifact }) {
+function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
   const t = useT();
   const verify = useTriggerVerify();
   const key = artifact.keyIds[0] ?? "—";
@@ -29,15 +32,17 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
             {t("artifacts.key", { key })}
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-auto"
-          onClick={() => verify.mutate(artifact.id)}
-          disabled={verify.isPending}
-        >
-          {verify.isPending ? t("common.loading") : t("artifacts.verify")}
-        </Button>
+        <div className="ml-auto flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => verify.mutate(artifact.id)}
+            disabled={verify.isPending}
+          >
+            {verify.isPending ? t("common.loading") : t("artifacts.verify")}
+          </Button>
+          <RestoreButton artifact={artifact} role={role} />
+        </div>
       </CardContent>
     </Card>
   );
@@ -46,6 +51,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
 export default function ArtifactsPage() {
   const t = useT();
   const artifacts = useArtifacts();
+  const role = useCurrentRole();
 
   return (
     <AppShell>
@@ -59,7 +65,9 @@ export default function ArtifactsPage() {
         ) : artifacts.data.length === 0 ? (
           <EmptyState message={t("artifacts.empty")} />
         ) : (
-          artifacts.data.map((artifact) => <ArtifactRow key={artifact.id} artifact={artifact} />)
+          artifacts.data.map((artifact) => (
+            <ArtifactRow key={artifact.id} artifact={artifact} role={role} />
+          ))
         )}
       </div>
     </AppShell>

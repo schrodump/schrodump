@@ -155,6 +155,23 @@ export const en = {
   "artifacts.verify": "Verify",
   "artifacts.restore": "Restore",
   "artifacts.empty": "No artifacts yet.",
+
+  "restore.title": "Restore artifact",
+  "restore.description": "Restore is deliberate. Pick a scope — scopes this engine cannot restore are disabled.",
+  "restore.scope": "Restore scope",
+  "restore.unsupported": "Not supported for {engine}",
+  "restore.targetDatabase": "Target database",
+  "restore.overExisting": "Restore over an existing database (overwrites data)",
+  "restore.confirmPrompt": "To confirm, type the target database name exactly.",
+  "restore.confirmName": "Type the database name to confirm",
+  "restore.mismatch": "The name does not match the target database.",
+  "restore.submit": "Start restore",
+  "restore.serverPending": "Restore execution is not available on the server yet.",
+  "restoreTarget.FULL_CLUSTER": "Full cluster",
+  "restoreTarget.DATABASE": "Database",
+  "restoreTarget.SCHEMA": "Schema",
+  "restoreTarget.TABLE": "Table",
+  "restoreTarget.COLLECTION": "Collection",
 } as const;
 
 export type MessageKey = keyof typeof en;
