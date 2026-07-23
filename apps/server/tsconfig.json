@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "customConditions": ["@schrodump/source"]
+  },
+  "include": ["src"]
+}

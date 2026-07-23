@@ -1,0 +1,377 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum EngineKind {
+  postgres
+  mysql
+  mariadb
+  mongodb
+}
+
+enum Role {
+  admin
+  operator
+  viewer
+}
+
+// Ternary on purpose — there is no "OK". A backup whose restore was never observed is
+// UNOBSERVED, never assumed good.
+enum ArtifactState {
+  VERIFIED
+  UNOBSERVED
+  FAILED
+}
+
+enum ExecutionMode {
+  STREAM
+  STAGED
+}
+
+enum VerifyLevel {
+  NONE
+  CHECKSUM
+  FULL_RESTORE
+}
+
+enum CompressionAlgorithm {
+  none
+  zstd
+  gzip
+}
+
+enum JobKind {
+  BACKUP
+  RESTORE
+  VERIFY
+}
+
+enum JobState {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum KeyType {
+  operational
+  escrow
+}
+
+enum KeyState {
+  active
+  retired
+}
+
+enum DestinationSealMode {
+  operational
+  sealed
+}
+
+// ---------------------------------------------------------------------------
+// Auth models (Better-Auth) — global, not organization-scoped. Users belong to
+// organizations through Membership, so they carry no single organizationId.
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String  @id
+  name          String
+  email         String  @unique
+  emailVerified Boolean @default(false)
+  image         String?
+  // The bootstrap admin's password comes from env (visible in `docker inspect`), so it must
+  // be rotated on first login.
+  mustChangePassword Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions    Session[]
+  accounts    Account[]
+  memberships Membership[]
+  auditLogs   AuditLog[]
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+// ---------------------------------------------------------------------------
+// Instance-global (pre-organization) models
+// ---------------------------------------------------------------------------
+
+model SetupToken {
+  id         String    @id @default(cuid())
+  // SHA-256 of the raw token; the raw token is never persisted.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Domain models — every one carries organizationId, no exception.
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  // Hidden in the UI while it is the only organization.
+  hidden    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships         Membership[]
+  databaseTargets     DatabaseTarget[]
+  storageDestinations StorageDestination[]
+  backupPolicies      BackupPolicy[]
+  backupJobs          BackupJob[]
+  artifacts           Artifact[]
+  encryptionKeys      EncryptionKey[]
+  auditLogs           AuditLog[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+}
+
+model DatabaseTarget {
+  id             String     @id @default(cuid())
+  organizationId String
+  name           String
+  engine         EngineKind
+  host           String
+  port           Int
+  username       String
+  // Envelope-encrypted credential blob. Write-only from the user's perspective — never
+  // decrypted for display.
+  encryptedCredential Json
+  tls            Boolean    @default(true)
+  scope          Json       // { databases, schemas, collections }
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  backupPolicies BackupPolicy[]
+
+  @@index([organizationId])
+  @@index([organizationId, engine])
+}
+
+model StorageDestination {
+  id             String  @id @default(cuid())
+  organizationId String
+  name           String
+  endpoint       String?
+  region         String
+  bucket         String
+  prefix         String
+  // The access key id is an identifier, not the secret; the secret is envelope-encrypted.
+  accessKeyId    String
+  encryptedSecretAccessKey Json
+  forcePathStyle Boolean @default(false)
+  // operational: server holds the identity (full verify). sealed: server holds only the
+  // public recipient (verify degrades to checksum; restore needs an operator-supplied identity).
+  sealMode       DestinationSealMode @default(operational)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  backupPolicies BackupPolicy[]
+  artifacts      Artifact[]
+
+  @@index([organizationId])
+}
+
+model BackupPolicy {
+  id             String @id @default(cuid())
+  organizationId String
+  name           String
+  targetId       String
+  destinationId  String
+  cron           String
+  // GFS retention (see @schrodump/core RetentionPolicy).
+  keepLast             Int    @default(0)
+  keepDaily            Int    @default(0)
+  keepWeekly           Int    @default(0)
+  keepMonthly          Int    @default(0)
+  keepYearly           Int    @default(0)
+  minAgeBeforeDeleteMs BigInt @default(0)
+  verifyLevel          VerifyLevel          @default(CHECKSUM)
+  executionMode        ExecutionMode        @default(STREAM)
+  parallelism          Int                  @default(1)
+  compression          CompressionAlgorithm @default(zstd)
+  enabled              Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  target       DatabaseTarget     @relation(fields: [targetId], references: [id])
+  destination  StorageDestination @relation(fields: [destinationId], references: [id])
+  jobs         BackupJob[]
+
+  @@index([organizationId])
+  @@index([organizationId, enabled])
+}
+
+model BackupJob {
+  id             String    @id @default(cuid())
+  organizationId String
+  policyId       String?
+  kind           JobKind   @default(BACKUP)
+  state          JobState  @default(PENDING)
+  correlationId  String
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  exitCode       Int?
+  // Sanitized stderr from the runner — never raw client output.
+  stderr         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policy       BackupPolicy? @relation(fields: [policyId], references: [id])
+  artifact     Artifact?
+
+  @@index([organizationId])
+  @@index([organizationId, state])
+}
+
+model Artifact {
+  id                  String        @id @default(cuid())
+  organizationId      String
+  jobId               String        @unique
+  destinationId       String
+  state               ArtifactState @default(UNOBSERVED)
+  bucketKey           String
+  manifestKey         String
+  engine              EngineKind
+  serverVersionNum    Int
+  sizeRawBytes        BigInt
+  sizeCompressedBytes BigInt
+  checksumAlgorithm   String
+  checksum            String
+  compression         CompressionAlgorithm
+  // Fingerprints of the recipients the artifact was encrypted for.
+  keyIds              String[]
+  // jobIds this artifact depends on (full/incremental chain).
+  dependsOn           String[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  job          BackupJob          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  destination  StorageDestination @relation(fields: [destinationId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, state])
+}
+
+model EncryptionKey {
+  id             String   @id @default(cuid())
+  organizationId String
+  // Fingerprint of the public recipient.
+  keyId          String
+  type           KeyType
+  // age recipient (public), e.g. age1...
+  publicRecipient String
+  // Envelope-encrypted identity (secret) — present only for operational keys the server holds;
+  // null for escrow keys (identity kept offline).
+  encryptedIdentity Json?
+  state          KeyState @default(active)
+  createdAt      DateTime @default(now())
+  retiredAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, keyId])
+  @@index([organizationId])
+  @@index([organizationId, type, state])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  // e.g. "restore.trigger", "credential.read" — restore and credential reads are mandatory.
+  action         String
+  targetType     String?
+  targetId       String?
+  correlationId  String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+}
