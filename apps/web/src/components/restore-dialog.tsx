@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,13 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
   const [database, setDatabase] = useState("");
   const [overExisting, setOverExisting] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Move focus into the dialog on open so keyboard users land inside it and Escape reaches the
+  // handler below instead of the page behind.
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
 
   const scoped = target !== "FULL_CLUSTER";
   const nameMatches = database.length > 0 && confirmName === database;
@@ -52,10 +59,12 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="restore-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 outline-none"
       onKeyDown={(event) => {
         if (event.key === "Escape") onClose();
       }}

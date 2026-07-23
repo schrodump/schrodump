@@ -28,9 +28,9 @@
   /* Ternary backup state. UNOBSERVED is deliberately amber — never gray, never green. */
   --state-verified: oklch(0.52 0.14 152);
   --state-verified-bg: oklch(0.95 0.05 152);
-  --state-unobserved: oklch(0.56 0.14 75);
+  --state-unobserved: oklch(0.50 0.13 75);
   --state-unobserved-bg: oklch(0.95 0.07 85);
-  --state-failed: oklch(0.55 0.22 27);
+  --state-failed: oklch(0.52 0.21 27);
   --state-failed-bg: oklch(0.95 0.06 25);
 }
 
