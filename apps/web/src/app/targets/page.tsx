@@ -30,12 +30,21 @@ function TestConnection({ targetId }: { targetId: string }) {
         </span>
       ) : null}
       {test.isSuccess && !test.data.ok ? (
-        <span className="text-sm text-[var(--color-state-failed)]">{t("targets.probe.failed")}</span>
+        <span className="text-sm text-[var(--color-state-failed)]">
+          {t("targets.probe.failed")} {t(`targets.probe.reason.${test.data.failure ?? "UNKNOWN"}`)}
+          {/* Shown only when the classification gave up: otherwise it is noise, but on an UNKNOWN
+              it is the difference between a reportable failure and a dead end. */}
+          {test.data.failure === "UNKNOWN" && test.data.driverCode !== null
+            ? ` ${t("targets.probe.driverCode", { code: test.data.driverCode })}`
+            : ""}
+        </span>
       ) : null}
       {test.isError ? (
         <span className="text-sm text-[var(--color-state-failed)]">{t("targets.probe.failed")}</span>
       ) : null}
-      {test.isSuccess ? (
+      {/* Only alongside a success: on a failure this reads as if the probe ran and came back thin,
+          which is the wrong thing to tell someone whose connection did not work at all. */}
+      {test.isSuccess && test.data.ok ? (
         <span className="text-xs text-muted-foreground">{t("targets.probe.limited")}</span>
       ) : null}
     </div>

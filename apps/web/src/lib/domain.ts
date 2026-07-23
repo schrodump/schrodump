@@ -44,6 +44,18 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
+// Why the server answers with a code and not a message: driver errors embed the credential they
+// failed with. The wording lives in the translation files.
+export const PROBE_FAILURE_CODES = [
+  "UNREACHABLE",
+  "TIMEOUT",
+  "AUTH_FAILED",
+  "INSUFFICIENT_PRIVILEGES",
+  "TLS_FAILED",
+  "UNKNOWN",
+] as const;
+export type ProbeFailureCode = (typeof PROBE_FAILURE_CODES)[number];
+
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 
 export function canRestore(role: Role): boolean {

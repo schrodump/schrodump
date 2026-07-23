@@ -3,6 +3,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import type { ProbeFailureCode } from "@/lib/domain";
 
 export function useCreateTarget() {
   const client = useQueryClient();
@@ -15,7 +16,9 @@ export function useCreateTarget() {
 export function useTestConnection() {
   return useMutation({
     mutationFn: (targetId: string) =>
-      api.post<{ ok: boolean; serverVersionNum: number | null }>(`/targets/${targetId}/test-connection`),
+      api.post<{ ok: boolean; serverVersionNum: number | null; failure: ProbeFailureCode | null; driverCode: string | null }>(
+        `/targets/${targetId}/test-connection`,
+      ),
   });
 }
 
