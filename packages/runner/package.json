@@ -1,0 +1,43 @@
+{
+  "name": "@schrodump/runner",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./runner": {
+      "@schrodump/source": "./src/runner.ts",
+      "types": "./dist/runner.d.ts",
+      "import": "./dist/runner.js"
+    },
+    "./docker": {
+      "@schrodump/source": "./src/docker.ts",
+      "types": "./dist/docker.d.ts",
+      "import": "./dist/docker.js"
+    },
+    "./scratch": {
+      "@schrodump/source": "./src/scratch.ts",
+      "types": "./dist/scratch.d.ts",
+      "import": "./dist/scratch.js"
+    },
+    "./pipeline": {
+      "@schrodump/source": "./src/pipeline.ts",
+      "types": "./dist/pipeline.d.ts",
+      "import": "./dist/pipeline.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@schrodump/core": "workspace:*",
+    "dockerode": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.0",
+    "@types/node": "^22.0.0"
+  }
+}
