@@ -1,0 +1,106 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.15 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0 0);
+  --primary: oklch(0.21 0.006 285.9);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.967 0.001 286.4);
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --muted: oklch(0.967 0.001 286.4);
+  --muted-foreground: oklch(0.52 0.016 285.9);
+  --accent: oklch(0.967 0.001 286.4);
+  --accent-foreground: oklch(0.21 0.006 285.9);
+  --destructive: oklch(0.577 0.245 27.3);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.92 0.004 286.3);
+  --input: oklch(0.92 0.004 286.3);
+  --ring: oklch(0.7 0.015 286.1);
+  --radius: 0.625rem;
+
+  /* Ternary backup state. UNOBSERVED is deliberately amber — never gray, never green. */
+  --state-verified: oklch(0.52 0.14 152);
+  --state-verified-bg: oklch(0.95 0.05 152);
+  --state-unobserved: oklch(0.56 0.14 75);
+  --state-unobserved-bg: oklch(0.95 0.07 85);
+  --state-failed: oklch(0.55 0.22 27);
+  --state-failed-bg: oklch(0.95 0.06 25);
+}
+
+.dark {
+  --background: oklch(0.15 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.19 0.006 285.9);
+  --card-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.92 0.004 286.3);
+  --primary-foreground: oklch(0.21 0.006 285.9);
+  --secondary: oklch(0.27 0.006 286.0);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.27 0.006 286.0);
+  --muted-foreground: oklch(0.71 0.013 286.1);
+  --accent: oklch(0.27 0.006 286.0);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.7 0.19 22.2);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.55 0.015 286.1);
+
+  --state-verified: oklch(0.78 0.16 152);
+  --state-verified-bg: oklch(0.28 0.06 152);
+  --state-unobserved: oklch(0.82 0.15 85);
+  --state-unobserved-bg: oklch(0.3 0.06 80);
+  --state-failed: oklch(0.75 0.18 25);
+  --state-failed-bg: oklch(0.3 0.08 25);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-state-verified: var(--state-verified);
+  --color-state-verified-bg: var(--state-verified-bg);
+  --color-state-unobserved: var(--state-unobserved);
+  --color-state-unobserved-bg: var(--state-unobserved-bg);
+  --color-state-failed: var(--state-failed);
+  --color-state-failed-bg: var(--state-failed-bg);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+  /* Visible keyboard focus for accessibility. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
