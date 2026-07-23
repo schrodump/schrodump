@@ -4,6 +4,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { parseConnectionUrl, type ParseFailureReason } from "@/lib/connection-url";
 import { z } from "zod";
 import { useCreateTarget } from "@/hooks/use-mutations";
 import { useT } from "@/i18n/provider";
@@ -43,7 +44,34 @@ export function TargetForm({ onDone }: { onDone: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [tls, setTls] = useState(true);
+  const [databases, setDatabases] = useState("");
   const [invalid, setInvalid] = useState(false);
+  const [connectionUrl, setConnectionUrl] = useState("");
+  const [urlError, setUrlError] = useState<ParseFailureReason | null>(null);
+  const [urlScheme, setUrlScheme] = useState("");
+
+  // The URL fills the form; it is never part of what gets submitted. On failure nothing is
+  // touched — a form half-filled from a URL that did not parse is worse than an empty one.
+  function fillFromUrl() {
+    const result = parseConnectionUrl(connectionUrl);
+    if (!result.ok) {
+      setUrlError(result.reason);
+      setUrlScheme(result.scheme ?? "");
+      return;
+    }
+    const value = result.value;
+    setEngine(value.engine);
+    setHost(value.host);
+    setPort(value.port);
+    if (value.username.length > 0) setUsername(value.username);
+    if (value.password.length > 0) setPassword(value.password);
+    if (value.tls !== null) setTls(value.tls);
+    setDatabases(value.databases.join(", "));
+    setUrlError(null);
+    // Cleared on success: the URL holds the password in clear, and leaving it in state would keep
+    // the secret in a second place for no benefit.
+    setConnectionUrl("");
+  }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -53,14 +81,40 @@ export function TargetForm({ onDone }: { onDone: () => void }) {
       return;
     }
     setInvalid(false);
+    const names = databases
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
     create.mutate(
-      { ...parsed.data, scope: { databases: [], schemas: [], collections: [] } },
+      { ...parsed.data, scope: { databases: names, schemas: [], collections: [] } },
       { onSuccess: onDone },
     );
   }
 
   return (
     <form className="grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label htmlFor="connection-url">{t("targets.url")}</Label>
+        <div className="flex gap-2">
+          <Input
+            id="connection-url"
+            type="password"
+            autoComplete="off"
+            value={connectionUrl}
+            onChange={(e) => setConnectionUrl(e.target.value)}
+          />
+          <Button type="button" variant="outline" onClick={fillFromUrl}>
+            {t("targets.url.fill")}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{t("targets.url.hint")}</p>
+        {urlError !== null ? (
+          <p className="text-sm text-[var(--color-state-failed)]">
+            {t(`targets.url.error.${urlError}`, { scheme: urlScheme })}
+          </p>
+        ) : null}
+      </div>
+
       <div className="space-y-1.5">
         <Label htmlFor="name">{t("targets.name")}</Label>
         <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -103,6 +157,10 @@ export function TargetForm({ onDone }: { onDone: () => void }) {
         <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} />
         {t("targets.tls")}
       </label>
+      <div className="space-y-1.5 sm:col-span-2">
+        <Label htmlFor="databases">{t("targets.databases")}</Label>
+        <Input id="databases" value={databases} onChange={(e) => setDatabases(e.target.value)} />
+      </div>
       <div className="sm:col-span-2 space-y-2">
         {invalid ? <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p> : null}
         {create.isError ? <ErrorState message={create.error.message} /> : null}
