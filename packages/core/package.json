@@ -5,26 +5,32 @@
   "sideEffects": false,
   "exports": {
     "./types": {
+      "@schrodump/source": "./src/types.ts",
       "types": "./dist/types.d.ts",
       "import": "./dist/types.js"
     },
     "./execution": {
+      "@schrodump/source": "./src/execution.ts",
       "types": "./dist/execution.d.ts",
       "import": "./dist/execution.js"
     },
     "./capabilities": {
+      "@schrodump/source": "./src/capabilities.ts",
       "types": "./dist/capabilities.d.ts",
       "import": "./dist/capabilities.js"
     },
     "./manifest": {
+      "@schrodump/source": "./src/manifest.ts",
       "types": "./dist/manifest.d.ts",
       "import": "./dist/manifest.js"
     },
     "./retention": {
+      "@schrodump/source": "./src/retention.ts",
       "types": "./dist/retention.d.ts",
       "import": "./dist/retention.js"
     },
     "./errors": {
+      "@schrodump/source": "./src/errors.ts",
       "types": "./dist/errors.d.ts",
       "import": "./dist/errors.js"
     }

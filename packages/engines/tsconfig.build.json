@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
-    "paths": {}
+    "customConditions": []
   },
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
 }
