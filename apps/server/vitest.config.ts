@@ -4,7 +4,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const coreSrc = fileURLToPath(new URL("../../packages/core/src/", import.meta.url));
+const packagesDir = fileURLToPath(new URL("../../packages/", import.meta.url));
 
 export default defineConfig({
   test: {
@@ -12,6 +12,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
   },
   resolve: {
-    alias: [{ find: /^@schrodump\/core\/(.*)$/, replacement: `${coreSrc}$1.ts` }],
+    // @schrodump/<pkg>/<subpath> -> ../../packages/<pkg>/src/<subpath>.ts (resolve from source)
+    alias: [{ find: /^@schrodump\/([^/]+)\/(.*)$/, replacement: `${packagesDir}$1/src/$2.ts` }],
   },
 });

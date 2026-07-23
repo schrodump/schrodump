@@ -5,18 +5,22 @@
   "sideEffects": false,
   "exports": {
     "./driver": {
+      "@schrodump/source": "./src/driver.ts",
       "types": "./dist/driver.d.ts",
       "import": "./dist/driver.js"
     },
     "./s3": {
+      "@schrodump/source": "./src/s3.ts",
       "types": "./dist/s3.d.ts",
       "import": "./dist/s3.js"
     },
     "./canary": {
+      "@schrodump/source": "./src/canary.ts",
       "types": "./dist/canary.d.ts",
       "import": "./dist/canary.js"
     },
     "./manifest-sidecar": {
+      "@schrodump/source": "./src/manifest-sidecar.ts",
       "types": "./dist/manifest-sidecar.d.ts",
       "import": "./dist/manifest-sidecar.js"
     }

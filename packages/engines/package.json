@@ -5,26 +5,32 @@
   "sideEffects": false,
   "exports": {
     "./descriptor": {
+      "@schrodump/source": "./src/descriptor.ts",
       "types": "./dist/descriptor.d.ts",
       "import": "./dist/descriptor.js"
     },
     "./registry": {
+      "@schrodump/source": "./src/registry.ts",
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
     },
     "./probe/types": {
+      "@schrodump/source": "./src/probe/types.ts",
       "types": "./dist/probe/types.d.ts",
       "import": "./dist/probe/types.js"
     },
     "./probe/postgres": {
+      "@schrodump/source": "./src/probe/postgres.ts",
       "types": "./dist/probe/postgres.d.ts",
       "import": "./dist/probe/postgres.js"
     },
     "./probe/mysql": {
+      "@schrodump/source": "./src/probe/mysql.ts",
       "types": "./dist/probe/mysql.d.ts",
       "import": "./dist/probe/mysql.js"
     },
     "./probe/mongodb": {
+      "@schrodump/source": "./src/probe/mongodb.ts",
       "types": "./dist/probe/mongodb.d.ts",
       "import": "./dist/probe/mongodb.js"
     }

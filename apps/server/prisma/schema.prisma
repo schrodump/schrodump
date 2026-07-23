@@ -286,6 +286,9 @@ model BackupJob {
   id             String    @id @default(cuid())
   organizationId String
   policyId       String?
+  // The scheduling window; with policyId it forms the idempotency key so a duplicate trigger of
+  // the same window does not create two jobs. Null for manual/ad-hoc jobs.
+  scheduledAt    DateTime?
   kind           JobKind   @default(BACKUP)
   state          JobState  @default(PENDING)
   correlationId  String
@@ -294,6 +297,8 @@ model BackupJob {
   exitCode       Int?
   // Sanitized stderr from the runner — never raw client output.
   stderr         String?
+  // Explicit reason for a FAILED/degraded outcome (e.g. orphaned by restart, sealed downgrade).
+  reason         String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -301,6 +306,7 @@ model BackupJob {
   policy       BackupPolicy? @relation(fields: [policyId], references: [id])
   artifact     Artifact?
 
+  @@unique([policyId, scheduledAt])
   @@index([organizationId])
   @@index([organizationId, state])
 }
