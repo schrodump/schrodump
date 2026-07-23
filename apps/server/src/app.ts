@@ -6,6 +6,9 @@ import { ZodError } from "zod";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
 import type { SessionResolver } from "./auth/rbac.js";
 import { newCorrelationId } from "./observability/pino.js";
+import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
+import { jobsRoutes, type JobsService } from "./routes/jobs.js";
+import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { restoreRoutes } from "./routes/restore.js";
 import { setupRoutes, type SetupDeps } from "./routes/setup.js";
 import { targetRoutes, type TargetStore } from "./routes/targets.js";
@@ -16,6 +19,13 @@ export interface AppDeps {
   resolver: SessionResolver;
   setupDeps: SetupDeps;
   targetStore(organizationId: string): TargetStore;
+  destinationStore(organizationId: string): DestinationStore;
+  destinationCanary(
+    organizationId: string,
+    destinationId: string,
+  ): Promise<{ ok: boolean; failedOperation: string | null }>;
+  policyStore(organizationId: string): PolicyStore;
+  jobsService: JobsService;
   kek: Buffer;
 }
 
@@ -55,6 +65,23 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     targetRoutes({ resolver: deps.resolver, kek: deps.kek, store: deps.targetStore })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    destinationRoutes({
+      resolver: deps.resolver,
+      kek: deps.kek,
+      store: deps.destinationStore,
+      canary: deps.destinationCanary,
+    })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    policyRoutes({ resolver: deps.resolver, store: deps.policyStore })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    jobsRoutes({ resolver: deps.resolver, service: deps.jobsService })(instance);
     return Promise.resolve();
   });
 

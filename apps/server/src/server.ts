@@ -2,19 +2,47 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
+import { createS3Driver } from "@schrodump/storage/s3";
 import { buildApp } from "./app.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
+import { decryptCredential, parseEncryptedCredential } from "./crypto/envelope.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
-import { createPrismaClient } from "./db.js";
+import { scopedPrisma } from "./data/scope.js";
+import { createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
+import { createJobsService, prismaDestinationStore, prismaPolicyStore } from "./routes/wiring.js";
 
 // A stable per-instance auth secret derived from the KEK when none is configured explicitly.
 function deriveAuthSecret(kek: Buffer): string {
   return createHash("sha256").update(kek).update("schrodump-better-auth").digest("hex");
+}
+
+async function destinationCanary(
+  prisma: PrismaClient,
+  kek: Buffer,
+  organizationId: string,
+  destinationId: string,
+): Promise<{ ok: boolean; failedOperation: string | null }> {
+  const dest = await scopedPrisma(prisma, organizationId).storageDestination.findFirst({
+    where: { id: destinationId },
+  });
+  if (dest === null) return { ok: false, failedOperation: null };
+  const secret = decryptCredential(kek, parseEncryptedCredential(dest.encryptedSecretAccessKey));
+  const driver = createS3Driver({
+    ...(dest.endpoint !== null ? { endpoint: dest.endpoint } : {}),
+    region: dest.region,
+    bucket: dest.bucket,
+    prefix: dest.prefix,
+    accessKeyId: dest.accessKeyId,
+    secretAccessKey: secret,
+    forcePathStyle: dest.forcePathStyle,
+  });
+  const health = await driver.canary();
+  return { ok: health.ok, failedOperation: health.failedOperation };
 }
 
 export async function main(): Promise<void> {
@@ -39,6 +67,11 @@ export async function main(): Promise<void> {
     resolver: betterAuthResolver(auth, prisma),
     setupDeps: createSetupDeps(prisma, auth),
     targetStore: (organizationId) => prismaTargetStore(prisma, organizationId),
+    destinationStore: (organizationId) => prismaDestinationStore(prisma, organizationId),
+    destinationCanary: (organizationId, destinationId) =>
+      destinationCanary(prisma, kek, organizationId, destinationId),
+    policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
+    jobsService: createJobsService(prisma),
     kek,
   });
 
