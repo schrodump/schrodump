@@ -8,22 +8,11 @@
 // (PGPASSWORD, MYSQL_PWD) or a mounted config file (mongo, via `--config`).
 
 import type { EngineKind, ExecutionMode, RestoreTarget } from "@schrodump/core/types";
+import type { ExecutionDescriptor } from "@schrodump/core/execution";
 
-export interface BuildWarning {
-  readonly code: string;
-  readonly message: string;
-}
-
-export interface ExecutionDescriptor {
-  readonly image: string;
-  readonly command: string[];
-  readonly env: Record<string, string>;
-  readonly outputKind: "stdout" | "directory";
-  readonly workdir?: string;
-  // Advisory notices produced while building the descriptor (e.g. MyISAM under
-  // --single-transaction). Present but never silenced; empty/omitted when there are none.
-  readonly warnings?: readonly BuildWarning[];
-}
+// ExecutionDescriptor / BuildWarning are the shared contract between engines and runner, so
+// they live in core; re-exported here for this package's consumers.
+export type { BuildWarning, ExecutionDescriptor } from "@schrodump/core/execution";
 
 export interface TargetConnection {
   readonly host: string;
