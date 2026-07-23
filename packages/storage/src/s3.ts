@@ -15,6 +15,7 @@ import {
 import { Upload } from "@aws-sdk/lib-storage";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { z } from "zod";
+import { runCanary } from "./canary.js";
 import type { HealthResult, ObjectMeta, Page, PutOptions, PutResult, StorageDriver } from "./driver.js";
 
 /**
@@ -200,28 +201,22 @@ class S3Driver implements StorageDriver {
     }
   }
 
-  async canary(): Promise<HealthResult> {
-    const key = this.#canaryKey();
-    try {
-      await this.put(key, Readable.from([Buffer.from("schrodump-canary")]), {
-        contentType: "application/octet-stream",
-        partSize: 5 * 1024 * 1024,
-        metadata: {},
-      });
-    } catch {
-      return { ok: false, failedOperation: "put", message: "PUT failed" };
-    }
-    try {
-      await drain(await this.get(key));
-    } catch {
-      return { ok: false, failedOperation: "get", message: "GET failed" };
-    }
-    try {
-      await this.delete([key]);
-    } catch {
-      return { ok: false, failedOperation: "delete", message: "DELETE failed" };
-    }
-    return { ok: true, failedOperation: null, message: null };
+  canary(): Promise<HealthResult> {
+    return runCanary(this.#canaryKey(), {
+      put: async (key) => {
+        await this.put(key, Readable.from([Buffer.from("schrodump-canary")]), {
+          contentType: "application/octet-stream",
+          partSize: 5 * 1024 * 1024,
+          metadata: {},
+        });
+      },
+      get: async (key) => {
+        await drain(await this.get(key));
+      },
+      delete: async (key) => {
+        await this.delete([key]);
+      },
+    });
   }
 
   #canaryKey(): string {
