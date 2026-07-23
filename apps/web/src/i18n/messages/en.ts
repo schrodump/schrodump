@@ -98,6 +98,24 @@ export const en = {
   "targets.probe.version": "Detected version: {version}",
   "targets.probe.limited": "Scope, estimated size and probe warnings need a richer server endpoint.",
   "targets.empty": "No targets yet. Add one to start backing it up.",
+
+  "destinations.title": "Storage destinations",
+  "destinations.add": "Add destination",
+  "destinations.name": "Name",
+  "destinations.endpoint": "Endpoint (optional)",
+  "destinations.region": "Region",
+  "destinations.bucket": "Bucket",
+  "destinations.prefix": "Prefix",
+  "destinations.accessKeyId": "Access key ID",
+  "destinations.secretAccessKey": "Secret access key",
+  "destinations.forcePathStyle": "Force path-style addressing",
+  "destinations.sealMode": "Seal mode",
+  "sealMode.operational": "Operational — full verify works",
+  "sealMode.sealed": "Sealed — verify degrades to checksum",
+  "destinations.canary": "Run canary",
+  "destinations.canary.ok": "Canary passed: put, get and delete",
+  "destinations.canary.failed": "Canary failed on: {op}",
+  "destinations.empty": "No destinations yet. Add one to store backups.",
 } as const;
 
 export type MessageKey = keyof typeof en;
