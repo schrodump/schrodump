@@ -1,0 +1,71 @@
+name: schrodump
+
+services:
+  schrodump:
+    image: schrodump/schrodump:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      docker-proxy:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://schrodump:${DB_PASSWORD:?defina DB_PASSWORD no .env}@db:5432/schrodump
+      SCHRODUMP_KEK: ${SCHRODUMP_KEK:?gere com 'openssl rand -base64 32' e guarde fora deste host}
+      SCHRODUMP_URL: ${SCHRODUMP_URL:-http://localhost:8080}
+      SCHRODUMP_ADMIN_EMAIL: ${SCHRODUMP_ADMIN_EMAIL:-}
+      SCHRODUMP_ADMIN_PASSWORD: ${SCHRODUMP_ADMIN_PASSWORD:-}
+      DOCKER_HOST: tcp://docker-proxy:2375
+      SCHRODUMP_SCRATCH_PATH: /scratch
+      SCHRODUMP_SCRATCH_MAX_BYTES: ${SCRATCH_MAX_BYTES:-107374182400}
+      SCHRODUMP_MAX_CONCURRENT_STAGED: ${MAX_STAGED:-2}
+      SCHRODUMP_EXECUTOR_NETWORK: ${EXECUTOR_NETWORK:-schrodump_targets}
+    volumes:
+      - scratch:/scratch
+    ports:
+      - "${PORT:-8080}:8080"
+    networks:
+      - internal
+      - targets
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: schrodump
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?}
+      POSTGRES_DB: schrodump
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U schrodump -d schrodump"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - internal
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      INFO: 1
+      POST: 1
+      EXEC: 0
+      VOLUMES: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - internal
+
+volumes:
+  db:
+  scratch:
+
+networks:
+  internal:
+    internal: true
+  targets:
