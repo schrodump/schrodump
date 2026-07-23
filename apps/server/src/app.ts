@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
 import type { SessionResolver } from "./auth/rbac.js";
 import { newCorrelationId } from "./observability/pino.js";
+import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js";
 import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
@@ -26,6 +27,7 @@ export interface AppDeps {
   ): Promise<{ ok: boolean; failedOperation: string | null }>;
   policyStore(organizationId: string): PolicyStore;
   jobsService: JobsService;
+  catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
   kek: Buffer;
 }
 
@@ -82,6 +84,10 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     jobsRoutes({ resolver: deps.resolver, service: deps.jobsService })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    catalogRoutes({ resolver: deps.resolver, rebuild: deps.catalogRebuild })(instance);
     return Promise.resolve();
   });
 

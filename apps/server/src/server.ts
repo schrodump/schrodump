@@ -3,7 +3,10 @@
 
 import { createHash } from "node:crypto";
 import { createS3Driver } from "@schrodump/storage/s3";
+import type { StorageDriver } from "@schrodump/storage/driver";
 import { buildApp } from "./app.js";
+import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
+import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
@@ -21,16 +24,16 @@ function deriveAuthSecret(kek: Buffer): string {
   return createHash("sha256").update(kek).update("schrodump-better-auth").digest("hex");
 }
 
-async function destinationCanary(
+async function driverForDestination(
   prisma: PrismaClient,
   kek: Buffer,
   organizationId: string,
   destinationId: string,
-): Promise<{ ok: boolean; failedOperation: string | null }> {
+): Promise<{ driver: StorageDriver; prefix: string } | null> {
   const dest = await scopedPrisma(prisma, organizationId).storageDestination.findFirst({
     where: { id: destinationId },
   });
-  if (dest === null) return { ok: false, failedOperation: null };
+  if (dest === null) return null;
   const secret = decryptCredential(kek, parseEncryptedCredential(dest.encryptedSecretAccessKey));
   const driver = createS3Driver({
     ...(dest.endpoint !== null ? { endpoint: dest.endpoint } : {}),
@@ -41,8 +44,38 @@ async function destinationCanary(
     secretAccessKey: secret,
     forcePathStyle: dest.forcePathStyle,
   });
-  const health = await driver.canary();
+  return { driver, prefix: dest.prefix };
+}
+
+async function destinationCanary(
+  prisma: PrismaClient,
+  kek: Buffer,
+  organizationId: string,
+  destinationId: string,
+): Promise<{ ok: boolean; failedOperation: string | null }> {
+  const target = await driverForDestination(prisma, kek, organizationId, destinationId);
+  if (target === null) return { ok: false, failedOperation: null };
+  const health = await target.driver.canary();
   return { ok: health.ok, failedOperation: health.failedOperation };
+}
+
+async function runRebuild(
+  prisma: PrismaClient,
+  kek: Buffer,
+  organizationId: string,
+  destinationId: string,
+): Promise<{ scanned: number; imported: string[]; skipped: string[] }> {
+  const target = await driverForDestination(prisma, kek, organizationId, destinationId);
+  if (target === null) return { scanned: 0, imported: [], skipped: [] };
+  return rebuildCatalog(
+    createCatalogRebuildPorts({
+      prisma,
+      organizationId,
+      driver: target.driver,
+      prefix: target.prefix,
+      destinationId,
+    }),
+  );
 }
 
 export async function main(): Promise<void> {
@@ -72,6 +105,8 @@ export async function main(): Promise<void> {
       destinationCanary(prisma, kek, organizationId, destinationId),
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
     jobsService: createJobsService(prisma),
+    catalogRebuild: (organizationId, destinationId) =>
+      runRebuild(prisma, kek, organizationId, destinationId),
     kek,
   });
 
