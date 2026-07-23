@@ -11,7 +11,7 @@ const service: JobsService = {
   listArtifacts: () => Promise.resolve([{ id: "a1" }]),
   enqueueBackup: () => Promise.resolve("job-b"),
   enqueueVerify: () => Promise.resolve("job-v"),
-  testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 160002 }),
+  testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 160002, failure: null, driverCode: null }),
 };
 
 async function appWith(role: Role | null) {

@@ -6,7 +6,10 @@
 // automatically filtered by organizationId.
 
 import type { PrismaClient } from "@prisma/client";
+import { z } from "zod";
 import { scopedPrisma } from "../data/scope.js";
+import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { testTargetConnection, type EngineName, type TestConnectionResult } from "../probe/test-connection.js";
 import type { DestinationStore } from "./destinations.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
 import type { JobsService } from "./jobs.js";
@@ -107,8 +110,36 @@ export function prismaPolicyStore(prisma: PrismaClient, organizationId: string):
   };
 }
 
+const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
+
+// The one place a target credential is decrypted. It is decrypted to be USED — handed to a driver
+// that opens a socket — never to be shown: the plaintext stays inside this function's call and
+// nothing derived from it reaches the response or the log.
+async function probeTarget(
+  prisma: PrismaClient,
+  kek: Buffer,
+  organizationId: string,
+  targetId: string,
+): Promise<TestConnectionResult> {
+  const row = await scopedPrisma(prisma, organizationId).databaseTarget.findFirst({
+    where: { id: targetId },
+  });
+  if (row === null) return { ok: false, serverVersionNum: null, failure: "UNKNOWN", driverCode: null };
+
+  const scope = ScopeSchema.safeParse(row.scope);
+  return testTargetConnection({
+    engine: row.engine as EngineName,
+    host: row.host,
+    port: row.port,
+    username: row.username,
+    password: decryptCredential(kek, parseEncryptedCredential(row.encryptedCredential)),
+    tls: row.tls,
+    databases: scope.success ? scope.data.databases : [],
+  });
+}
+
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
-export function createJobsService(prisma: PrismaClient): JobsService {
+export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsService {
   const enqueue = async (organizationId: string, kind: "BACKUP" | "VERIFY", correlationId: string): Promise<string> => {
     const db = scopedPrisma(prisma, organizationId);
     const job = await db.backupJob.create({
@@ -126,7 +157,6 @@ export function createJobsService(prisma: PrismaClient): JobsService {
     // up the PENDING job; here we only enqueue it.
     enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", `backup:${policyId}`),
     enqueueVerify: (organizationId, artifactId) => enqueue(organizationId, "VERIFY", `verify:${artifactId}`),
-    // test-connection is composed with the engines probe by the caller; kept minimal here.
-    testConnection: () => Promise.resolve({ ok: false, serverVersionNum: null }),
+    testConnection: (organizationId, targetId) => probeTarget(prisma, kek, organizationId, targetId),
   };
 }

@@ -12,8 +12,17 @@ export interface JobsService {
   enqueueBackup(organizationId: string, policyId: string): Promise<string>;
   // Enqueue a VERIFY job for an artifact.
   enqueueVerify(organizationId: string, artifactId: string): Promise<string>;
-  // Probe the target to test connectivity (never returns credentials).
-  testConnection(organizationId: string, targetId: string): Promise<{ ok: boolean; serverVersionNum: number | null }>;
+  // Probe the target to test connectivity. Returns a failure CODE, never a driver message:
+  // driver errors embed the credential they failed with.
+  testConnection(
+    organizationId: string,
+    targetId: string,
+  ): Promise<{
+    ok: boolean;
+    serverVersionNum: number | null;
+    failure: string | null;
+    driverCode: string | null;
+  }>;
 }
 
 export interface JobsRoutesDeps {

@@ -104,7 +104,7 @@ export async function main(): Promise<void> {
     destinationCanary: (organizationId, destinationId) =>
       destinationCanary(prisma, kek, organizationId, destinationId),
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
-    jobsService: createJobsService(prisma),
+    jobsService: createJobsService(prisma, kek),
     catalogRebuild: (organizationId, destinationId) =>
       runRebuild(prisma, kek, organizationId, destinationId),
     kek,
