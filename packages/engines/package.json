@@ -1,0 +1,50 @@
+{
+  "name": "@schrodump/engines",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./descriptor": {
+      "types": "./dist/descriptor.d.ts",
+      "import": "./dist/descriptor.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
+    "./probe/types": {
+      "types": "./dist/probe/types.d.ts",
+      "import": "./dist/probe/types.js"
+    },
+    "./probe/postgres": {
+      "types": "./dist/probe/postgres.d.ts",
+      "import": "./dist/probe/postgres.js"
+    },
+    "./probe/mysql": {
+      "types": "./dist/probe/mysql.d.ts",
+      "import": "./dist/probe/mysql.js"
+    },
+    "./probe/mongodb": {
+      "types": "./dist/probe/mongodb.d.ts",
+      "import": "./dist/probe/mongodb.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@schrodump/core": "workspace:*",
+    "mongodb": "^7.5.0",
+    "mysql2": "^3.23.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
+    "testcontainers": "^12.0.0"
+  }
+}
