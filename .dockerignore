@@ -1,0 +1,43 @@
+# Keep the build context small and the image free of anything that is not a build input.
+# Anything listed here is invisible to `docker build`.
+
+# Dependencies and build output are produced inside the image, never copied in.
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# History and CI metadata are not build inputs.
+.git
+.github
+.gitignore
+
+# Tests never ship. They are also the largest source of context churn.
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.integration.test.ts
+vitest.config.ts
+**/vitest.config.ts
+**/vitest.setup.ts
+
+# Secrets must never enter the build context, not even to be ignored later.
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise.
+.DS_Store
+.vscode
+.idea
+
+# Docs and compose do not affect the runtime image. `docker/` stays: the entrypoint is copied in.
+docs
+compose.yaml
+docker/executors
