@@ -56,10 +56,22 @@ describe.skipIf(!enabled)("probe integration (testcontainers)", () => {
   it(
     "probes a real mysql and reports MyISAM presence as a boolean",
     async () => {
+      // Waiting on the log is not enough here: the init phase starts a temporary server that
+      // logs "ready for connections" twice (server plus X Plugin) over a socket with no TCP, so
+      // the wait is satisfied before the real server exists and the probe gets its connection
+      // closed underneath it. The healthcheck forces TCP against 127.0.0.1, which only the final
+      // server binds.
       const container = await new GenericContainer("mysql:8.0")
         .withEnvironment({ MYSQL_ROOT_PASSWORD: "schrodump", MYSQL_DATABASE: "app" })
         .withExposedPorts(3306)
-        .withWaitStrategy(Wait.forLogMessage(/ready for connections/, 2))
+        .withHealthCheck({
+          test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pschrodump --silent"],
+          interval: 2000,
+          timeout: 5000,
+          retries: 30,
+          startPeriod: 5000,
+        })
+        .withWaitStrategy(Wait.forHealthCheck())
         .start();
       try {
         const result = await probeMysql(connFor(container, 3306, "mysql", "root"));
