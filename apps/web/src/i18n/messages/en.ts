@@ -172,6 +172,25 @@ export const en = {
   "restoreTarget.SCHEMA": "Schema",
   "restoreTarget.TABLE": "Table",
   "restoreTarget.COLLECTION": "Collection",
+
+  "guided.title": "Get to your first verified backup",
+  "guided.description": "Five steps. Only the last one turns a backup from a question into an answer.",
+  "guided.step.destination": "Create a storage destination",
+  "guided.step.canary": "Run the canary on that destination",
+  "guided.step.target": "Create a database target",
+  "guided.step.probe": "Test the target connection",
+  "guided.step.policy": "Create a policy with verify enabled",
+  "guided.manual": "Run it on the page — the server keeps no record of whether it ran.",
+  "guided.open": "Open",
+  "guided.done": "Done",
+
+  "settings.title": "Settings",
+  "settings.keys": "Encryption keys",
+  "settings.keys.description": "Age recipients and the KEK fingerprint the server pins at first boot.",
+  "settings.members": "Members",
+  "settings.members.description": "Organization members and their roles: admin, operator, viewer.",
+  "settings.instance": "Instance",
+  "settings.instance.description": "Scratch space, retention floor and runner configuration.",
 } as const;
 
 export type MessageKey = keyof typeof en;

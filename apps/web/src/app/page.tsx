@@ -5,6 +5,7 @@
 
 import { AppShell } from "@/components/app-shell";
 import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
+import { GuidedSetup } from "@/components/guided-setup";
 import { StateCounters } from "@/components/state-counters";
 import { Card, CardContent } from "@/components/ui/card";
 import { useArtifacts, useJobs } from "@/hooks/use-resources";
@@ -33,9 +34,11 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <h1 className="text-2xl font-semibold">{t("dashboard.title")}</h1>
+      <h1 className="mb-6 text-2xl font-semibold">{t("dashboard.title")}</h1>
 
-      <section className="mt-6">
+      <GuidedSetup />
+
+      <section>
         {artifacts.isPending ? (
           <LoadingState />
         ) : artifacts.isError ? (

@@ -174,4 +174,23 @@ export const ptBR: Record<MessageKey, string> = {
   "restoreTarget.SCHEMA": "Schema",
   "restoreTarget.TABLE": "Tabela",
   "restoreTarget.COLLECTION": "Coleção",
+
+  "guided.title": "Chegue ao seu primeiro backup verificado",
+  "guided.description": "Cinco passos. Só o último transforma um backup de pergunta em resposta.",
+  "guided.step.destination": "Criar um destino de armazenamento",
+  "guided.step.canary": "Rodar o canary nesse destino",
+  "guided.step.target": "Criar um banco alvo",
+  "guided.step.probe": "Testar a conexão com o alvo",
+  "guided.step.policy": "Criar uma política com verify ligado",
+  "guided.manual": "Rode na própria página — o servidor não guarda registro de que isso rodou.",
+  "guided.open": "Abrir",
+  "guided.done": "Feito",
+
+  "settings.title": "Configurações",
+  "settings.keys": "Chaves de criptografia",
+  "settings.keys.description": "Recipients do age e o fingerprint da KEK que o servidor fixa no primeiro boot.",
+  "settings.members": "Membros",
+  "settings.members.description": "Membros da organização e seus papéis: admin, operator, viewer.",
+  "settings.instance": "Instância",
+  "settings.instance.description": "Scratch, piso de retenção e configuração do runner.",
 };
