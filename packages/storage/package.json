@@ -1,0 +1,40 @@
+{
+  "name": "@schrodump/storage",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "import": "./dist/driver.js"
+    },
+    "./s3": {
+      "types": "./dist/s3.d.ts",
+      "import": "./dist/s3.js"
+    },
+    "./canary": {
+      "types": "./dist/canary.d.ts",
+      "import": "./dist/canary.js"
+    },
+    "./manifest-sidecar": {
+      "types": "./dist/manifest-sidecar.d.ts",
+      "import": "./dist/manifest-sidecar.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1093.0",
+    "@aws-sdk/lib-storage": "^3.1093.0",
+    "@schrodump/core": "workspace:*",
+    "zod": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

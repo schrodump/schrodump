@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "paths": {
+      "@schrodump/core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src"]
+}
