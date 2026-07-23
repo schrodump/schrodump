@@ -42,6 +42,23 @@ export const ptBR: Record<MessageKey, string> = {
   "state.failed": "Falhou",
   "state.unobserved.hint": "Nenhum verify rodou — este backup é uma pergunta em aberto.",
 
+  "dashboard.title": "Painel",
+  "dashboard.unobservedBackups": "{count} backups não observados",
+  "dashboard.unobservedHint": "Backups sem verify — as perguntas a responder primeiro.",
+  "dashboard.verifiedBackups": "{count} verificados",
+  "dashboard.failedBackups": "{count} falharam",
+  "dashboard.recentJobs": "Jobs recentes",
+  "dashboard.noJobs": "Nenhum job ainda",
+
+  "job.kind.BACKUP": "Backup",
+  "job.kind.RESTORE": "Restore",
+  "job.kind.VERIFY": "Verify",
+  "job.state.PENDING": "Pendente",
+  "job.state.RUNNING": "Executando",
+  "job.state.SUCCEEDED": "Concluído",
+  "job.state.FAILED": "Falhou",
+  "job.state.CANCELLED": "Cancelado",
+
   "auth.login.title": "Entrar",
   "auth.login.email": "Email",
   "auth.login.password": "Senha",

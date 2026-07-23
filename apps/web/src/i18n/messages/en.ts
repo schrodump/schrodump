@@ -40,6 +40,23 @@ export const en = {
   "state.failed": "Failed",
   "state.unobserved.hint": "No verify has run — this backup is an open question.",
 
+  "dashboard.title": "Dashboard",
+  "dashboard.unobservedBackups": "{count} unobserved backups",
+  "dashboard.unobservedHint": "Backups with no verify — the questions to answer first.",
+  "dashboard.verifiedBackups": "{count} verified",
+  "dashboard.failedBackups": "{count} failed",
+  "dashboard.recentJobs": "Recent jobs",
+  "dashboard.noJobs": "No jobs yet",
+
+  "job.kind.BACKUP": "Backup",
+  "job.kind.RESTORE": "Restore",
+  "job.kind.VERIFY": "Verify",
+  "job.state.PENDING": "Pending",
+  "job.state.RUNNING": "Running",
+  "job.state.SUCCEEDED": "Succeeded",
+  "job.state.FAILED": "Failed",
+  "job.state.CANCELLED": "Cancelled",
+
   "auth.login.title": "Sign in",
   "auth.login.email": "Email",
   "auth.login.password": "Password",
