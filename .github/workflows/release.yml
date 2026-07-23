@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
+
+# Publishes the image a tag points at, signed and with a bill of materials.
+#
+# Signing is not ceremony here. An operator pulling schrodump/schrodump is handing the image
+# credentials for every database they run; a signature and an SBOM are what let them establish
+# that the bytes came from this repository's tag and know what is inside them. Both are keyless
+# (OIDC), so there is no signing key to leak — which matters more than usual for a project whose
+# threat model is "someone replaces the image".
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub release
+  packages: write # push to GHCR
+  id-token: write # keyless signing via OIDC
+
+jobs:
+  image:
+    name: build, sign and publish
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      stable: ${{ steps.version.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog is built from the commit range since the previous tag.
+          fetch-depth: 0
+
+      # A tag like v1.2.3-rc.1 is a release, but it is not the one `latest` should point at.
+      - name: Resolve version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v4.2.0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.5.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: |
+            ghcr.io/schrodump/schrodump
+            schrodump/schrodump
+          # latest is never implicit; it is added below only for a stable version.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Attached to the image in the registry, so `docker buildx imagetools inspect` answers
+          # "what is in this and where did it come from" without trusting a separate file.
+          sbom: true
+          provenance: mode=max
+
+      # Signed by digest, not by tag: a tag can be moved, a digest cannot.
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign the published digests
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for image in ghcr.io/schrodump/schrodump schrodump/schrodump; do
+            cosign sign --yes "${image}@${DIGEST}"
+          done
+
+      # A second, downloadable copy of the SBOM. The registry attestation serves tooling; this
+      # serves the operator who wants to read it before pulling anything.
+      - name: SBOM file
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ghcr.io/schrodump/schrodump@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: schrodump-${{ steps.version.outputs.version }}.spdx.json
+
+      # Both the tag and the digest go through env rather than being interpolated straight into
+      # the shell: a tag name is attacker-chosen the moment anyone can push one.
+      - name: Changelog
+        env:
+          TAG: ${{ github.ref_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          {
+            echo "## ${TAG}"
+            echo
+            if [ -n "$previous" ]; then
+              echo "Changes since ${previous}:"
+              echo
+              git log --no-merges --pretty=format:'- %s' "${previous}..${TAG}"
+            else
+              echo "First tagged release."
+              echo
+              git log --no-merges --pretty=format:'- %s' "${TAG}"
+            fi
+            echo
+            echo
+            echo "Image digest: \`${DIGEST}\`"
+            echo
+            echo "Verify the signature before running it:"
+            echo
+            echo '```'
+            echo "cosign verify ghcr.io/schrodump/schrodump@${DIGEST} \\"
+            echo "  --certificate-identity-regexp '^https://github.com/schrodump/schrodump/' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+          } > CHANGELOG_RELEASE.md
+          cat CHANGELOG_RELEASE.md
+
+      - uses: softprops/action-gh-release@v3.0.2
+        with:
+          body_path: CHANGELOG_RELEASE.md
+          prerelease: ${{ steps.version.outputs.stable == 'false' }}
+          files: schrodump-${{ steps.version.outputs.version }}.spdx.json
+
+  executors:
+    name: publish executor images
+    runs-on: ubuntu-latest
+    # The server resolves these by name at backup time (schrodump/age:1, schrodump/mydumper:1), so
+    # a release that ships the server without them ships a product that cannot take a backup. They
+    # move on their own cadence: the floating :1 tag is what the application code references, and
+    # the exact version tag is what an operator pins to.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: age
+            version: "1.3.1"
+          - name: mydumper
+            version: "1.0.3-1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v4.2.0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.5.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/executors/${{ matrix.name }}.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ghcr.io/schrodump/${{ matrix.name }}:${{ matrix.version }}
+            ghcr.io/schrodump/${{ matrix.name }}:1
+            schrodump/${{ matrix.name }}:${{ matrix.version }}
+            schrodump/${{ matrix.name }}:1

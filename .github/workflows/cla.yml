@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
+
+# ┌──────────────────────────────────────────────────────────────────────────────────────────┐
+# │ NOT ENABLED — DO NOT ADD THE pull_request TRIGGER YET                                     │
+# │                                                                                          │
+# │ CONTRIBUTING.md still carries `TODO: texto do CLA pendente de revisão jurídica`. Turning  │
+# │ this on now would collect signatures against a document that does not exist, which is     │
+# │ worse than collecting none: contributors would have agreed to nothing while the project   │
+# │ recorded that they agreed to something, and every signature gathered under the placeholder│
+# │ would have to be re-collected once the real text lands.                                   │
+# │                                                                                          │
+# │ To enable, once the CLA text has been reviewed and merged into CONTRIBUTING.md:           │
+# │   1. add the `pull_request_target` and `issue_comment` triggers below;                    │
+# │   2. create the signature store repository and the PERSONAL_ACCESS_TOKEN secret;          │
+# │   3. make this check required on main.                                                    │
+# └──────────────────────────────────────────────────────────────────────────────────────────┘
+
+name: CLA
+
+# Manual only, on purpose. See the block above before changing this.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    name: contributor license agreement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the CLA text is no longer a placeholder
+        run: |
+          if grep -q 'TODO: texto do CLA' CONTRIBUTING.md; then
+            echo "The CLA text in CONTRIBUTING.md is still a placeholder pending legal review."
+            echo "Refusing to collect signatures against a document that does not exist."
+            exit 1
+          fi
+
+      # Rights holder: ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA, CNPJ 34.292.395/0001-65.
+      # Contributors sign by commenting on their pull request; signatures are recorded in a
+      # separate repository so they survive a force-push to this one.
+      - uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_SIGNATURES_TOKEN }}
+        with:
+          path-to-document: https://github.com/schrodump/schrodump/blob/main/CONTRIBUTING.md#contributor-license-agreement
+          path-to-signatures: signatures/version1/cla.json
+          branch: main
+          allowlist: dependabot[bot]
+          custom-notsigned-prcomment: >
+            Thank you for the contribution. Schrodump is AGPL-3.0-or-later and every contribution is
+            accepted only under the Contributor License Agreement held by ARIERRAC DESENVOLVIMENTO
+            DE SOFTWARE E SUPORTE LTDA (CNPJ 34.292.395/0001-65). Please read it and comment below
+            with the exact sentence that follows to sign.
