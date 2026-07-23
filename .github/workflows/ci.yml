@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
+
 name: CI
 
 on:
@@ -5,8 +8,48 @@ on:
     branches: [main]
   pull_request:
 
+# A superseded run tells you nothing about the commit that replaced it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      # Reported, not enforced. A coverage gate on a young codebase buys tests written to move a
+      # number rather than to catch a defect; the number is here to be looked at.
+      - name: Coverage
+        continue-on-error: true
+        run: pnpm -r exec vitest run --coverage --coverage.reporter=text-summary
+
+  integration:
+    name: integration (real services)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +63,106 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm typecheck
+      # MinIO is started here rather than declared under `services:` because it needs an explicit
+      # `server /data` command, and `services:` cannot override an image's command. The tag is
+      # pinned for the same reason the executor images are.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for _ in $(seq 1 30); do
+            nc -z localhost 9000 && break
+            sleep 1
+          done
 
-      - run: pnpm lint
+      - name: Create the test bucket
+        env:
+          AWS_ACCESS_KEY_ID: minio
+          AWS_SECRET_ACCESS_KEY: minio123
+          AWS_DEFAULT_REGION: us-east-1
+        run: aws --endpoint-url http://localhost:9000 s3 mb s3://schrodump-test
 
-      - run: pnpm test
+      # The engine probes and the Docker runner provision their own containers through
+      # testcontainers/dockerode, so they need Docker on the runner rather than a declared service.
+      #
+      # COVERAGE GAP, deliberate and tracked: probe.integration.test.ts pins postgres:16-alpine,
+      # mysql:8.0 and mongo:8 inside the test file. The supported-range edges (PostgreSQL 13 and
+      # 18), MariaDB and a MongoDB replica set are therefore NOT exercised here. Closing that needs
+      # the test parameterised by environment — a change to test code, which belongs in its own
+      # change rather than in the CI wiring.
+      - name: Integration tests
+        env:
+          SCHRODUMP_TEST_INTEGRATION: "1"
+          SCHRODUMP_TEST_S3_ENDPOINT: http://localhost:9000
+          SCHRODUMP_TEST_S3_REGION: us-east-1
+          SCHRODUMP_TEST_S3_BUCKET: schrodump-test
+          SCHRODUMP_TEST_S3_ACCESS_KEY: minio
+          SCHRODUMP_TEST_S3_SECRET_KEY: minio123
+        run: pnpm test
+
+  image:
+    name: image (build and smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built on every pull request, pushed on none: the Dockerfile is validated by the same event
+      # that would break it.
+      - name: Build the production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: schrodump/schrodump:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The architecture in one assertion: dumps run in ephemeral executors, so a database client
+      # inside the server image means the boundary was crossed.
+      - name: Assert no database client is present
+        run: |
+          found=$(docker run --rm --entrypoint sh schrodump/schrodump:ci \
+            -c 'command -v pg_dump mysqldump mongodump mydumper age psql mysql mongosh 2>/dev/null' || true)
+          if [ -n "$found" ]; then
+            echo "database client found in the runtime image:"; echo "$found"; exit 1
+          fi
+          echo "none present"
+
+      - name: Report image size
+        run: docker image ls schrodump/schrodump:ci --format '{{.Size}}'
+
+      # Proves the image actually runs: migrations apply, both processes come up and the API
+      # answers. The dependency pruning in the Dockerfile is only safe because this step exists.
+      - name: Smoke test
+        run: |
+          docker network create smoke
+          docker run -d --name pg --network smoke \
+            -e POSTGRES_USER=schrodump -e POSTGRES_PASSWORD=s3cret -e POSTGRES_DB=schrodump \
+            postgres:18-alpine
+          for _ in $(seq 1 30); do
+            docker exec pg pg_isready -U schrodump -d schrodump >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name app --network smoke \
+            -e DATABASE_URL='postgres://schrodump:s3cret@pg:5432/schrodump' \
+            -e SCHRODUMP_KEK="$(openssl rand -base64 32)" \
+            -e SCHRODUMP_URL='http://localhost:8080' \
+            schrodump/schrodump:ci
+          for _ in $(seq 1 40); do
+            [ "$(docker inspect app --format '{{.State.Health.Status}}')" = "healthy" ] && break
+            sleep 2
+          done
+          status=$(docker inspect app --format '{{.State.Health.Status}}')
+          docker logs app
+          [ "$status" = "healthy" ] || { echo "container never became healthy: $status"; exit 1; }
+          docker exec app node -e '
+            for (const u of ["http://127.0.0.1:8080/login", "http://127.0.0.1:8080/backend/health"]) {
+              const r = await fetch(u);
+              console.log(u, "->", r.status);
+              if (!r.ok) process.exit(1);
+            }'
