@@ -142,6 +142,19 @@ export const en = {
   "policies.verifyOff.description": "Backups from this policy are never verified — every artifact stays UNOBSERVED.",
   "policies.trigger": "Run backup now",
   "policies.empty": "No policies yet. Add one to schedule backups.",
+
+  "jobs.title": "Jobs",
+  "jobs.filterAll": "All states",
+  "jobs.correlationId": "Correlation ID",
+  "jobs.log": "Execution log",
+  "jobs.empty": "No jobs yet.",
+
+  "artifacts.title": "Artifact catalog",
+  "artifacts.size": "Size: {size}",
+  "artifacts.key": "Key: {key}",
+  "artifacts.verify": "Verify",
+  "artifacts.restore": "Restore",
+  "artifacts.empty": "No artifacts yet.",
 } as const;
 
 export type MessageKey = keyof typeof en;

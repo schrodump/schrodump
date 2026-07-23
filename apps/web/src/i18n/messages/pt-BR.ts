@@ -144,4 +144,17 @@ export const ptBR: Record<MessageKey, string> = {
   "policies.verifyOff.description": "Os backups desta política nunca são verificados — todo artefato fica NÃO OBSERVADO.",
   "policies.trigger": "Rodar backup agora",
   "policies.empty": "Nenhuma política ainda. Adicione uma para agendar backups.",
+
+  "jobs.title": "Jobs",
+  "jobs.filterAll": "Todos os estados",
+  "jobs.correlationId": "ID de correlação",
+  "jobs.log": "Log de execução",
+  "jobs.empty": "Nenhum job ainda.",
+
+  "artifacts.title": "Catálogo de artefatos",
+  "artifacts.size": "Tamanho: {size}",
+  "artifacts.key": "Chave: {key}",
+  "artifacts.verify": "Verificar",
+  "artifacts.restore": "Restaurar",
+  "artifacts.empty": "Nenhum artefato ainda.",
 };

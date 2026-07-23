@@ -6,12 +6,13 @@ import type {
   CompressionAlgorithm,
   EngineKind,
   ExecutionMode,
+  JobKind,
+  JobState,
   SealMode,
   VerifyLevel,
 } from "@/lib/domain";
 
-export type JobKind = "BACKUP" | "RESTORE" | "VERIFY";
-export type JobState = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+export type { JobKind, JobState } from "@/lib/domain";
 
 export interface Artifact {
   id: string;

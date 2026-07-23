@@ -14,6 +14,12 @@ export type ArtifactState = (typeof ARTIFACT_STATES)[number];
 export const VERIFY_LEVELS = ["NONE", "CHECKSUM", "FULL_RESTORE"] as const;
 export type VerifyLevel = (typeof VERIFY_LEVELS)[number];
 
+export const JOB_KINDS = ["BACKUP", "RESTORE", "VERIFY"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export const JOB_STATES = ["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const;
+export type JobState = (typeof JOB_STATES)[number];
+
 export const EXECUTION_MODES = ["STREAM", "STAGED"] as const;
 export type ExecutionMode = (typeof EXECUTION_MODES)[number];
 
