@@ -74,6 +74,30 @@ export const en = {
   "setup.done.goToLogin": "Go to sign in",
   "setup.closed.title": "Setup is closed",
   "setup.closed.description": "An administrator already exists. Recovery is available via the CLI.",
+
+  "engine.postgres": "PostgreSQL",
+  "engine.mysql": "MySQL",
+  "engine.mariadb": "MariaDB",
+  "engine.mongodb": "MongoDB",
+
+  "credential.replacePlaceholder": "Enter a new value to replace",
+  "form.invalid": "Please fix the errors below",
+
+  "targets.title": "Database targets",
+  "targets.add": "Add target",
+  "targets.name": "Name",
+  "targets.engine": "Engine",
+  "targets.host": "Host",
+  "targets.port": "Port",
+  "targets.username": "Username",
+  "targets.password": "Password",
+  "targets.tls": "Require TLS",
+  "targets.testConnection": "Test connection",
+  "targets.probe.ok": "Connection succeeded",
+  "targets.probe.failed": "Connection failed",
+  "targets.probe.version": "Detected version: {version}",
+  "targets.probe.limited": "Scope, estimated size and probe warnings need a richer server endpoint.",
+  "targets.empty": "No targets yet. Add one to start backing it up.",
 } as const;
 
 export type MessageKey = keyof typeof en;

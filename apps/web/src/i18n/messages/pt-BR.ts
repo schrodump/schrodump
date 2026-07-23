@@ -76,4 +76,28 @@ export const ptBR: Record<MessageKey, string> = {
   "setup.done.goToLogin": "Ir para o login",
   "setup.closed.title": "Setup encerrado",
   "setup.closed.description": "Já existe um administrador. A recuperação é feita via CLI.",
+
+  "engine.postgres": "PostgreSQL",
+  "engine.mysql": "MySQL",
+  "engine.mariadb": "MariaDB",
+  "engine.mongodb": "MongoDB",
+
+  "credential.replacePlaceholder": "Digite um novo valor para substituir",
+  "form.invalid": "Corrija os erros abaixo",
+
+  "targets.title": "Bancos alvo",
+  "targets.add": "Adicionar alvo",
+  "targets.name": "Nome",
+  "targets.engine": "Engine",
+  "targets.host": "Host",
+  "targets.port": "Porta",
+  "targets.username": "Usuário",
+  "targets.password": "Senha",
+  "targets.tls": "Exigir TLS",
+  "targets.testConnection": "Testar conexão",
+  "targets.probe.ok": "Conexão bem-sucedida",
+  "targets.probe.failed": "Conexão falhou",
+  "targets.probe.version": "Versão detectada: {version}",
+  "targets.probe.limited": "Escopo, tamanho estimado e avisos do probe precisam de um endpoint mais rico no servidor.",
+  "targets.empty": "Nenhum alvo ainda. Adicione um para começar a copiá-lo.",
 };
