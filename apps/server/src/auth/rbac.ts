@@ -44,6 +44,15 @@ export function authenticate(resolver: SessionResolver) {
   };
 }
 
+// Reads the authenticated context inside a handler (authenticate() guarantees it is present).
+export function contextOf(request: FastifyRequest): AuthContext {
+  const ctx = request.authContext;
+  if (ctx === undefined) {
+    throw new Error("missing auth context — authenticate() must run before the handler");
+  }
+  return ctx;
+}
+
 // preHandler: enforces a minimum role. Must run after authenticate().
 export function requireRole(min: Role) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {

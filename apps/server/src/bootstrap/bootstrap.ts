@@ -27,9 +27,9 @@ export async function bootstrap(deps: BootstrapDeps, env: Env): Promise<Bootstra
     return { kind: "already-initialized" };
   }
 
-  // 2. If admin credentials are in env, create the admin + default org. The password is visible
+  // 2. If admin credentials are in env, create the admin + default org. The env value is visible
   //    in `docker inspect` and in the versioned compose, so the user is flagged for a mandatory
-  //    password change on first login.
+  //    credential rotation on first sign-in.
   if (env.SCHRODUMP_ADMIN_EMAIL !== undefined && env.SCHRODUMP_ADMIN_PASSWORD !== undefined) {
     await deps.createAdmin({
       email: env.SCHRODUMP_ADMIN_EMAIL,
