@@ -51,6 +51,8 @@ export interface TargetFacts {
 
 export interface DumpInput {
   readonly connection: TargetConnection;
+  // Probed server version; the adapter resolves the executor image from it via imageFor.
+  readonly serverVersionNum: number;
   readonly executionMode: ExecutionMode;
   readonly parallelism: number;
   readonly scope: DumpScope;
@@ -61,6 +63,7 @@ export interface DumpInput {
 
 export interface RestoreInput {
   readonly connection: TargetConnection;
+  readonly serverVersionNum: number;
   readonly target: RestoreTarget;
   readonly scope: DumpScope;
   // Path to the artifact inside the executor (stream on stdin or a staged directory).
@@ -69,6 +72,7 @@ export interface RestoreInput {
 
 export interface VerifyInput {
   readonly connection: TargetConnection;
+  readonly serverVersionNum: number;
   readonly scope: DumpScope;
 }
 
