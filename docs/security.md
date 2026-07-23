@@ -137,6 +137,10 @@ database of every operator who pulled it.
   not changed.
 - The image ships **no database clients**. That is an architectural rule with a security payoff:
   the server's attack surface does not include five database client libraries it never calls.
+- The image ships **no package manager**. npm, corepack and yarn are removed from the base: the
+  entrypoint calls none of them, npm alone accounted for most of the advisories reported against
+  the image, and a way to fetch and run arbitrary code is not something a container holding
+  database credentials should have lying around.
 
 ### Known: `sharp` ships in the image
 

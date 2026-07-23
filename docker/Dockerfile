@@ -104,6 +104,15 @@ RUN apk add --no-cache dumb-init openssl && \
     addgroup -S schrodump && \
     adduser -S -G schrodump -h /app -s /sbin/nologin schrodump
 
+# The base image bundles npm, corepack and yarn; the entrypoint calls none of them. They are
+# removed because npm alone was the largest source of advisories in the image — it vendors tar,
+# sigstore, picomatch and brace-expansion, none of which this runtime loads — and because a
+# package manager inside a container holding database credentials is a way to fetch and run code,
+# not a feature.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+           /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
