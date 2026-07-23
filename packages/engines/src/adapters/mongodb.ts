@@ -107,21 +107,29 @@ export const mongodbAdapter: EngineAdapter = {
   buildVerifyAssertions(input) {
     const connection = input.connection;
     const database = input.scope.databases[0] ?? connection.database;
-    const tlsQuery = connection.tls ? "&tls=true" : "";
-    // The password is read from process.env inside the eval, so only the env var NAME appears
-    // in argv — never the value.
-    const script = [
-      `const user = ${JSON.stringify(connection.username)};`,
-      `const pass = process.env.MONGODB_PASSWORD || "";`,
-      `const uri = "mongodb://" + encodeURIComponent(user) + ":" + encodeURIComponent(pass) + ` +
-        `"@${connection.host}:${connection.port}/?authSource=${connection.database}${tlsQuery}";`,
-      `print(new Mongo(uri).getDB(${JSON.stringify(database)}).getCollectionNames().length);`,
-    ].join(" ");
+    // STATIC eval script: every dynamic value is passed through env and read with process.env,
+    // so no target-controlled string is ever interpolated into the JS that mongosh evaluates
+    // (env values are data, never code). This closes the script-injection vector.
+    const script =
+      'const user = encodeURIComponent(process.env.SCHRODUMP_MONGO_USER || "");' +
+      'const pass = encodeURIComponent(process.env.MONGODB_PASSWORD || "");' +
+      'const auth = encodeURIComponent(process.env.SCHRODUMP_MONGO_AUTHDB || "");' +
+      'const tls = process.env.SCHRODUMP_MONGO_TLS === "1" ? "&tls=true" : "";' +
+      'const uri = "mongodb://" + user + ":" + pass + "@" + process.env.SCHRODUMP_MONGO_HOSTPORT +' +
+      ' "/?authSource=" + auth + tls;' +
+      "print(new Mongo(uri).getDB(process.env.SCHRODUMP_MONGO_DB).getCollectionNames().length);";
 
     return {
       image: this.imageFor(input.serverVersionNum),
       command: ["mongosh", "--quiet", "--eval", script],
-      env: mongoEnv(connection),
+      env: {
+        ...mongoEnv(connection),
+        SCHRODUMP_MONGO_USER: connection.username,
+        SCHRODUMP_MONGO_HOSTPORT: `${connection.host}:${connection.port}`,
+        SCHRODUMP_MONGO_AUTHDB: connection.database,
+        SCHRODUMP_MONGO_DB: database,
+        SCHRODUMP_MONGO_TLS: connection.tls ? "1" : "0",
+      },
       outputKind: "stdout",
     };
   },

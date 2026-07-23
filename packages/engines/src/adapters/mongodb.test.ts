@@ -69,3 +69,22 @@ describe("mongodbAdapter.buildDump", () => {
     expect(descriptor.env.MONGODB_PASSWORD).toBe("s3cret");
   });
 });
+
+describe("mongodbAdapter.buildVerifyAssertions", () => {
+  it("never interpolates target-controlled values into the mongosh eval script", () => {
+    const evil = 'evil"+process.exit(1)+"';
+    const descriptor = mongodbAdapter.buildVerifyAssertions({
+      connection: { ...CONN, host: evil, database: evil, username: evil },
+      serverVersionNum: 80004,
+      scope: { databases: [evil], schemas: [], collections: [] },
+    });
+    const script = descriptor.command.at(-1) ?? "";
+    // The eval string is static; the malicious values live only in env.
+    expect(script).not.toContain(evil);
+    expect(script).not.toContain("process.exit");
+    expect(descriptor.env.SCHRODUMP_MONGO_HOSTPORT).toContain(evil);
+    for (const arg of descriptor.command) {
+      expect(arg).not.toContain("s3cret");
+    }
+  });
+});
