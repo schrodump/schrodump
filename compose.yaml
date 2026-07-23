@@ -13,8 +13,11 @@ services:
       DATABASE_URL: postgres://schrodump:${DB_PASSWORD:?defina DB_PASSWORD no .env}@db:5432/schrodump
       SCHRODUMP_KEK: ${SCHRODUMP_KEK:?gere com 'openssl rand -base64 32' e guarde fora deste host}
       SCHRODUMP_URL: ${SCHRODUMP_URL:-http://localhost:8080}
-      SCHRODUMP_ADMIN_EMAIL: ${SCHRODUMP_ADMIN_EMAIL:-}
-      SCHRODUMP_ADMIN_PASSWORD: ${SCHRODUMP_ADMIN_PASSWORD:-}
+      # Passed through only when actually set. The server validates these as non-empty strings, so
+      # handing it an empty value is not "unset" — it is an invalid value, and it refuses to boot.
+      # Leave them out of .env entirely to create the first admin through the setup link instead.
+      SCHRODUMP_ADMIN_EMAIL:
+      SCHRODUMP_ADMIN_PASSWORD:
       DOCKER_HOST: tcp://docker-proxy:2375
       SCHRODUMP_SCRATCH_PATH: /scratch
       SCHRODUMP_SCRATCH_MAX_BYTES: ${SCRATCH_MAX_BYTES:-107374182400}
@@ -36,7 +39,10 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:?}
       POSTGRES_DB: schrodump
     volumes:
-      - db:/var/lib/postgresql/data
+      # /var/lib/postgresql, not /var/lib/postgresql/data: from 18 the official image stores data
+      # in a major-version subdirectory, and a volume mounted at the old path is detected as an
+      # orphaned data directory and refuses to start.
+      - db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U schrodump -d schrodump"]
       interval: 5s
@@ -46,7 +52,10 @@ services:
       - internal
 
   docker-proxy:
-    image: tecnativa/docker-socket-proxy
+    # Pinned: this container is the only thing standing between Schrodump and root on the host.
+    # A floating tag on the component that enforces that boundary is the boundary moving on its
+    # own. See docs/security.md.
+    image: tecnativa/docker-socket-proxy:v0.4.2
     restart: unless-stopped
     environment:
       CONTAINERS: 1
