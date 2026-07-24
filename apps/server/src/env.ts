@@ -19,6 +19,8 @@ const EnvSchema = z.object({
   SCHRODUMP_MAX_CONCURRENT_STAGED: z.coerce.number().int().default(2),
   SCHRODUMP_EXECUTOR_NETWORK: z.string().default("schrodump_targets"),
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
+  // How often the scheduler evaluates enabled policies and dispatches due backup jobs.
+  SCHRODUMP_SCHEDULER_TICK_MS: z.coerce.number().int().default(30000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
