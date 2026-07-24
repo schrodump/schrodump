@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
-import { resolveVerifyPlan, sanitizeReason, toBackupProbe } from "./worker-wiring.js";
+import { loadEnv } from "../env.js";
+import { createJobExecutor, resolveVerifyPlan, sanitizeReason, toBackupProbe } from "./worker-wiring.js";
+import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
   it("keeps FULL_RESTORE for postgres with no downgrade", () => {
@@ -90,5 +93,64 @@ describe("toBackupProbe", () => {
       facts: { isReplicaSet: false, hasMyisam: false },
     };
     expect(toBackupProbe(rich).estimatedBytes).toBe(0);
+  });
+});
+
+describe("runVerify org-scoping guard", () => {
+  // A minimal env: only the fields createJobExecutor actually reads matter here (no scratch path
+  // configured, so no Docker/S3 call is reachable before the guard fires anyway).
+  const env = loadEnv({ DATABASE_URL: "postgresql://x/db", SCHRODUMP_KEK: "kek" });
+
+  function fakePrisma(artifact: { organizationId: string }) {
+    const backupJobUpdate = vi.fn<
+      (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<Record<string, unknown>>
+    >(async () => ({}));
+    const artifactUpdate = vi.fn(async () => ({}));
+    const encryptionKeyFindMany = vi.fn(async () => []);
+    const backupPolicyFindUnique = vi.fn(async () => null);
+    const prisma = {
+      artifact: {
+        findUniqueOrThrow: vi.fn(async () => artifact),
+        update: artifactUpdate,
+      },
+      backupJob: { update: backupJobUpdate },
+      backupPolicy: { findUnique: backupPolicyFindUnique },
+      encryptionKey: { findMany: encryptionKeyFindMany },
+    };
+    return { prisma: prisma as unknown as PrismaClient, backupJobUpdate, artifactUpdate, encryptionKeyFindMany, backupPolicyFindUnique };
+  }
+
+  it("fails a mis-scoped VERIFY job LOUD, before any policy lookup or decrypt, and leaves the artifact untouched", async () => {
+    const { prisma, backupJobUpdate, artifactUpdate, encryptionKeyFindMany, backupPolicyFindUnique } = fakePrisma({
+      organizationId: "org-other",
+    });
+    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), env });
+    const job: ClaimedJob = {
+      id: "job-1",
+      organizationId: "org-mine",
+      kind: "VERIFY",
+      policyId: null,
+      artifactId: "artifact-1",
+      correlationId: "verify:artifact-1",
+      restoreParams: null,
+    };
+
+    await executor.runVerify(job);
+
+    expect(backupJobUpdate).toHaveBeenCalledTimes(1);
+    const call = backupJobUpdate.mock.calls[0]![0];
+    expect(call.where).toEqual({ id: "job-1" });
+    expect(call.data.state).toBe("FAILED");
+    const reason = call.data.reason as string;
+    // Credential-free: no org id, no secret, just a clear structural reason.
+    expect(reason).toBe("verify artifact does not belong to this organization");
+    expect(reason).not.toContain("org-other");
+    expect(reason).not.toContain("org-mine");
+
+    // The artifact is not ours to judge: its state is never touched on this failure.
+    expect(artifactUpdate).not.toHaveBeenCalled();
+    // Nothing past the guard ran: no policy lookup, no key material ever fetched/decrypted.
+    expect(backupPolicyFindUnique).not.toHaveBeenCalled();
+    expect(encryptionKeyFindMany).not.toHaveBeenCalled();
   });
 });

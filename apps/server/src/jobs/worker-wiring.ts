@@ -57,8 +57,10 @@ const PROBE_CONNECT_TIMEOUT_MS = 15_000;
 // Coarse ceiling for an executor run. There is no per-job timeout knob in the v1 env; a generous
 // bound still guards against a wedged container holding the worker forever.
 const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
-// Bounds BOTH readiness polling and the whole ephemeral verify sandbox's lifetime. A throwaway
-// postgres container should accept connections within seconds; this is generous slack, not a target.
+// Bounds readiness polling for the ephemeral verify sandbox (passed as readinessTimeoutMs). A
+// throwaway postgres container should accept connections within seconds; this is generous slack,
+// not a target. It does NOT bound the sandbox's lifetime — that's the `use` callback (restore runs
+// under DUMP_TIMEOUT_MS), with teardown in withEphemeralService's finally.
 const SANDBOX_READY_TIMEOUT_MS = 60_000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
@@ -392,6 +394,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       where: { id: job.artifactId },
       include: { destination: true, job: true },
     });
+
+    // SECURITY: the VERIFY job must reference an artifact in its OWN organization. This runs on raw
+    // prisma (system process), so the check is explicit and happens BEFORE any decrypt — mirroring
+    // runRestore's guard below. A job pointing at another org's artifact is failed, never verified;
+    // the artifact itself is left untouched (it is not this org's artifact to judge).
+    if (!artifactBelongsToOrg(artifact.organizationId, job.organizationId)) {
+      await failJob(job.id, "verify artifact does not belong to this organization");
+      return;
+    }
 
     const producingJob = artifact.job;
     const policyLevel =
