@@ -82,6 +82,20 @@ describe("runRestoreJob", () => {
     expect(h.restoredWithKey).toEqual([]);
   });
 
+  it("refuses a non-postgres artifact in v1, before any audit or execution", async () => {
+    // v1 restore is verified for PostgreSQL only; other engines' descriptors were not adapted to the
+    // staged-file executor. The gate must fire before the audit and before runRestore.
+    const h = makeHarness({
+      loadArtifact: () =>
+        Promise.resolve({ ...ARTIFACT, engine: "mongodb", supportedRestoreTargets: ["DATABASE"] }),
+    });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toMatch(/not available for mongodb/i);
+    expect(h.restoredWithKey).toEqual([]);
+    expect(h.audits).toEqual([]);
+  });
+
   it("refuses to restore over existing data without explicit confirmation", async () => {
     const h = makeHarness({}, true);
     const outcome = await runRestoreJob(REQ, h.ports);

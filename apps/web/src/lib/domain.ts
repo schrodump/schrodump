@@ -44,6 +44,15 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
+// v1 restore is verified end-to-end for PostgreSQL only; the server refuses the rest (their restore
+// descriptors were not adapted to the staged-file executor yet). The UI disables the trigger to match
+// — the server is still the enforcing lock. Lift this together with the server gate per engine.
+export const V1_RESTORE_ENGINES: readonly EngineKind[] = ["postgres"];
+
+export function canRestoreEngine(engine: EngineKind): boolean {
+  return V1_RESTORE_ENGINES.includes(engine);
+}
+
 // Why the server answers with a code and not a message: driver errors embed the credential they
 // failed with. The wording lives in the translation files.
 export const PROBE_FAILURE_CODES = [

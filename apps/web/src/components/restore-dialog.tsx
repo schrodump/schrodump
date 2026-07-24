@@ -15,6 +15,7 @@ import {
   RESTORE_TARGETS,
   RESTORE_TARGETS_BY_ENGINE,
   canRestore,
+  canRestoreEngine,
   type RestoreTarget,
   type Role,
 } from "@/lib/domain";
@@ -176,6 +177,20 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   const t = useT();
   const [open, setOpen] = useState(false);
   if (!canRestore(role)) return null;
+  // v1 restore is PostgreSQL-only; the server refuses the rest. Show the trigger disabled with the
+  // reason rather than hiding it, so it is clear the artifact exists and why it can't be restored yet.
+  if (!canRestoreEngine(artifact.engine)) {
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled
+        title={t("restore.engineUnavailable", { engine: t(`engine.${artifact.engine}`) })}
+      >
+        {t("artifacts.restore")}
+      </Button>
+    );
+  }
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>

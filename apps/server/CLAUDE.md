@@ -85,10 +85,12 @@ link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- **Restore está implementado ponta a ponta:** a rota enfileira, o worker despacha `RESTORE` e
-  roda o pipeline real (download → decrypt → restore). O que falta é mais fino: seleção de
-  sub-escopo (hoje é sempre restore completo), identidade em memória para artefatos sealed (hoje
-  passa por disco) e verify de `FULL_RESTORE`.
+- **Restore roda ponta a ponta só para PostgreSQL:** a rota enfileira, o worker despacha `RESTORE` e
+  roda o pipeline real (download → decrypt in-process → gunzip → arquivo montado → `pg_restore`). Os
+  descritores `buildRestore` de mysql/mongo não foram adaptados ao executor staged-file nem passaram
+  por smoke, então `runRestoreJob` recusa não-postgres com erro claro e a UI desabilita o botão
+  (backup/verify dessas engines seguem normais). O que falta: adaptar+smoke por engine, seleção de
+  sub-escopo (hoje sempre restore completo) e verify de `FULL_RESTORE`.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.

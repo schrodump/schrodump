@@ -253,6 +253,10 @@ async function restoreOne(
       throw new Error(`restore execution failed (exit code ${restoreResult.exitCode})`);
     }
   } finally {
+    // Release the S3 read stream. On success it has already ended (fully consumed by the decrypt);
+    // on a decrypt/gunzip/exit failure it may still be open, and destroy() frees its socket instead
+    // of stranding it until GC. destroy() with no arg emits no 'error'.
+    source.destroy();
     // The decrypted dump is cleartext on the scratch volume — always remove it (success and throw).
     await rm(dumpPath, { force: true });
   }

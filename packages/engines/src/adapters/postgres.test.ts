@@ -160,3 +160,28 @@ describe("postgresAdapter.buildGlobalsRestore", () => {
     expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
   });
 });
+
+describe("postgresAdapter.buildRestore", () => {
+  const restoreInput: RestoreInput = {
+    connection: CONN,
+    serverVersionNum: 160002,
+    target: "DATABASE",
+    scope: { databases: ["app"], schemas: [], collections: [] },
+  };
+
+  it("runs pg_restore --clean --if-exists --exit-on-error, reading the mounted dump as a file", () => {
+    // --exit-on-error is load-bearing: without it pg_restore ignores per-object failures and STILL
+    // exits 0, which the executor reads as SUCCEEDED — a partially-restored dump reporting ok, the
+    // exact failure the thesis forbids. --clean --if-exists keeps the DROPs from erroring on absent
+    // objects. The dump is a mounted positional file (sourcePath), never a second stdin.
+    const descriptor = postgresAdapter.buildRestore({
+      ...restoreInput,
+      sourcePath: "/var/lib/schrodump/restore-source",
+    });
+    expect(descriptor.command).toEqual([
+      "pg_restore", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app",
+      "--clean", "--if-exists", "--exit-on-error", "/var/lib/schrodump/restore-source",
+    ]);
+    expect(descriptor.env.PGPASSWORD).toBe("s3cret");
+  });
+});

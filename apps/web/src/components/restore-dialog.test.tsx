@@ -18,8 +18,8 @@ const artifact: Artifact = {
   state: "UNOBSERVED",
   bucketKey: "org/shop/2026-01-01.dump",
   manifestKey: "org/shop/2026-01-01.manifest.json",
-  engine: "mysql",
-  serverVersionNum: 80_036,
+  engine: "postgres",
+  serverVersionNum: 160_002,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
   checksumAlgorithm: "sha256",
@@ -53,6 +53,11 @@ describe("RestoreButton", () => {
     renderButton("operator");
     expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
   });
+
+  it("disables the trigger for a non-postgres engine (server refuses restore in v1)", () => {
+    renderWith(<RestoreButton artifact={{ ...artifact, engine: "mongodb" }} role="operator" />);
+    expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
+  });
 });
 
 describe("RestoreDialog", () => {
@@ -69,12 +74,12 @@ describe("RestoreDialog", () => {
 
   it("disables scopes the engine cannot restore, with a reason", async () => {
     await openDialog();
-    // MySQL restores cluster/database/table — never schema or collection.
+    // PostgreSQL restores cluster/database/schema/table — never collection.
     expect(screen.getByLabelText("Database")).toBeEnabled();
+    expect(screen.getByLabelText("Schema")).toBeEnabled();
     expect(screen.getByLabelText("Table")).toBeEnabled();
-    expect(screen.getByLabelText("Schema")).toBeDisabled();
     expect(screen.getByLabelText("Collection")).toBeDisabled();
-    expect(screen.getAllByText("Not supported for MySQL")).toHaveLength(2);
+    expect(screen.getAllByText("Not supported for PostgreSQL")).toHaveLength(1);
   });
 
   it("blocks restore over an existing database until the name is typed exactly", async () => {

@@ -185,6 +185,7 @@ export const es: Record<MessageKey, string> = {
   "restore.mismatch": "El nombre no coincide con la base de datos de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore encolado",
+  "restore.engineUnavailable": "El restore para {engine} no está disponible en esta versión",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Base de datos",
   "restoreTarget.SCHEMA": "Schema",

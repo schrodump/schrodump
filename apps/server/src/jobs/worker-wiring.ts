@@ -528,18 +528,19 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         return keys.map(toKeyRecord);
       },
       targetHasExistingData: async () => {
-        // Decrypt the credential to USE it (probe the origin target), never to show it.
-        const password = decryptCredential(
-          deps.kek,
-          parseEncryptedCredential(originTarget.encryptedCredential),
-        );
         // C1 (security): the engine probes propagate the RAW driver error by contract — the server
         // sanitizes, not the engines — and the Mongo driver embeds the full connection URI (password
         // included) in that message. runRestoreJob catches a throw here and writes error.message
         // straight to BackupJob.reason, bypassing the worker's sanitizeReason. So a raw driver
-        // message must NEVER escape: swallow it and re-throw a credential-free error.
+        // message must NEVER escape: swallow it and re-throw a credential-free error. The credential
+        // decrypt lives inside the same guard so an envelope error can't escape raw either.
         let probe;
         try {
+          // Decrypt the credential to USE it (probe the origin target), never to show it.
+          const password = decryptCredential(
+            deps.kek,
+            parseEncryptedCredential(originTarget.encryptedCredential),
+          );
           probe = await PROBES[engine]({
             host: originTarget.host,
             port: originTarget.port,

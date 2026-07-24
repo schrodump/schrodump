@@ -185,6 +185,7 @@ export const ptBR: Record<MessageKey, string> = {
   "restore.mismatch": "O nome não confere com o banco de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore enfileirado",
+  "restore.engineUnavailable": "Restore para {engine} não está disponível nesta versão",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Banco",
   "restoreTarget.SCHEMA": "Schema",
