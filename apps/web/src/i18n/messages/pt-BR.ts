@@ -36,6 +36,7 @@ export const ptBR: Record<MessageKey, string> = {
   "locale.label": "Idioma",
   "locale.en": "Inglês",
   "locale.pt-BR": "Português (Brasil)",
+  "locale.es": "Espanhol",
 
   "state.verified": "Verificado",
   "state.unobserved": "Não observado",

@@ -34,6 +34,7 @@ export const en = {
   "locale.label": "Language",
   "locale.en": "English",
   "locale.pt-BR": "Portuguese (Brazil)",
+  "locale.es": "Spanish",
 
   "state.verified": "Verified",
   "state.unobserved": "Unobserved",

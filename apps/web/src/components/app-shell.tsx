@@ -35,7 +35,7 @@ function LocaleSwitch() {
       >
         {LOCALES.map((code) => (
           <option key={code} value={code}>
-            {t(code === "en" ? "locale.en" : "locale.pt-BR")}
+            {t(`locale.${code}`)}
           </option>
         ))}
       </select>

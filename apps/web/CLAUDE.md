@@ -15,9 +15,11 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
   Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).
 - **Verify desligado numa policy é aviso persistente**, não toast.
-- **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts`; `pt-BR.ts` é
-  `Record<MessageKey, string>`, então tradução faltando quebra o typecheck. Chaves dinâmicas usam
-  template literal (`` t(`job.state.${state}`) ``), que o TS estreita para o subconjunto válido.
+- **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
+  chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
+  faltando quebra o typecheck. Adicionar locale: novo dicionário + entrada em `Locale`/`LOCALES`/
+  `dictionaries` no `provider.tsx`. Chaves dinâmicas usam template literal
+  (`` t(`job.state.${state}`) ``), que o TS estreita para o subconjunto válido.
 - **Sessão é cookie**, nunca localStorage. Só a preferência de idioma vai pro localStorage.
 
 ## Como fala com o servidor

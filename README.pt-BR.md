@@ -47,7 +47,7 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 - **Agendamento com retenção GFS** — avô-pai-filho, ciente das cadeias full/incremental.
 - **Atrito de restore de propósito** — restrito por papel, limitado por uma matriz de capacidade da
   engine, e sobrescrever um banco exige digitar o nome dele.
-- **Interface web** — um painel construído em torno dos três estados, em inglês e português.
+- **Interface web** — um painel construído em torno dos três estados, em inglês, português e espanhol.
 - **Docker-first** — uma imagem única sem clients de banco, releases multi-arch assinadas com SBOM
   anexado.
 

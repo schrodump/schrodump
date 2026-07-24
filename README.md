@@ -47,7 +47,7 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 - **Scheduling with GFS retention** — grandfather-father-son, aware of full/incremental chains.
 - **Deliberate restore friction** — role-gated, scoped by an engine capability matrix, and an
   overwrite requires typing the database name.
-- **Web UI** — a dashboard built around the three states, in English and Portuguese.
+- **Web UI** — a dashboard built around the three states, in English, Portuguese and Spanish.
 - **Docker-first** — a single image with no database clients, signed multi-arch releases with an
   attached SBOM.
 

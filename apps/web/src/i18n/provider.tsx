@@ -6,11 +6,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { en, type MessageKey } from "./messages/en";
 import { ptBR } from "./messages/pt-BR";
+import { es } from "./messages/es";
 
-export type Locale = "en" | "pt-BR";
-export const LOCALES: Locale[] = ["en", "pt-BR"];
+export type Locale = "en" | "pt-BR" | "es";
+export const LOCALES: Locale[] = ["en", "pt-BR", "es"];
 
-const dictionaries: Record<Locale, Record<MessageKey, string>> = { en, "pt-BR": ptBR };
+const dictionaries: Record<Locale, Record<MessageKey, string>> = { en, "pt-BR": ptBR, es };
 const LOCALE_STORAGE_KEY = "schrodump.locale";
 
 export type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
@@ -41,7 +42,7 @@ export function I18nProvider({
 
   useEffect(() => {
     const stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    if (stored === "en" || stored === "pt-BR") setLocaleState(stored);
+    if (stored !== null && (LOCALES as string[]).includes(stored)) setLocaleState(stored as Locale);
   }, []);
 
   const setLocale = useCallback((next: Locale) => {

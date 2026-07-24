@@ -42,4 +42,13 @@ describe("i18n", () => {
     );
     expect(screen.getByText("Não observado")).toBeInTheDocument();
   });
+
+  it("renders es when that is the initial locale", () => {
+    render(
+      <I18nProvider initialLocale="es">
+        <Sample />
+      </I18nProvider>,
+    );
+    expect(screen.getByText("No observado")).toBeInTheDocument();
+  });
 });

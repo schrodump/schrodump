@@ -50,7 +50,7 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
   completa/incremental.
 - **Fricción de restauración deliberada** — restringida por rol, acotada por una matriz de
   capacidad del motor, y sobrescribir una base exige escribir su nombre.
-- **Interfaz web** — un panel construido en torno a los tres estados, en inglés y portugués.
+- **Interfaz web** — un panel construido en torno a los tres estados, en inglés, portugués y español.
 - **Docker primero** — una única imagen sin clientes de base de datos, releases multiarquitectura
   firmadas con un SBOM adjunto.
 
