@@ -6,6 +6,7 @@
 // container that MUST run on an isolated network with no access to production target networks.
 
 import { createHash } from "node:crypto";
+import { SchrodumpError } from "@schrodump/core/errors";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import type { VerifyPorts, VerifyProof } from "./verify.js";
 
@@ -21,6 +22,19 @@ export interface VerifyWiringDeps {
   runFullRestore(): Promise<VerifyProof>;
   setJobState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
   setArtifactState(state: "VERIFIED" | "FAILED"): Promise<void>;
+}
+
+// Restore-executor codes that mean the restore actually ran against the dump and rejected it —
+// the artifact is the problem. Every other SchrodumpError code (RESTORE_SOURCE_FAILED, RUNNER_*)
+// and every non-SchrodumpError is our own infra failing to even attempt the restore: INCONCLUSIVE,
+// never FAILED — we must not condemn a backup because our sandbox couldn't run.
+const RESTORE_FAILED_CODES = new Set(["RESTORE_DECRYPT_FAILED", "RESTORE_EXECUTOR_FAILED"]);
+
+export function classifyVerifyError(err: unknown): VerifyProof {
+  if (err instanceof SchrodumpError && RESTORE_FAILED_CODES.has(err.code)) {
+    return "FAILED";
+  }
+  return "INCONCLUSIVE";
 }
 
 export function createVerifyPorts(deps: VerifyWiringDeps): VerifyPorts {
