@@ -6,6 +6,10 @@ import { buildApp } from "./app.js";
 import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
 import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
 import { driverForDestination } from "./jobs/destination-driver.js";
+import { drainQueue } from "./jobs/worker.js";
+import { startWorker, installShutdown } from "./jobs/worker-loop.js";
+import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
+import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
@@ -85,4 +89,27 @@ export async function main(): Promise<void> {
   });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
+
+  // --- worker boot ---
+  // 1. Orphan recovery: a RUNNING job at boot belongs to a process that died.
+  const recovered = await prisma.backupJob.updateMany({
+    where: { state: "RUNNING" },
+    data: { state: "FAILED", finishedAt: new Date(), reason: "orphaned by process restart" },
+  });
+  if (recovered.count > 0) logger.info({ count: recovered.count }, "recovered orphaned jobs");
+
+  // 2. Single-flight worker (advisory lock keeps one replica draining).
+  const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
+  const store = createWorkerStore(prisma);
+  const executor = createJobExecutor({ prisma, kek, env });
+  const workerDeps = { store, executor, log: logger, sanitizeReason };
+  const lock = pgAdvisoryLock(prisma);
+  const handle = startWorker({
+    intervalMs: env.WORKER_POLL_MS,
+    drainQueue: () => withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps)).then((n) => n ?? 0),
+  });
+
+  // 3. Graceful shutdown: stop the loop before exit (scratch of an in-flight job is released by
+  //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
+  installShutdown({ onSignal: () => { handle.stop(); } });
 }
