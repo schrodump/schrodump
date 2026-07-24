@@ -14,6 +14,10 @@ function baseEnv(over: Partial<Env> = {}): Env {
     SCHRODUMP_URL: "http://localhost:8080",
     PORT: 8080,
     LOG_LEVEL: "info",
+    SCHRODUMP_SCRATCH_MAX_BYTES: 107374182400,
+    SCHRODUMP_MAX_CONCURRENT_STAGED: 2,
+    SCHRODUMP_EXECUTOR_NETWORK: "schrodump_targets",
+    WORKER_POLL_MS: 2000,
     ...over,
   };
 }
