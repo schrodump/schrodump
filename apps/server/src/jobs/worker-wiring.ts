@@ -54,14 +54,14 @@ const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 
-// Restore writes the decryption identity AND the decrypted cleartext dump to disk; they MUST land
-// on the configured scratch volume (gc-swept, and host-encrypted in the deploy), never a tmpdir
-// fallback — the operational identity decrypts every artifact for the org. The reservation estimate
-// stays deliberately small (the identity is ~100 bytes): v1 restore is single-stream with no
-// size-based staging, so the dump is not pre-sized against free space here.
-const IDENTITY_SCRATCH_BYTES = 4096;
+// Restore writes the decrypted CLEARTEXT dump to disk; it MUST land on the configured scratch volume
+// (gc-swept, and host-encrypted in the deploy), never a tmpdir fallback. The decryption identity is
+// NOT written to disk — it decrypts in-process, in memory. The reservation estimate stays a small
+// nominal placeholder: v1 restore is single-stream with no size-based staging, so the dump is not
+// pre-sized against free space here (see the deferred "scratch dump-file sizing" item in the roadmap).
+const DUMP_SCRATCH_BYTES = 4096;
 const RESTORE_SCRATCH_REQUIRED_REASON =
-  "restore requires a configured scratch path for the decryption identity";
+  "restore requires a configured scratch path for the decrypted dump";
 
 type EngineProbeFn = (conn: ProbeConnection) => Promise<EngineProbeResult>;
 
@@ -437,10 +437,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
   const runRestore = async (job: ClaimedJob): Promise<void> => {
     const params = restoreParamsOf(job.restoreParams);
 
-    // I1: restore materializes the decryption identity on disk. Only the scratch volume is swept by
-    // ScratchManager.gc() (and host-encrypted in the deploy); without it we would strand the
-    // operational identity — which decrypts every artifact for the org — on an unswept, possibly
-    // unencrypted filesystem. A configured scratch path is mandatory; never fall back to tmpdir.
+    // I1: restore writes the decrypted CLEARTEXT dump to disk. Only the scratch volume is swept by
+    // ScratchManager.gc() (and host-encrypted in the deploy); without it we would strand a plaintext
+    // copy of the org's data on an unswept, possibly unencrypted filesystem. A configured scratch path
+    // is mandatory; never fall back to tmpdir. (The identity itself never touches disk — in-process.)
     if (scratch === null) {
       await failJob(job.id, RESTORE_SCRATCH_REQUIRED_REASON);
       return;
@@ -626,9 +626,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           reserveStaging: async () => {
             // I1: reserve the per-job scratch DIRECTORY (ScratchManager.gc() reclaims it if a hard
             // kill skips the finally cleanup; a bare root file would be skipped by gc). It holds the
-            // 0600 identity AND the decrypted cleartext dump files; runRestorePipeline removes both
-            // in finally, and release() recursively removes the dir as a backstop.
-            const reservation = await scratch.reserve(job.id, IDENTITY_SCRATCH_BYTES);
+            // decrypted cleartext dump files (the identity never lands here — decrypt is in-process);
+            // runRestorePipeline removes each dump in finally, and release() recursively removes the
+            // dir as a backstop.
+            const reservation = await scratch.reserve(job.id, DUMP_SCRATCH_BYTES);
             return { dir: reservation.path, cleanup: () => reservation.release() };
           },
         });
