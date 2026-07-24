@@ -30,7 +30,7 @@ function makeHarness(over: Partial<VerifyPorts> = {}): Harness {
     },
     fullRestore: () => {
       calls.push("fullRestore");
-      return Promise.resolve(true);
+      return Promise.resolve("VERIFIED");
     },
     ...over,
   };
@@ -88,5 +88,21 @@ describe("runVerifyJob", () => {
     const outcome = await runVerifyJob(CTX, h.ports);
     expect(outcome.finalState).toBe("FAILED");
     expect(h.artifactStates).toEqual(["FAILED"]);
+  });
+
+  it("marks the artifact FAILED when fullRestore proves it FAILED", async () => {
+    const h = makeHarness({ fullRestore: () => Promise.resolve("FAILED") });
+    const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
+    expect(outcome.finalState).toBe("FAILED");
+    expect(h.artifactStates).toEqual(["FAILED"]);
+    expect(h.jobStates).toEqual(["RUNNING", "FAILED"]);
+  });
+
+  it("leaves the artifact UNOBSERVED and fails the job when fullRestore is INCONCLUSIVE", async () => {
+    const h = makeHarness({ fullRestore: () => Promise.resolve("INCONCLUSIVE") });
+    const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
+    expect(outcome.finalState).toBe("UNOBSERVED");
+    expect(h.artifactStates).toEqual([]); // infra failure never touches the artifact's state
+    expect(h.jobStates).toEqual(["RUNNING", "FAILED"]);
   });
 });

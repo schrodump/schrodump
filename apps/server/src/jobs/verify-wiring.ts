@@ -7,17 +7,18 @@
 
 import { createHash } from "node:crypto";
 import type { StorageDriver } from "@schrodump/storage/driver";
-import type { VerifyPorts } from "./verify.js";
+import type { VerifyPorts, VerifyProof } from "./verify.js";
 
 export interface VerifyWiringDeps {
   driver: StorageDriver;
   bucketKey: string;
   // Checksum of the stored (encrypted) object, from the manifest.
   manifestChecksum: string;
-  // Restores the artifact into an ephemeral container on an ISOLATED network and runs the minimal
-  // assertions (row/collection counts vs. dump time, constraint presence, migration version), then
-  // destroys the container. Returns whether every assertion passed.
-  runFullRestore(): Promise<boolean>;
+  // Restores the artifact into an ephemeral, isolated-network container of the correct major, runs
+  // the minimal assertions (row/collection counts vs. dump time, constraint presence, migration
+  // version), then destroys the container. Three-way: VERIFIED/FAILED are claims about the
+  // artifact; INCONCLUSIVE means the sandbox itself failed to run the attempt.
+  runFullRestore(): Promise<VerifyProof>;
   setJobState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
   setArtifactState(state: "VERIFIED" | "FAILED"): Promise<void>;
 }
