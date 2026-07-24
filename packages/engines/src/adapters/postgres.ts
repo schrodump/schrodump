@@ -113,22 +113,17 @@ export const postgresAdapter: EngineAdapter = {
   },
 
   // globals.bin is plain SQL (pg_dumpall --globals-only), which pg_restore cannot read; restore it
-  // with psql reading the script on stdin (-f -). ON_ERROR_STOP turns any failure into a non-zero
-  // exit. Run before the per-database restore so roles/tablespaces exist first.
+  // with psql reading the script on stdin (-f -). Deliberately WITHOUT ON_ERROR_STOP: pg_dumpall
+  // always emits `CREATE ROLE <bootstrap>` (e.g. postgres), and every real target — including a
+  // freshly initdb'd cluster — already has that role, so a strict run would abort on the
+  // always-expected "role already exists". Globals restore is best-effort by standard pg_dumpall
+  // practice; the per-database restore below keeps ON_ERROR_STOP for real data errors. Run first so
+  // roles/tablespaces exist before the per-database restore.
   buildGlobalsRestore(input) {
     const connection = input.connection;
     return {
       image: this.imageFor(input.serverVersionNum),
-      command: [
-        "psql",
-        ...connArgs(connection),
-        "-d",
-        connection.database,
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-f",
-        "-",
-      ],
+      command: ["psql", ...connArgs(connection), "-d", connection.database, "-f", "-"],
       env: connEnv(connection),
       outputKind: "stdout",
     };

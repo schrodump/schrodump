@@ -134,23 +134,13 @@ describe("postgresAdapter.buildGlobalsRestore", () => {
     scope: { databases: ["app"], schemas: [], collections: [] },
   };
 
-  it("emits psql -f - reading the globals SQL on stdin (pg_restore cannot read plain SQL)", () => {
+  it("emits psql -f - reading the globals SQL on stdin, WITHOUT ON_ERROR_STOP", () => {
+    // pg_dumpall always emits CREATE ROLE for the bootstrap role, which exists on every cluster;
+    // ON_ERROR_STOP would make that always-expected conflict abort the restore. Globals restore is
+    // best-effort (standard pg_dumpall practice) — the per-database restore keeps ON_ERROR_STOP.
     const descriptor = postgresAdapter.buildGlobalsRestore?.(restoreInput);
-    expect(descriptor?.command).toEqual([
-      "psql",
-      "-h",
-      "db.internal",
-      "-p",
-      "5432",
-      "-U",
-      "backup",
-      "-d",
-      "app",
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-f",
-      "-",
-    ]);
+    expect(descriptor?.command).toEqual(["psql", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app", "-f", "-"]);
+    expect(descriptor?.command).not.toContain("ON_ERROR_STOP=1");
     expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
   });
 });
