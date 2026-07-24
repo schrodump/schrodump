@@ -54,6 +54,22 @@ export function artifactBelongsToOrg(artifactOrganizationId: string, jobOrganiza
   return artifactOrganizationId === jobOrganizationId;
 }
 
+const RestoreScopeSchema = z.object({
+  databases: z.array(z.string()).default([]),
+  schemas: z.array(z.string()).default([]),
+  collections: z.array(z.string()).default([]),
+});
+
+export type RestoreScope = z.infer<typeof RestoreScopeSchema>;
+
+// A malformed origin-target scope must fail LOUD, never silently degrade to an empty scope: an
+// empty-scope restore born from a parse failure is worse than a clear error (mirrors the fail-loud
+// stance of restoreParamsOf). An absent/empty field defaults to [] — a legitimately unscoped
+// target is valid; a non-array value is not.
+export function restoreScopeOf(raw: unknown): RestoreScope {
+  return RestoreScopeSchema.parse(raw);
+}
+
 const ARTIFACT_OBJECT = "artifact.bin";
 const GLOBALS_OBJECT = "globals.bin";
 

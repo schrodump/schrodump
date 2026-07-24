@@ -6,7 +6,6 @@
 // scopedPrisma — every query therefore filters organizationId explicitly. Credentials are decrypted
 // only to be USED (handed to a driver/probe), never shown, logged, or returned.
 
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
@@ -32,6 +31,7 @@ import {
   createIdentityFile,
   globalsKeyFor,
   restoreParamsOf,
+  restoreScopeOf,
   runRestorePipeline,
 } from "./restore-executor.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
@@ -55,13 +55,12 @@ const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 
-// Restore needs the full DumpScope (buildRestore reads scope.schemas for a SCHEMA target); the
-// backup path only cared about databases. Missing arrays default to empty.
-const RestoreScopeSchema = z.object({
-  databases: z.array(z.string()).default([]),
-  schemas: z.array(z.string()).default([]),
-  collections: z.array(z.string()).default([]),
-});
+// Restore writes the decryption identity to disk; it MUST land on the configured scratch volume
+// (gc-swept, and host-encrypted in the deploy), never a tmpdir fallback — the operational identity
+// decrypts every artifact for the org. A tiny reservation estimate: the identity is ~100 bytes.
+const IDENTITY_SCRATCH_BYTES = 4096;
+const RESTORE_SCRATCH_REQUIRED_REASON =
+  "restore requires a configured scratch path for the decryption identity";
 
 type EngineProbeFn = (conn: ProbeConnection) => Promise<EngineProbeResult>;
 
@@ -437,6 +436,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
   const runRestore = async (job: ClaimedJob): Promise<void> => {
     const params = restoreParamsOf(job.restoreParams);
 
+    // I1: restore materializes the decryption identity on disk. Only the scratch volume is swept by
+    // ScratchManager.gc() (and host-encrypted in the deploy); without it we would strand the
+    // operational identity — which decrypts every artifact for the org — on an unswept, possibly
+    // unencrypted filesystem. A configured scratch path is mandatory; never fall back to tmpdir.
+    if (scratch === null) {
+      await failJob(job.id, RESTORE_SCRATCH_REQUIRED_REASON);
+      return;
+    }
+
     if (job.artifactId === null) {
       await failJob(job.id, "restore job has no target artifact");
       return;
@@ -483,10 +491,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
     const engine = artifact.engine;
     const adapter = resolveAdapter(engine);
-    const scopeParse = RestoreScopeSchema.safeParse(originTarget.scope);
-    const scope = scopeParse.success
-      ? scopeParse.data
-      : { databases: [], schemas: [], collections: [] };
+    // M1: a malformed scope fails loud — never silently degrade to an empty scope, which would
+    // restore the wrong (empty) set. The parse failure carries only zod field paths, no credential.
+    let scope;
+    try {
+      scope = restoreScopeOf(originTarget.scope);
+    } catch {
+      await failJob(job.id, "restore origin target has a malformed scope");
+      return;
+    }
     const connectDatabase = probeDatabaseFor(engine, scope.databases);
 
     const connectionFor = (password: string): TargetConnection => ({
@@ -519,15 +532,25 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           deps.kek,
           parseEncryptedCredential(originTarget.encryptedCredential),
         );
-        const probe = await PROBES[engine]({
-          host: originTarget.host,
-          port: originTarget.port,
-          database: connectDatabase,
-          username: originTarget.username,
-          password,
-          tls: originTarget.tls,
-          connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
-        });
+        // C1 (security): the engine probes propagate the RAW driver error by contract — the server
+        // sanitizes, not the engines — and the Mongo driver embeds the full connection URI (password
+        // included) in that message. runRestoreJob catches a throw here and writes error.message
+        // straight to BackupJob.reason, bypassing the worker's sanitizeReason. So a raw driver
+        // message must NEVER escape: swallow it and re-throw a credential-free error.
+        let probe;
+        try {
+          probe = await PROBES[engine]({
+            host: originTarget.host,
+            port: originTarget.port,
+            database: connectDatabase,
+            username: originTarget.username,
+            password,
+            tls: originTarget.tls,
+            connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
+          });
+        } catch {
+          throw new Error("could not probe the origin target");
+        }
         // Conservative signal: any non-empty database in scope (or any probed database when the
         // target is unscoped) counts as "holds data", so the overwrite gate errs toward requiring
         // confirmation. A precise user-data check (table/row counts) is a follow-up; the smoke
@@ -597,8 +620,25 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   target: params.target,
                   scope,
                 }),
-          writeIdentityFile: (identity) =>
-            createIdentityFile(deps.env.SCHRODUMP_SCRATCH_PATH ?? tmpdir(), job.id, identity),
+          writeIdentityFile: async (identity) => {
+            // I1: reserve a per-job scratch DIRECTORY (ScratchManager.gc() reclaims a directory if a
+            // hard kill skips the finally unlink; a bare root file would be skipped by gc). Write the
+            // 0600 identity inside it; cleanup unlinks the file and releases the reservation.
+            const reservation = await scratch.reserve(job.id, IDENTITY_SCRATCH_BYTES);
+            try {
+              const file = await createIdentityFile(reservation.path, job.id, identity);
+              return {
+                path: file.path,
+                cleanup: async () => {
+                  await file.cleanup();
+                  await reservation.release();
+                },
+              };
+            } catch (err) {
+              await reservation.release();
+              throw err;
+            }
+          },
         });
       },
     };

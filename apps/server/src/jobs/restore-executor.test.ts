@@ -12,6 +12,7 @@ import {
   globalsKeyFor,
   planRestoreSteps,
   restoreParamsOf,
+  restoreScopeOf,
 } from "./restore-executor.js";
 
 describe("restoreParamsOf", () => {
@@ -32,6 +33,24 @@ describe("artifactBelongsToOrg", () => {
   it("is true only when the artifact's org matches the job's org", () => {
     expect(artifactBelongsToOrg("org-a", "org-a")).toBe(true);
     expect(artifactBelongsToOrg("org-a", "org-b")).toBe(false);
+  });
+});
+
+describe("restoreScopeOf", () => {
+  it("parses a full scope and defaults missing arrays to empty", () => {
+    expect(restoreScopeOf({ databases: ["app"], schemas: ["public"], collections: [] })).toEqual({
+      databases: ["app"],
+      schemas: ["public"],
+      collections: [],
+    });
+    // A legitimately unscoped target (full instance) is valid, not a failure.
+    expect(restoreScopeOf({})).toEqual({ databases: [], schemas: [], collections: [] });
+  });
+
+  it("fails LOUD on a malformed scope instead of degrading to empty", () => {
+    expect(() => restoreScopeOf(null)).toThrow();
+    expect(() => restoreScopeOf({ databases: "app" })).toThrow();
+    expect(() => restoreScopeOf({ databases: [1, 2] })).toThrow();
   });
 });
 
@@ -88,6 +107,8 @@ describe("createIdentityFile", () => {
     const identity = "AGE-SECRET-KEY-1EXAMPLEIDENTITY";
     const file = await createIdentityFile(dir, "job-1", identity);
 
+    // Restore passes a reserved scratch directory; the identity must land INSIDE it.
+    expect(file.path.startsWith(dir)).toBe(true);
     const info = await stat(file.path);
     // Only the owner may read the operational identity.
     expect(info.mode & 0o777).toBe(0o600);
