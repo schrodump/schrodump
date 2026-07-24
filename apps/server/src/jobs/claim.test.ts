@@ -1,25 +1,47 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { PrismaClient } from "@prisma/client";
 import { claimNextJob } from "./claim.js";
 
-const RUN = process.env.SCHRODUMP_TEST_INTEGRATION === "1";
+// Opt-in only: needs Docker. Skipped unless SCHRODUMP_TEST_INTEGRATION=1. The metadata Postgres is
+// self-provisioned via testcontainers (like probe.integration.test.ts) — the CI integration job
+// gives us Docker but no ambient DATABASE_URL, so the test must stand up and migrate its own DB.
+const enabled = process.env.SCHRODUMP_TEST_INTEGRATION === "1";
 
-describe.skipIf(!RUN)("claimNextJob (integration)", () => {
-  const prisma = new PrismaClient();
+describe.skipIf(!enabled)("claimNextJob (integration)", () => {
+  let container: StartedTestContainer;
+  let prisma: PrismaClient;
   let orgId: string;
 
   beforeAll(async () => {
+    container = await new GenericContainer("postgres:16-alpine")
+      .withEnvironment({ POSTGRES_USER: "schrodump", POSTGRES_PASSWORD: "schrodump", POSTGRES_DB: "app" })
+      .withExposedPorts(5432)
+      .withWaitStrategy(Wait.forListeningPorts())
+      .start();
+    const url = `postgresql://schrodump:schrodump@${container.getHost()}:${container.getMappedPort(5432)}/app?schema=public`;
+
+    // Apply the real schema (the committed migrations) to the throwaway DB.
+    const schemaPath = fileURLToPath(new URL("../../prisma/schema.prisma", import.meta.url));
+    execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy", "--schema", schemaPath], {
+      env: { ...process.env, DATABASE_URL: url },
+    });
+
+    prisma = new PrismaClient({ datasourceUrl: url });
     const org = await prisma.organization.create({ data: { name: "claim-test", slug: `claim-test-${Date.now()}` } });
     orgId = org.id;
-  });
+  }, 180_000);
+
   afterAll(async () => {
-    await prisma.backupJob.deleteMany({ where: { organizationId: orgId } });
-    await prisma.organization.delete({ where: { id: orgId } });
-    await prisma.$disconnect();
+    if (prisma !== undefined) await prisma.$disconnect();
+    if (container !== undefined) await container.stop();
   });
+
   beforeEach(async () => {
     await prisma.backupJob.deleteMany({ where: { organizationId: orgId } });
   });
