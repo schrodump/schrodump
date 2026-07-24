@@ -29,6 +29,9 @@ import { driverForDestination } from "./destination-driver.js";
 import { createVerifyPorts } from "./verify-wiring.js";
 import { runVerifyJob, type VerifyLevel } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
+// TODO(Task 3): wire createRestorePorts and runRestoreJob
+// import { createRestorePorts } from "./restore-wiring.js";
+// import { runRestoreJob } from "./restore.js";
 
 // Identifies the tool that produced a manifest. No per-build version source exists yet (the server
 // package is 0.0.0); a stable literal keeps the manifest schema satisfied until one lands.
@@ -416,5 +419,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     );
   };
 
-  return { runBackup, runVerify };
+  const runRestore = async (job: ClaimedJob): Promise<void> => {
+    // TODO(Task 3): Implement real restore executor with createRestorePorts and runRestoreJob.
+    // For now, fail the job as this is a documented v1 gap.
+    await failJob(job.id, "restore executor not yet implemented");
+  };
+
+  return { runBackup, runVerify, runRestore };
 }
