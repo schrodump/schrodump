@@ -11,6 +11,7 @@ import { destinationRoutes, type DestinationStore } from "./routes/destinations.
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { restoreRoutes } from "./routes/restore.js";
+import { sessionRoutes } from "./routes/session.js";
 import { setupRoutes, type SetupDeps } from "./routes/setup.js";
 import { targetRoutes, type TargetStore } from "./routes/targets.js";
 
@@ -59,6 +60,10 @@ export function buildApp(deps: AppDeps) {
 
   app.register((instance) => {
     setupRoutes(deps.setupDeps)(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    sessionRoutes(deps.resolver)(instance);
     return Promise.resolve();
   });
   app.register((instance) => {

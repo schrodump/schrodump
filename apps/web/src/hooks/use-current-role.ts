@@ -3,15 +3,15 @@
 
 "use client";
 
-import { useSession } from "@/lib/auth-client";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import type { Role } from "@/lib/domain";
 
-// The RBAC role lives on the organization membership and is resolved server-side per request; it
-// is not part of the better-auth session and no endpoint exposes it. Until one does, the UI cannot
-// know the caller's role and fails closed to "viewer", which hides restore. The server enforces
-// operator+ on restore independently, so hiding is UX, not the control.
+// The RBAC role lives on the organization membership and is resolved server-side per request; it is
+// not part of the Better-Auth session. GET /me exposes it. While the query is loading, or if it
+// fails, the UI fails closed to "viewer" — which hides restore. The server enforces operator+ on
+// restore independently, so this is UX, not the control.
 export function useCurrentRole(): Role {
-  const { data } = useSession();
-  const role = (data?.user as { role?: Role } | undefined)?.role;
-  return role ?? "viewer";
+  const { data } = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ role: Role }>("/me") });
+  return data?.role ?? "viewer";
 }
