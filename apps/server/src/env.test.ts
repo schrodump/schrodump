@@ -32,4 +32,15 @@ describe("loadEnv worker config", () => {
     expect(env.WORKER_POLL_MS).toBe(500);
     expect(env.SCHRODUMP_SCHEDULER_TICK_MS).toBe(15000);
   });
+
+  it("rejects SCHRODUMP_MAX_CONCURRENT_STAGED below 1", () => {
+    expect(() =>
+      loadEnv({ ...base, SCHRODUMP_MAX_CONCURRENT_STAGED: "0" } as NodeJS.ProcessEnv),
+    ).toThrow();
+  });
+
+  it("accepts SCHRODUMP_MAX_CONCURRENT_STAGED of 1", () => {
+    const env = loadEnv({ ...base, SCHRODUMP_MAX_CONCURRENT_STAGED: "1" } as NodeJS.ProcessEnv);
+    expect(env.SCHRODUMP_MAX_CONCURRENT_STAGED).toBe(1);
+  });
 });

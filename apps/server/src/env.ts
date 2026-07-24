@@ -16,7 +16,7 @@ const EnvSchema = z.object({
   // Worker / executor configuration. Absent scratch path -> STREAM-only (no staged/parallel).
   SCHRODUMP_SCRATCH_PATH: z.string().min(1).optional(),
   SCHRODUMP_SCRATCH_MAX_BYTES: z.coerce.number().int().default(107374182400), // 100 GiB
-  SCHRODUMP_MAX_CONCURRENT_STAGED: z.coerce.number().int().default(2),
+  SCHRODUMP_MAX_CONCURRENT_STAGED: z.coerce.number().int().min(1).default(2),
   SCHRODUMP_EXECUTOR_NETWORK: z.string().default("schrodump_targets"),
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.

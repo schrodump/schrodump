@@ -83,9 +83,10 @@ link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- Restore retorna **501**: o worker já consome jobs `PENDING` (o backup encadeia o verify), mas o
-  executor de RESTORE não está ligado — a orquestração existe como função pura; o executor que a
-  roda, não. Um `RESTORE` que chegasse à fila é recusado como kind não suportado.
+- **Restore está implementado ponta a ponta:** a rota enfileira, o worker despacha `RESTORE` e
+  roda o pipeline real (download → decrypt → restore). O que falta é mais fino: seleção de
+  sub-escopo (hoje é sempre restore completo), identidade em memória para artefatos sealed (hoje
+  passa por disco) e verify de `FULL_RESTORE`.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.

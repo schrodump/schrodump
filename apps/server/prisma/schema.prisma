@@ -292,7 +292,7 @@ model BackupJob {
   kind           JobKind   @default(BACKUP)
   state          JobState  @default(PENDING)
   correlationId  String
-  // The artifact a VERIFY job targets. Null for BACKUP/RESTORE jobs. Structural link so the
+  // The artifact a VERIFY/RESTORE job targets. Null for BACKUP jobs. Structural link so the
   // worker never parses correlationId.
   artifactId     String?
   // RESTORE-only: { target, confirmExistingDatabase, triggeredByUserId }. Null for BACKUP/VERIFY.
