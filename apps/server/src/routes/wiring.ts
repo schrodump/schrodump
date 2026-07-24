@@ -12,7 +12,7 @@ import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.
 import { testTargetConnection, type EngineName, type TestConnectionResult } from "../probe/test-connection.js";
 import type { DestinationStore } from "./destinations.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
-import type { JobsService } from "./jobs.js";
+import type { ArtifactRecord, JobsService } from "./jobs.js";
 
 export function prismaDestinationStore(prisma: PrismaClient, organizationId: string): DestinationStore {
   const db = scopedPrisma(prisma, organizationId);
@@ -138,6 +138,46 @@ async function probeTarget(
   });
 }
 
+// BigInt -> number: the DB stores artifact sizes as BigInt, which Fastify cannot serialize (it
+// throws, and the whole /artifacts response 500s). Narrow them here and drop internal columns.
+export function toArtifactRecord(row: {
+  id: string;
+  jobId: string;
+  destinationId: string;
+  state: string;
+  bucketKey: string;
+  manifestKey: string;
+  engine: string;
+  serverVersionNum: number;
+  sizeRawBytes: bigint;
+  sizeCompressedBytes: bigint;
+  checksumAlgorithm: string;
+  checksum: string;
+  compression: string;
+  keyIds: string[];
+  dependsOn: string[];
+  createdAt: Date;
+}): ArtifactRecord {
+  return {
+    id: row.id,
+    jobId: row.jobId,
+    destinationId: row.destinationId,
+    state: row.state,
+    bucketKey: row.bucketKey,
+    manifestKey: row.manifestKey,
+    engine: row.engine,
+    serverVersionNum: row.serverVersionNum,
+    sizeRawBytes: Number(row.sizeRawBytes),
+    sizeCompressedBytes: Number(row.sizeCompressedBytes),
+    checksumAlgorithm: row.checksumAlgorithm,
+    checksum: row.checksum,
+    compression: row.compression,
+    keyIds: row.keyIds,
+    dependsOn: row.dependsOn,
+    createdAt: row.createdAt,
+  };
+}
+
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
 export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsService {
   const enqueue = async (organizationId: string, kind: "BACKUP" | "VERIFY", correlationId: string): Promise<string> => {
@@ -151,8 +191,10 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
   return {
     listJobs: (organizationId) =>
       scopedPrisma(prisma, organizationId).backupJob.findMany({ orderBy: { createdAt: "desc" } }),
-    listArtifacts: (organizationId) =>
-      scopedPrisma(prisma, organizationId).artifact.findMany({ orderBy: { createdAt: "desc" } }),
+    listArtifacts: async (organizationId) =>
+      (await scopedPrisma(prisma, organizationId).artifact.findMany({ orderBy: { createdAt: "desc" } })).map(
+        toArtifactRecord,
+      ),
     // Real dispatch (probe / descriptor / runner composition) is handled by the worker that picks
     // up the PENDING job; here we only enqueue it.
     enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", `backup:${policyId}`),

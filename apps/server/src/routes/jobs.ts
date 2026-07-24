@@ -5,9 +5,31 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
 
+// The API shape of an artifact. Mirrors the DB row but with BigInt sizes narrowed to number, and
+// without internal columns (organizationId, updatedAt). Fastify cannot serialize BigInt, so the
+// raw row must never reach the response — see toArtifactRecord in wiring.ts.
+export interface ArtifactRecord {
+  id: string;
+  jobId: string;
+  destinationId: string;
+  state: string;
+  bucketKey: string;
+  manifestKey: string;
+  engine: string;
+  serverVersionNum: number;
+  sizeRawBytes: number;
+  sizeCompressedBytes: number;
+  checksumAlgorithm: string;
+  checksum: string;
+  compression: string;
+  keyIds: string[];
+  dependsOn: string[];
+  createdAt: Date;
+}
+
 export interface JobsService {
   listJobs(organizationId: string): Promise<unknown[]>;
-  listArtifacts(organizationId: string): Promise<unknown[]>;
+  listArtifacts(organizationId: string): Promise<ArtifactRecord[]>;
   // Enqueue a manual BACKUP job for a policy; returns the jobId.
   enqueueBackup(organizationId: string, policyId: string): Promise<string>;
   // Enqueue a VERIFY job for an artifact.

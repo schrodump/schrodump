@@ -8,7 +8,27 @@ import { jobsRoutes, type JobsService } from "./jobs.js";
 
 const service: JobsService = {
   listJobs: () => Promise.resolve([{ id: "j1" }]),
-  listArtifacts: () => Promise.resolve([{ id: "a1" }]),
+  listArtifacts: () =>
+    Promise.resolve([
+      {
+        id: "a1",
+        jobId: "j1",
+        destinationId: "d1",
+        state: "UNOBSERVED",
+        bucketKey: "org/backup.age",
+        manifestKey: "org/backup.manifest.json",
+        engine: "postgres",
+        serverVersionNum: 160002,
+        sizeRawBytes: 9_000_000_000,
+        sizeCompressedBytes: 1_500_000_000,
+        checksumAlgorithm: "sha256",
+        checksum: "abc",
+        compression: "zstd",
+        keyIds: ["age1..."],
+        dependsOn: [],
+        createdAt: new Date("2026-07-01T00:00:00.000Z"),
+      },
+    ]),
   enqueueBackup: () => Promise.resolve("job-b"),
   enqueueVerify: () => Promise.resolve("job-v"),
   testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 160002, failure: null, driverCode: null }),
