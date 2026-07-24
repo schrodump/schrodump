@@ -17,6 +17,46 @@ permissions:
   contents: read
 
 jobs:
+  readme-sync:
+    name: readme translations in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Needs the base branch to diff against.
+          fetch-depth: 0
+
+      # README.md is the source of truth; the translations mirror it. This catches the common
+      # miss — editing the English README and forgetting the others — by requiring all three to be
+      # touched together. It checks that the files changed, NOT that they say the same thing;
+      # semantic equivalence is on the author. base_ref is only set on pull requests, so pushes
+      # skip. It is put through env rather than interpolated into the shell on purpose.
+      - name: English README changes require the translations
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -z "${BASE_REF:-}" ]; then
+            echo "not a pull request; nothing to enforce"
+            exit 0
+          fi
+          git fetch --quiet origin "$BASE_REF"
+          changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
+          if ! echo "$changed" | grep -qx 'README.md'; then
+            echo "README.md unchanged; nothing to enforce"
+            exit 0
+          fi
+          missing=0
+          for translation in README.pt-BR.md README.es.md; do
+            if ! echo "$changed" | grep -qx "$translation"; then
+              echo "README.md changed but $translation did not — update all three in the same PR."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+          echo "all READMEs updated together"
+
   check:
     name: check (node ${{ matrix.node }})
     runs-on: ubuntu-latest

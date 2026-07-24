@@ -89,6 +89,17 @@ setado — são `describe.skipIf` de outra forma:
 - `docs/roadmap.md` registra o que ficou **fora do v1** e por quê (backup físico/PITR, agent em
   Go, Object Lock, notificações) e as **limitações conhecidas** que embarcam no v1.
 
+## READMEs — sincronia obrigatória
+
+O projeto tem três READMEs: `README.md` (inglês, **fonte de verdade**), `README.pt-BR.md` e
+`README.es.md`. Eles são o mesmo documento em três idiomas.
+
+**Regra:** qualquer mudança de conteúdo no `README.md` deve atualizar os três no **mesmo commit/PR**.
+Corrigir só uma tradução (typo, gramática) sem tocar no inglês é permitido. O job `readme-sync` do
+`ci.yml` cobra a direção que importa: inglês mudou → traduções têm que mudar junto. Ele detecta que
+os arquivos foram tocados, não equivalência semântica — manter o sentido igual é responsabilidade de
+quem edita.
+
 ## Header SPDX (obrigatório)
 
 Todo arquivo-fonte começa com — inclusive `Dockerfile`, workflows e `.mjs`:
