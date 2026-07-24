@@ -2,34 +2,34 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it, vi } from "vitest";
-import { startWorker } from "./worker-loop.js";
+import { startLoop } from "./loop.js";
 
-describe("startWorker", () => {
-  it("drains on each tick and stops cleanly", async () => {
-    const drainQueue = vi.fn(() => Promise.resolve(1));
-    const handle = startWorker({ drainQueue, intervalMs: 5 });
+describe("startLoop", () => {
+  it("runs the tick on each interval and stops cleanly", async () => {
+    const tick = vi.fn(() => Promise.resolve(1));
+    const handle = startLoop({ tick, intervalMs: 5 });
     await new Promise((r) => setTimeout(r, 25));
     handle.stop();
-    const callsAtStop = drainQueue.mock.calls.length;
+    const callsAtStop = tick.mock.calls.length;
     expect(callsAtStop).toBeGreaterThanOrEqual(1);
     await new Promise((r) => setTimeout(r, 20));
-    expect(drainQueue.mock.calls.length).toBe(callsAtStop); // no ticks after stop
+    expect(tick.mock.calls.length).toBe(callsAtStop); // no ticks after stop
   });
 
-  it("never overlaps drains", async () => {
+  it("never overlaps ticks", async () => {
     let active = 0;
     let sawOverlap = false;
-    const drainQueue = vi.fn(async () => {
+    const tick = vi.fn(async () => {
       active += 1;
       if (active > 1) sawOverlap = true;
       await new Promise((r) => setTimeout(r, 10));
       active -= 1;
       return 0;
     });
-    const handle = startWorker({ drainQueue, intervalMs: 1 });
+    const handle = startLoop({ tick, intervalMs: 1 });
     await new Promise((r) => setTimeout(r, 40));
     handle.stop();
     expect(sawOverlap).toBe(false);
-    expect(drainQueue.mock.calls.length).toBeGreaterThan(1);
+    expect(tick.mock.calls.length).toBeGreaterThan(1);
   });
 });

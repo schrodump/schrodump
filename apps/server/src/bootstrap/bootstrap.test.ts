@@ -18,6 +18,7 @@ function baseEnv(over: Partial<Env> = {}): Env {
     SCHRODUMP_MAX_CONCURRENT_STAGED: 2,
     SCHRODUMP_EXECUTOR_NETWORK: "schrodump_targets",
     WORKER_POLL_MS: 2000,
+    SCHRODUMP_SCHEDULER_TICK_MS: 30000,
     ...over,
   };
 }

@@ -7,18 +7,18 @@ import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
 import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
 import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
-import { startWorker, installShutdown } from "./jobs/worker-loop.js";
+import { startLoop, installShutdown } from "./jobs/loop.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
-import { recoverOrphanedJobs } from "./scheduler/scheduler.js";
-import { prismaSchedulerStore } from "./scheduler/wiring.js";
+import { dispatchDueJobs, recoverOrphanedJobs } from "./scheduler/scheduler.js";
+import { cronEvaluator, prismaSchedulerStore } from "./scheduler/wiring.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
 import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
-import { createLogger } from "./observability/pino.js";
+import { createLogger, newCorrelationId } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
 import { createJobsService, prismaDestinationStore, prismaPolicyStore } from "./routes/wiring.js";
 
@@ -111,11 +111,11 @@ export async function main(): Promise<void> {
   const store = createWorkerStore(prisma);
   const executor = createJobExecutor({ prisma, kek, env });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
-  const handle = startWorker({
+  const handle = startLoop({
     intervalMs: env.WORKER_POLL_MS,
     // A drain-level throw (claim query fails, tryLock throws) must be logged, not swallowed, or a
     // wedged worker goes silent. Per-job crashes are already handled inside drainQueue.
-    drainQueue: () =>
+    tick: () =>
       withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps))
         .then((n) => n ?? 0)
         .catch((err) => {
@@ -124,12 +124,27 @@ export async function main(): Promise<void> {
         }),
   });
 
-  // 3. Graceful shutdown: stop the loop before exit (scratch of an in-flight job is released by
+  // 3. Scheduler: evaluate enabled policies and dispatch due backup jobs on a tick. Its OWN
+  //    advisory-lock key (not the worker's), so scheduling and draining run independently, each
+  //    single-flight across replicas. currentWindow looks back, so a window missed while the
+  //    process was down is still created on the next tick — idempotent by (policyId, scheduledAt).
+  const SCHEDULER_LOCK_KEY = 0x5343_4852_444d_5032n; // "SCHRDMP2"
+  const schedulerDeps = { store: schedulerStore, cron: cronEvaluator(), now: () => new Date(), newCorrelationId };
+  const schedulerHandle = startLoop({
+    intervalMs: env.SCHRODUMP_SCHEDULER_TICK_MS,
+    tick: () =>
+      withAdvisoryLock(lock, SCHEDULER_LOCK_KEY, () => dispatchDueJobs(schedulerDeps)).catch((err) => {
+        logger.error({ err }, "scheduler dispatch tick failed");
+      }),
+  });
+
+  // 4. Graceful shutdown: stop both loops before exit (scratch of an in-flight job is released by
   //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
   //    Also drop the dedicated advisory-lock connection so its session lock is released promptly.
   installShutdown({
     onSignal: async () => {
       handle.stop();
+      schedulerHandle.stop();
       await advisoryLockPrisma.$disconnect();
     },
   });
