@@ -4,6 +4,8 @@
 // The worker brain: claim one job, dispatch by kind, chain backup -> verify. Deliberately free of
 // I/O so it is unit-tested with fakes; the real store/executor are assembled in worker-wiring.ts.
 
+import type { VerifyLevel } from "./verify.js";
+
 export interface ClaimedJob {
   id: string;
   organizationId: string;
@@ -13,7 +15,7 @@ export interface ClaimedJob {
   correlationId: string;
 }
 
-export type VerifyLevel = "NONE" | "CHECKSUM" | "FULL_RESTORE";
+export type { VerifyLevel };
 
 export interface BackupResult {
   ok: boolean;

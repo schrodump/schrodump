@@ -71,12 +71,28 @@ describe("runWorkerOnce", () => {
     expect(store.failJob).not.toHaveBeenCalled(); // the pure job already set FAILED via its ports
   });
 
+  it("does not chain when backup.ok is false even if artifactId is non-null", async () => {
+    const { deps, store } = makeDeps({
+      jobs: [backupJob],
+      backup: () => Promise.resolve({ ok: false, artifactId: "a1", verifyLevel: "CHECKSUM" }),
+    });
+    await runWorkerOnce(deps);
+    expect(store.enqueueVerify).not.toHaveBeenCalled();
+  });
+
   it("runs a VERIFY job and chains nothing", async () => {
     const runVerify = vi.fn(() => Promise.resolve());
     const { deps, store } = makeDeps({ jobs: [verifyJob], verify: runVerify });
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(runVerify).toHaveBeenCalledOnce();
     expect(store.enqueueVerify).not.toHaveBeenCalled();
+  });
+
+  it("catches runVerify throw and fails the job with a sanitized reason", async () => {
+    const runVerify = vi.fn(() => Promise.reject(new Error("database connection failed")));
+    const { deps, store } = makeDeps({ jobs: [verifyJob], verify: runVerify });
+    expect(await runWorkerOnce(deps)).toBe("ran");
+    expect(store.failJob).toHaveBeenCalledWith("j2", "sanitized");
   });
 
   it("fails an unsupported kind", async () => {
