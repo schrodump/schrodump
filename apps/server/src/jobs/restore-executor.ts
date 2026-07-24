@@ -32,6 +32,7 @@ import { createGunzip } from "node:zlib";
 import { Decrypter } from "age-encryption";
 import { z } from "zod";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
+import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { EngineKind } from "@schrodump/core/types";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
@@ -220,15 +221,37 @@ async function restoreOne(
   // reaches the decrypt/gunzip pipeline. (age-decrypt and gunzip errors carry no secret; they pass
   // through as-is — e.g. gunzip's "unexpected end of file" on a truncated stream.)
   const ciphertext = new PassThrough();
-  source.on("error", () => ciphertext.destroy(new Error("restore source stream failed")));
+  source.on("error", () =>
+    ciphertext.destroy(
+      new SchrodumpError("restore source stream failed", {
+        code: "RESTORE_SOURCE_FAILED",
+        correlationId: deps.correlationId,
+      }),
+    ),
+  );
   source.pipe(ciphertext);
 
   try {
     // Decrypt in-process (age Decrypter), then gunzip into the scratch file (0600). No container, no
     // runner stdin: the writable end is a FILE, and the ciphertext never crosses a hijacked Docker
     // attach — the two failure modes the earlier stdin pipelines had.
-    const decrypted = await decryptStream(ciphertext, deps.ageIdentity);
-    await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 }));
+    try {
+      const decrypted = await decryptStream(ciphertext, deps.ageIdentity);
+      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 }));
+    } catch (err) {
+      // A source error rewritten above already carries RESTORE_SOURCE_FAILED and surfaces here
+      // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
+      // through unchanged rather than re-wrapping it as a decrypt failure. Everything else here is a
+      // genuine age-decrypt or gunzip failure (e.g. zlib's "unexpected end of file" on a truncated
+      // stream); its message carries no secret but is kept out of BackupJob.reason regardless, in
+      // `cause`, so the reason stays a stable, generic string.
+      if (err instanceof SchrodumpError) throw err;
+      throw new SchrodumpError("restore decrypt failed", {
+        code: "RESTORE_DECRYPT_FAILED",
+        correlationId: deps.correlationId,
+        cause: err,
+      });
+    }
 
     // Flush the staged dump to disk before another process, in another container, reads it. The
     // pipeline resolves once Node closes its own write fd, which leaves the bytes in the page cache;
@@ -250,7 +273,10 @@ async function restoreOne(
       correlationId: deps.correlationId,
     });
     if (restoreResult.exitCode !== 0) {
-      throw new Error(`restore execution failed (exit code ${restoreResult.exitCode})`);
+      throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
+        code: "RESTORE_EXECUTOR_FAILED",
+        correlationId: deps.correlationId,
+      });
     }
   } finally {
     // Release the S3 read stream. On success it has already ended (fully consumed by the decrypt);
