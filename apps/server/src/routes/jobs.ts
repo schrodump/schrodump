@@ -34,6 +34,12 @@ export interface JobsService {
   enqueueBackup(organizationId: string, policyId: string): Promise<string>;
   // Enqueue a VERIFY job for an artifact.
   enqueueVerify(organizationId: string, artifactId: string): Promise<string>;
+  // Enqueue a RESTORE job for an artifact; params are persisted on the job's restoreParams.
+  enqueueRestore(
+    organizationId: string,
+    artifactId: string,
+    params: { target: string; confirmExistingDatabase: boolean; triggeredByUserId: string },
+  ): Promise<string>;
   // Probe the target to test connectivity. Returns a failure CODE, never a driver message:
   // driver errors embed the credential they failed with.
   testConnection(

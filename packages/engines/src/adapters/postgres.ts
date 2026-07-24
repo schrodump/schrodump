@@ -103,6 +103,11 @@ export const postgresAdapter: EngineAdapter = {
       connection.database,
       "--clean",
       "--if-exists",
+      // Without this, pg_restore ignores per-object errors and STILL exits 0 ("errors ignored on
+      // restore: N"). The executor reads success from the exit code, so a dump that restored only
+      // partially would report SUCCEEDED — a failed restore reporting ok, which the thesis forbids.
+      // Safe with --clean --if-exists (the DROPs don't error on absent objects).
+      "--exit-on-error",
       ...schemaArgs,
     ];
     if (input.sourcePath !== undefined) {
@@ -110,6 +115,26 @@ export const postgresAdapter: EngineAdapter = {
       return { image, command, env: connEnv(connection), outputKind: "directory" };
     }
     return { image, command, env: connEnv(connection), outputKind: "stdout" };
+  },
+
+  // globals.bin is plain SQL (pg_dumpall --globals-only), which pg_restore cannot read; restore it
+  // with psql reading the script on stdin (-f -). Deliberately WITHOUT ON_ERROR_STOP: pg_dumpall
+  // always emits `CREATE ROLE <bootstrap>` (e.g. postgres), and every real target — including a
+  // freshly initdb'd cluster — already has that role, so a strict run would abort on the
+  // always-expected "role already exists". Globals restore is best-effort by standard pg_dumpall
+  // practice; the per-database restore (buildRestore, above) uses pg_restore --exit-on-error to fail
+  // on real data errors. Run first so roles/tablespaces exist before the per-database restore.
+  buildGlobalsRestore(input) {
+    const connection = input.connection;
+    const command = ["psql", ...connArgs(connection), "-d", connection.database, "-f"];
+    if (input.sourcePath !== undefined) {
+      // Read the globals SQL from the mounted dump file instead of stdin (the staged-file pipeline).
+      command.push(input.sourcePath);
+      return { image: this.imageFor(input.serverVersionNum), command, env: connEnv(connection), outputKind: "directory" };
+    }
+    // No sourcePath: read the script on stdin (`-f -`).
+    command.push("-");
+    return { image: this.imageFor(input.serverVersionNum), command, env: connEnv(connection), outputKind: "stdout" };
   },
 
   buildVerifyAssertions(input) {

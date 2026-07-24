@@ -210,6 +210,21 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
     // up the PENDING job; here we only enqueue it.
     enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", { policyId }),
     enqueueVerify: (organizationId, artifactId) => enqueue(organizationId, "VERIFY", { artifactId }),
+    enqueueRestore: async (organizationId, artifactId, params) => {
+      const db = scopedPrisma(prisma, organizationId);
+      const job = await db.backupJob.create({
+        data: {
+          organizationId,
+          kind: "RESTORE",
+          state: "PENDING",
+          correlationId: `restore:${artifactId}`,
+          artifactId,
+          restoreParams: params,
+        },
+        select: { id: true },
+      });
+      return job.id;
+    },
     testConnection: (organizationId, targetId) => probeTarget(prisma, kek, organizationId, targetId),
   };
 }

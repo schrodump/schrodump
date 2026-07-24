@@ -5,20 +5,18 @@
 // pair, and a large dump encrypted as a single GCM stream silently exceeds it. age's STREAM
 // construction already solves chunking, per-chunk authentication and truncation detection.
 //
-// Encryption/decryption run the audited `age` BINARY in an ephemeral executor via the runner —
-// no reimplementation. Key GENERATION uses the official age JS library (age-encryption).
+// Encryption (backup-wiring) and decryption (restore-executor) both run IN-PROCESS via the official
+// age JS library (age-encryption) — its Encrypter/Decrypter, and generateX25519Identity for key
+// generation. An earlier design ran the age binary in an ephemeral executor and fed data over the
+// runner's stdin; that path used a hijacked Docker attach whose demux intermittently corrupted the
+// stream, so both directions moved in-process. This module now only holds the age key/recipient
+// helpers shared by both directions.
 //
 // Pipeline order is fixed: dump -> compression -> encryption. Never inverted (compressing
 // ciphertext is useless and leaks nothing; encrypting first would defeat compression).
 
 import { createHash } from "node:crypto";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
-import type { ExecutionDescriptor } from "@schrodump/core/execution";
-
-// Executor image carrying the audited `age` binary (built separately, like the engine executors).
-const AGE_IMAGE = "schrodump/age:1";
-// Where the runner mounts the decryption identity — never passed on argv.
-const AGE_IDENTITY_PATH = "/etc/schrodump/age-identity";
 
 export interface AgeKeyPair {
   // AGE-SECRET-KEY-1... — held server-side (operational) or offline by the operator (escrow).
@@ -60,31 +58,6 @@ export function resolveRecipients(keys: EncryptionKeyRecord[]): {
   return {
     recipients: [operational.publicRecipient, escrow.publicRecipient],
     keyIds: [operational.keyId, escrow.keyId],
-  };
-}
-
-export function buildAgeEncryptDescriptor(recipients: string[]): ExecutionDescriptor {
-  if (recipients.length < 2) {
-    throw new Error("artifact encryption requires at least two recipients (operational + escrow)");
-  }
-  // Public recipients are safe on argv; the identity (secret) never is (see decrypt below).
-  const recipientArgs = recipients.flatMap((recipient) => ["-r", recipient]);
-  return {
-    image: AGE_IMAGE,
-    command: ["age", "--encrypt", ...recipientArgs],
-    env: {},
-    outputKind: "stdout",
-  };
-}
-
-export function buildAgeDecryptDescriptor(): ExecutionDescriptor {
-  // The identity is delivered as a mounted file at AGE_IDENTITY_PATH (from the operational key,
-  // or supplied in-memory by the operator in sealed mode) — never on argv.
-  return {
-    image: AGE_IMAGE,
-    command: ["age", "--decrypt", "-i", AGE_IDENTITY_PATH],
-    env: {},
-    outputKind: "stdout",
   };
 }
 

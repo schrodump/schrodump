@@ -3,37 +3,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  buildAgeDecryptDescriptor,
-  buildAgeEncryptDescriptor,
   generateAgeKeyPair,
   recipientFingerprint,
   resolveDecryptionKeyId,
   resolveRecipients,
   type EncryptionKeyRecord,
 } from "./artifact.js";
-
-describe("buildAgeEncryptDescriptor", () => {
-  it("emits one -r per recipient and reads/writes via stdout", () => {
-    const descriptor = buildAgeEncryptDescriptor(["age1op", "age1escrow"]);
-    expect(descriptor.command).toEqual(["age", "--encrypt", "-r", "age1op", "-r", "age1escrow"]);
-    expect(descriptor.outputKind).toBe("stdout");
-    expect(descriptor.env).toEqual({});
-  });
-
-  it("refuses fewer than two recipients (operational + escrow are mandatory)", () => {
-    expect(() => buildAgeEncryptDescriptor(["age1op"])).toThrow();
-  });
-});
-
-describe("buildAgeDecryptDescriptor", () => {
-  it("references a mounted identity file, never argv", () => {
-    const descriptor = buildAgeDecryptDescriptor();
-    expect(descriptor.command).toEqual(["age", "--decrypt", "-i", "/etc/schrodump/age-identity"]);
-    for (const arg of descriptor.command) {
-      expect(arg).not.toContain("AGE-SECRET-KEY");
-    }
-  });
-});
 
 describe("resolveRecipients", () => {
   const keys: EncryptionKeyRecord[] = [

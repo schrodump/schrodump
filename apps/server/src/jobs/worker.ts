@@ -13,6 +13,9 @@ export interface ClaimedJob {
   policyId: string | null;
   artifactId: string | null;
   correlationId: string;
+  // RESTORE-only: { target, confirmExistingDatabase, triggeredByUserId }. Null for BACKUP/VERIFY.
+  // Validated by restoreParamsOf before use.
+  restoreParams: unknown;
 }
 
 export type { VerifyLevel };
@@ -29,6 +32,8 @@ export interface JobExecutor {
   runBackup(job: ClaimedJob): Promise<BackupResult>;
   // Runs verify (which sets the job AND artifact terminal state via its own ports).
   runVerify(job: ClaimedJob): Promise<void>;
+  // Runs restore (which sets the RESTORE job's terminal state via its own ports).
+  runRestore(job: ClaimedJob): Promise<void>;
 }
 
 export interface WorkerStore {
@@ -62,6 +67,8 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
       backup = await deps.executor.runBackup(job);
     } else if (job.kind === "VERIFY") {
       await deps.executor.runVerify(job);
+    } else if (job.kind === "RESTORE") {
+      await deps.executor.runRestore(job);
     } else {
       await deps.store.failJob(job.id, `unsupported job kind: ${job.kind}`);
     }

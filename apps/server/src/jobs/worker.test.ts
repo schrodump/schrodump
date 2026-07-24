@@ -12,16 +12,17 @@ import {
 } from "./worker.js";
 
 const backupJob: ClaimedJob = {
-  id: "j1", organizationId: "o1", kind: "BACKUP", policyId: "p1", artifactId: null, correlationId: "backup:p1",
+  id: "j1", organizationId: "o1", kind: "BACKUP", policyId: "p1", artifactId: null, correlationId: "backup:p1", restoreParams: null,
 };
 const verifyJob: ClaimedJob = {
-  id: "j2", organizationId: "o1", kind: "VERIFY", policyId: null, artifactId: "a1", correlationId: "verify:a1",
+  id: "j2", organizationId: "o1", kind: "VERIFY", policyId: null, artifactId: "a1", correlationId: "verify:a1", restoreParams: null,
 };
 
 function makeDeps(over: {
   jobs?: (ClaimedJob | null)[];
   backup?: JobExecutor["runBackup"];
   verify?: JobExecutor["runVerify"];
+  restore?: JobExecutor["runRestore"];
   enqueueVerify?: WorkerStore["enqueueVerify"];
 }): {
   deps: WorkerDeps;
@@ -39,6 +40,7 @@ function makeDeps(over: {
   const executor: JobExecutor = {
     runBackup: over.backup ?? (() => Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "CHECKSUM" })),
     runVerify: over.verify ?? (() => Promise.resolve()),
+    runRestore: over.restore ?? (() => Promise.resolve()),
   };
   const log = { info: vi.fn(), error: vi.fn() };
   return {
@@ -111,6 +113,18 @@ describe("runWorkerOnce", () => {
     expect(store.enqueueVerify).not.toHaveBeenCalled();
   });
 
+  it("dispatches a RESTORE job to runRestore and chains nothing", async () => {
+    const runRestore = vi.fn(() => Promise.resolve());
+    const restoreJob: ClaimedJob = {
+      id: "j4", organizationId: "o1", kind: "RESTORE", policyId: null, artifactId: "a1", correlationId: "restore:a1",
+      restoreParams: { target: "DATABASE", confirmExistingDatabase: false, triggeredByUserId: "u1" },
+    };
+    const { deps, store } = makeDeps({ jobs: [restoreJob], restore: runRestore });
+    expect(await runWorkerOnce(deps)).toBe("ran");
+    expect(runRestore).toHaveBeenCalledOnce();
+    expect(store.enqueueVerify).not.toHaveBeenCalled();
+  });
+
   it("catches runVerify throw and fails the job with a sanitized reason", async () => {
     const runVerify = vi.fn(() => Promise.reject(new Error("database connection failed")));
     const { deps, store } = makeDeps({ jobs: [verifyJob], verify: runVerify });
@@ -119,10 +133,10 @@ describe("runWorkerOnce", () => {
   });
 
   it("fails an unsupported kind", async () => {
-    const restore: ClaimedJob = { ...verifyJob, id: "j3", kind: "RESTORE", artifactId: null };
-    const { deps, store } = makeDeps({ jobs: [restore] });
+    const unknownJob: ClaimedJob = { ...verifyJob, id: "j3", kind: "UNKNOWN" as unknown as ClaimedJob["kind"] };
+    const { deps, store } = makeDeps({ jobs: [unknownJob] });
     expect(await runWorkerOnce(deps)).toBe("ran");
-    expect(store.failJob).toHaveBeenCalledWith("j3", expect.stringContaining("RESTORE"));
+    expect(store.failJob).toHaveBeenCalledWith("j3", expect.stringContaining("UNKNOWN"));
   });
 
   it("catches a thrown executor and fails the job with a sanitized reason", async () => {

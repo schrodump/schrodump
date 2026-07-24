@@ -196,6 +196,9 @@ class DockerodeEngine implements DockerEngine {
     };
 
     const container = await this.#docker.createContainer(createOptions);
+    // Read-only attach: stdout/stderr only, no stdin. Feeding a container's stdin needs a hijacked
+    // attach whose demux intermittently leaks attach-protocol framing into the stdout stream —
+    // corrupting it. No executor needs stdin (dumps read from the DB, restores read a mounted file).
     const attachStream = await container.attach({ stream: true, stdout: true, stderr: true });
     const stdout = new PassThrough();
     const stderr = new PassThrough();

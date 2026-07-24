@@ -2,7 +2,12 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { EngineDescriptorError, type DumpInput, type TargetConnection } from "../descriptor.js";
+import {
+  EngineDescriptorError,
+  type DumpInput,
+  type RestoreInput,
+  type TargetConnection,
+} from "../descriptor.js";
 import { postgresAdapter } from "./postgres.js";
 
 const CONN: TargetConnection = {
@@ -118,5 +123,65 @@ describe("postgresAdapter.buildGlobalsDump", () => {
       "--globals-only",
     ]);
     expect(descriptor?.outputKind).toBe("stdout");
+  });
+});
+
+describe("postgresAdapter.buildGlobalsRestore", () => {
+  const restoreInput: RestoreInput = {
+    connection: CONN,
+    serverVersionNum: 160002,
+    target: "FULL_CLUSTER",
+    scope: { databases: ["app"], schemas: [], collections: [] },
+  };
+
+  it("emits psql -f - reading the globals SQL on stdin, WITHOUT ON_ERROR_STOP", () => {
+    // pg_dumpall always emits CREATE ROLE for the bootstrap role, which exists on every cluster;
+    // ON_ERROR_STOP would make that always-expected conflict abort the restore. Globals restore is
+    // best-effort (standard pg_dumpall practice) — the per-database restore keeps ON_ERROR_STOP.
+    const descriptor = postgresAdapter.buildGlobalsRestore?.(restoreInput);
+    expect(descriptor?.command).toEqual(["psql", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app", "-f", "-"]);
+    expect(descriptor?.command).not.toContain("ON_ERROR_STOP=1");
+    expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
+  });
+
+  it("emits psql -f <sourcePath> reading the globals SQL from the mounted file, still WITHOUT ON_ERROR_STOP", () => {
+    // The staged-file pipeline mounts the decrypted globals script and passes its path; psql reads
+    // the file instead of stdin. The best-effort stance (no ON_ERROR_STOP) is unchanged.
+    const descriptor = postgresAdapter.buildGlobalsRestore?.({
+      ...restoreInput,
+      sourcePath: "/var/lib/schrodump/restore-source",
+    });
+    expect(descriptor?.command).toEqual([
+      "psql", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app",
+      "-f", "/var/lib/schrodump/restore-source",
+    ]);
+    expect(descriptor?.command).not.toContain("-");
+    expect(descriptor?.command).not.toContain("ON_ERROR_STOP=1");
+    expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
+  });
+});
+
+describe("postgresAdapter.buildRestore", () => {
+  const restoreInput: RestoreInput = {
+    connection: CONN,
+    serverVersionNum: 160002,
+    target: "DATABASE",
+    scope: { databases: ["app"], schemas: [], collections: [] },
+  };
+
+  it("runs pg_restore --clean --if-exists --exit-on-error, reading the mounted dump as a file", () => {
+    // --exit-on-error is load-bearing: without it pg_restore ignores per-object failures and STILL
+    // exits 0, which the executor reads as SUCCEEDED — a partially-restored dump reporting ok, the
+    // exact failure the thesis forbids. --clean --if-exists keeps the DROPs from erroring on absent
+    // objects. The dump is a mounted positional file (sourcePath), never a second stdin.
+    const descriptor = postgresAdapter.buildRestore({
+      ...restoreInput,
+      sourcePath: "/var/lib/schrodump/restore-source",
+    });
+    expect(descriptor.command).toEqual([
+      "pg_restore", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app",
+      "--clean", "--if-exists", "--exit-on-error", "/var/lib/schrodump/restore-source",
+    ]);
+    expect(descriptor.env.PGPASSWORD).toBe("s3cret");
   });
 });

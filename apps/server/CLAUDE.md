@@ -78,14 +78,19 @@ link de setup.
 2. **Fingerprint da KEK** — SHA-256 de material derivado (nunca a chave), gravado no `AppConfig`
    no 1º boot; boot falha se divergir. É por isso que trocar a KEK contra um banco existente
    recusa o boot em vez de gerar artefatos que ninguém abre.
-3. **Artefatos** — `age` (binário via runner, execução diferida), sempre 2 recipients
-   (operacional + escrow). Pipeline: dump → compressão → criptografia (nunca inverter).
+3. **Artefatos** — `age` **in-process** via a lib `age-encryption` (`Encrypter` no backup,
+   `Decrypter` no restore; keygen pela mesma lib), sempre 2 recipients (operacional + escrow). Não
+   há executor `age`: cifrar/decifrar num container exigia stdin sobre attach hijacked, cujo demux
+   corrompia o stream. Pipeline: dump → compressão → criptografia (nunca inverter).
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- Restore retorna **501**: o worker já consome jobs `PENDING` (o backup encadeia o verify), mas o
-  executor de RESTORE não está ligado — a orquestração existe como função pura; o executor que a
-  roda, não. Um `RESTORE` que chegasse à fila é recusado como kind não suportado.
+- **Restore roda ponta a ponta só para PostgreSQL:** a rota enfileira, o worker despacha `RESTORE` e
+  roda o pipeline real (download → decrypt in-process → gunzip → arquivo montado → `pg_restore`). Os
+  descritores `buildRestore` de mysql/mongo não foram adaptados ao executor staged-file nem passaram
+  por smoke, então `runRestoreJob` recusa não-postgres com erro claro e a UI desabilita o botão
+  (backup/verify dessas engines seguem normais). O que falta: adaptar+smoke por engine, seleção de
+  sub-escopo (hoje sempre restore completo) e verify de `FULL_RESTORE`.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.

@@ -31,6 +31,7 @@ const service: JobsService = {
     ]),
   enqueueBackup: () => Promise.resolve("job-b"),
   enqueueVerify: () => Promise.resolve("job-v"),
+  enqueueRestore: () => Promise.resolve("job-r"),
   testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 160002, failure: null, driverCode: null }),
 };
 

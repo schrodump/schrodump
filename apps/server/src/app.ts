@@ -67,7 +67,7 @@ export function buildApp(deps: AppDeps) {
     return Promise.resolve();
   });
   app.register((instance) => {
-    restoreRoutes(deps.resolver)(instance);
+    restoreRoutes(deps.resolver, deps.jobsService)(instance);
     return Promise.resolve();
   });
   app.register((instance) => {
