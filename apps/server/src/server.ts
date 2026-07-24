@@ -10,6 +10,8 @@ import { drainQueue } from "./jobs/worker.js";
 import { startWorker, installShutdown } from "./jobs/worker-loop.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
+import { recoverOrphanedJobs } from "./scheduler/scheduler.js";
+import { prismaSchedulerStore } from "./scheduler/wiring.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
@@ -91,19 +93,21 @@ export async function main(): Promise<void> {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
 
   // --- worker boot ---
-  // 1. Orphan recovery: a RUNNING job at boot belongs to a process that died.
-  const recovered = await prisma.backupJob.updateMany({
-    where: { state: "RUNNING" },
-    data: { state: "FAILED", finishedAt: new Date(), reason: "orphaned by process restart" },
-  });
-  if (recovered.count > 0) logger.info({ count: recovered.count }, "recovered orphaned jobs");
-
-  // 2. Single-flight worker (advisory lock keeps one replica draining).
   const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
+  const lock = pgAdvisoryLock(prisma);
+
+  // 1. Orphan recovery: a RUNNING job at boot belongs to a process that died. Gated under the same
+  //    advisory lock as the drain loop below: BackupJob has no owner/lease column, so a replica
+  //    booting mid rolling-restart could otherwise mark another LIVE replica's RUNNING job FAILED.
+  //    null means another holder has the lock — a live replica, so recovery is correctly skipped.
+  const schedulerStore = prismaSchedulerStore(prisma);
+  const recovered = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () => recoverOrphanedJobs(schedulerStore));
+  if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
+
+  // 2. Single-flight worker (same advisory lock keeps one replica draining).
   const store = createWorkerStore(prisma);
   const executor = createJobExecutor({ prisma, kek, env });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
-  const lock = pgAdvisoryLock(prisma);
   const handle = startWorker({
     intervalMs: env.WORKER_POLL_MS,
     drainQueue: () => withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps)).then((n) => n ?? 0),

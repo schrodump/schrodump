@@ -30,5 +30,6 @@ describe("startWorker", () => {
     await new Promise((r) => setTimeout(r, 40));
     handle.stop();
     expect(sawOverlap).toBe(false);
+    expect(drainQueue.mock.calls.length).toBeGreaterThan(1);
   });
 });
