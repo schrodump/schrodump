@@ -295,6 +295,8 @@ model BackupJob {
   // The artifact a VERIFY job targets. Null for BACKUP/RESTORE jobs. Structural link so the
   // worker never parses correlationId.
   artifactId     String?
+  // RESTORE-only: { target, confirmExistingDatabase, triggeredByUserId }. Null for BACKUP/VERIFY.
+  restoreParams  Json?
   startedAt      DateTime?
   finishedAt     DateTime?
   exitCode       Int?
