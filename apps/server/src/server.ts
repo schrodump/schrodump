@@ -24,7 +24,7 @@ function deriveAuthSecret(kek: Buffer): string {
   return createHash("sha256").update(kek).update("schrodump-better-auth").digest("hex");
 }
 
-async function driverForDestination(
+export async function driverForDestination(
   prisma: PrismaClient,
   kek: Buffer,
   organizationId: string,
