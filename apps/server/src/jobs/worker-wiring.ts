@@ -22,10 +22,10 @@ import { ScratchManager } from "@schrodump/runner/scratch";
 import { resolveRecipients, type EncryptionKeyRecord } from "../crypto/artifact.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
 import type { Env } from "../env.js";
-import { driverForDestination } from "../server.js";
 import { createBackupPorts } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
+import { driverForDestination } from "./destination-driver.js";
 import { createVerifyPorts } from "./verify-wiring.js";
 import { runVerifyJob, type VerifyLevel } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
@@ -97,13 +97,28 @@ export function toBackupProbe(rich: EngineProbeResult): ProbeResult {
   };
 }
 
-// The verify level a VERIFY job runs at: the originating policy's level, or CHECKSUM when there is
-// no policy. FULL_RESTORE is downgraded to CHECKSUM because the restore executor it needs is a
-// documented v1 gap (restore returns 501); failing a good artifact against a verifier that does not
-// exist would corrupt the central UNOBSERVED/VERIFIED/FAILED distinction.
-export function resolveVerifyLevel(policyLevel: VerifyLevel | null): VerifyLevel {
-  const level: VerifyLevel = policyLevel ?? "CHECKSUM";
-  return level === "FULL_RESTORE" ? "CHECKSUM" : level;
+export interface VerifyPlan {
+  // The level verify actually runs at.
+  effectiveLevel: VerifyLevel;
+  // Non-null when the requested level was degraded — recorded on the job so the downgrade is
+  // visible, exactly like verify.ts's sealed-destination downgrade.
+  downgradeReason: string | null;
+}
+
+// The plan a VERIFY job runs under: the originating policy's level (CHECKSUM when there is no
+// policy), and whether that level was degraded. FULL_RESTORE is downgraded to CHECKSUM because the
+// restore executor it needs is a documented v1 gap (restore returns 501); running CHECKSUM and
+// recording the downgrade keeps a good artifact VERIFIED instead of corrupting the central
+// UNOBSERVED/VERIFIED/FAILED distinction by failing it against a verifier that does not exist.
+export function resolveVerifyPlan(policyLevel: VerifyLevel | null): VerifyPlan {
+  const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
+  if (requested === "FULL_RESTORE") {
+    return {
+      effectiveLevel: "CHECKSUM",
+      downgradeReason: "restore executor unavailable: FULL_RESTORE downgraded to CHECKSUM",
+    };
+  }
+  return { effectiveLevel: requested, downgradeReason: null };
 }
 
 // The database the probe/dump connects THROUGH. For SQL engines it is a real database (the first
@@ -359,7 +374,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
-    const verifyLevel = resolveVerifyLevel(policyLevel);
+    const plan = resolveVerifyPlan(policyLevel);
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -378,16 +393,27 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       bucketKey: artifact.bucketKey,
       // The checksum recorded at upload IS the manifest's checksum of the stored object.
       manifestChecksum: artifact.checksum,
-      // FULL_RESTORE is capped to CHECKSUM above, so this is unreachable; it stays honest about the
-      // v1 gap rather than pretending to verify.
+      // FULL_RESTORE is downgraded to CHECKSUM in the plan above, so this is unreachable; it stays
+      // honest about the v1 gap rather than pretending to verify.
       runFullRestore: () => Promise.reject(new Error("FULL_RESTORE verify is not wired in v1")),
-      setJobState: (state, reason) => setJobState(job.id, state, reason),
+      // Surface the downgrade: verify.ts marks a passing CHECKSUM as ("SUCCEEDED", undefined); when
+      // we degraded FULL_RESTORE, rewrite that one terminal call so BackupJob.reason records why.
+      setJobState: (state, reason) => {
+        const withDowngrade =
+          plan.downgradeReason !== null && state === "SUCCEEDED" && reason === undefined
+            ? plan.downgradeReason
+            : reason;
+        return setJobState(job.id, state, withDowngrade);
+      },
       setArtifactState: async (state) => {
         await prisma.artifact.update({ where: { id: artifact.id }, data: { state } });
       },
     });
 
-    await runVerifyJob({ jobId: job.id, artifactId: artifact.id, verifyLevel, sealed }, ports);
+    await runVerifyJob(
+      { jobId: job.id, artifactId: artifact.id, verifyLevel: plan.effectiveLevel, sealed },
+      ports,
+    );
   };
 
   return { runBackup, runVerify };

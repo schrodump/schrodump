@@ -2,17 +2,14 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
-import { createS3Driver } from "@schrodump/storage/s3";
-import type { StorageDriver } from "@schrodump/storage/driver";
 import { buildApp } from "./app.js";
 import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
 import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
+import { driverForDestination } from "./jobs/destination-driver.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
-import { decryptCredential, parseEncryptedCredential } from "./crypto/envelope.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
-import { scopedPrisma } from "./data/scope.js";
 import { createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./observability/pino.js";
@@ -22,29 +19,6 @@ import { createJobsService, prismaDestinationStore, prismaPolicyStore } from "./
 // A stable per-instance auth secret derived from the KEK when none is configured explicitly.
 function deriveAuthSecret(kek: Buffer): string {
   return createHash("sha256").update(kek).update("schrodump-better-auth").digest("hex");
-}
-
-export async function driverForDestination(
-  prisma: PrismaClient,
-  kek: Buffer,
-  organizationId: string,
-  destinationId: string,
-): Promise<{ driver: StorageDriver; prefix: string } | null> {
-  const dest = await scopedPrisma(prisma, organizationId).storageDestination.findFirst({
-    where: { id: destinationId },
-  });
-  if (dest === null) return null;
-  const secret = decryptCredential(kek, parseEncryptedCredential(dest.encryptedSecretAccessKey));
-  const driver = createS3Driver({
-    ...(dest.endpoint !== null ? { endpoint: dest.endpoint } : {}),
-    region: dest.region,
-    bucket: dest.bucket,
-    prefix: dest.prefix,
-    accessKeyId: dest.accessKeyId,
-    secretAccessKey: secret,
-    forcePathStyle: dest.forcePathStyle,
-  });
-  return { driver, prefix: dest.prefix };
 }
 
 async function destinationCanary(
