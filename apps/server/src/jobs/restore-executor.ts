@@ -22,7 +22,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, rm, writeFile } from "node:fs/promises";
+import { chmod, open, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -238,6 +238,19 @@ async function restoreOne(
       pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 })),
       sourceError,
     ]);
+
+    // Flush the staged dump to disk before another process, in another container, reads it. The
+    // pipeline resolves once Node closes its own write fd, which leaves the bytes in the page cache;
+    // the restore executor reads the file through a separate mount, so it must see the full length,
+    // not a short read. fsync forces the data + size metadata out. It also settles the file's view
+    // across Docker Desktop's virtiofs share, where a just-written host file can otherwise appear
+    // truncated in the container for a beat (a dev-only artifact; Linux bind mounts are coherent).
+    const dumpHandle = await open(dumpPath, "r");
+    try {
+      await dumpHandle.sync();
+    } finally {
+      await dumpHandle.close();
+    }
 
     // Success is StatusCode 0, never inferred from EOF: a process that ran without complaint proves
     // nothing. Check the age exit code only after its output is fully staged.
