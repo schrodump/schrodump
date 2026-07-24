@@ -6,9 +6,19 @@ import { pipeline } from "node:stream/promises";
 import Docker from "dockerode";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
-import type { RunOptions, RunResult, Runner } from "./runner.js";
+import type {
+  EphemeralServiceHandle,
+  EphemeralServiceSpec,
+  RunOptions,
+  RunResult,
+  Runner,
+} from "./runner.js";
+
+export type { EphemeralServiceHandle, EphemeralServiceSpec } from "./runner.js";
 
 const STDERR_LIMIT_BYTES = 8 * 1024;
+// How often withEphemeralService polls readinessCommand while waiting for the service to come up.
+const SERVICE_READINESS_POLL_MS = 250;
 
 export interface ContainerSpec {
   readonly image: string;
@@ -30,9 +40,18 @@ export interface StartedContainer {
   remove(): Promise<void>;
 }
 
+// A running ephemeral SERVICE container (as opposed to StartedContainer's one-shot exit-and-remove
+// shape): still up, reachable at `host`, and probed via `exec` until ready.
+export interface StartedService {
+  readonly host: string; // in-network address of the container
+  exec(command: string[]): Promise<number>; // runs command in the container, returns exit code
+  remove(): Promise<void>; // force-remove
+}
+
 export interface DockerEngine {
   networkExists(name: string): Promise<boolean>;
   start(spec: ContainerSpec): Promise<StartedContainer>;
+  startService(spec: EphemeralServiceSpec): Promise<StartedService>;
 }
 
 export class DockerRunner implements Runner {
@@ -113,6 +132,45 @@ export class DockerRunner implements Runner {
       await container.remove().catch(() => undefined);
     }
   }
+
+  async withEphemeralService<T>(
+    spec: EphemeralServiceSpec,
+    use: (handle: EphemeralServiceHandle) => Promise<T>,
+  ): Promise<T> {
+    const svc = await this.#engine.startService(spec);
+
+    try {
+      await this.#waitUntilReady(svc, spec);
+      return await use({ host: svc.host, port: spec.port });
+    } finally {
+      // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw
+      // or readiness never arrived.
+      await svc.remove().catch(() => undefined);
+    }
+  }
+
+  async #waitUntilReady(svc: StartedService, spec: EphemeralServiceSpec): Promise<void> {
+    const deadline = Date.now() + spec.readinessTimeoutMs;
+    for (;;) {
+      const exitCode = await svc.exec(spec.readinessCommand);
+      if (exitCode === 0) return;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new SchrodumpError("service did not become ready", {
+          code: "RUNNER_SERVICE_NOT_READY",
+          correlationId: spec.correlationId,
+          context: { image: spec.image },
+        });
+      }
+      // Cap the wait to whatever's left of readinessTimeoutMs, so the timeout fires on time
+      // instead of overshooting by up to one full poll interval.
+      await sleep(Math.min(SERVICE_READINESS_POLL_MS, remainingMs));
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createDockerRunner(docker?: Docker): DockerRunner {
@@ -133,10 +191,7 @@ export function sanitizeStderr(raw: string, env: Record<string, string>): string
     }
   }
   // Credentials embedded in a connection URI: scheme://user:pass@host
-  out = out.replace(
-    /([a-z][a-z0-9+.-]*:\/\/)[^\s:/@]+:[^\s:/@]+@/gi,
-    `$1${REDACTED}:${REDACTED}@`,
-  );
+  out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s:/@]+:[^\s:/@]+@/gi, `$1${REDACTED}:${REDACTED}@`);
   // password=... / password: ... option style
   out = out.replace(/\b(password|pwd)\s*[=:]\s*\S+/gi, `$1=${REDACTED}`);
   return out;
@@ -219,6 +274,46 @@ class DockerodeEngine implements DockerEngine {
       },
       kill: async () => {
         await container.kill();
+      },
+      remove: async () => {
+        await container.remove({ force: true });
+      },
+    };
+  }
+
+  async startService(spec: EphemeralServiceSpec): Promise<StartedService> {
+    const container = await this.#docker.createContainer({
+      Image: spec.image,
+      Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+      HostConfig: {
+        NetworkMode: spec.network,
+        AutoRemove: false,
+      },
+    });
+
+    await container.start();
+
+    const info = await container.inspect();
+    const ipAddress = info.NetworkSettings.Networks[spec.network]?.IPAddress;
+    // No IP yet (e.g. some network drivers resolve it only via DNS) — fall back to the
+    // container's own name, which Docker always registers as a DNS alias on user-defined networks.
+    const host =
+      ipAddress !== undefined && ipAddress.length > 0 ? ipAddress : info.Name.replace(/^\//, "");
+
+    return {
+      host,
+      exec: async (command: string[]) => {
+        const dockerExec = await container.exec({
+          Cmd: command,
+          AttachStdout: true,
+          AttachStderr: true,
+        });
+        // Read-only attach, same convention as start(): drain so the hijacked pipe never
+        // backpressures the readiness probe, we don't need its output.
+        const stream = await dockerExec.start({});
+        await drain(stream);
+        const { ExitCode } = await dockerExec.inspect();
+        return ExitCode ?? 1;
       },
       remove: async () => {
         await container.remove({ force: true });
