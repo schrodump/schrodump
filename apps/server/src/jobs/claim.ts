@@ -18,7 +18,7 @@ export async function claimNextJob(prisma: PrismaClient): Promise<ClaimedJob | n
         LIMIT 1
         FOR UPDATE SKIP LOCKED
      )
-    RETURNING id, "organizationId", kind, "policyId", "artifactId", "correlationId";
+    RETURNING id, "organizationId", kind, "policyId", "artifactId", "correlationId", "restoreParams";
   `;
   return rows[0] ?? null;
 }

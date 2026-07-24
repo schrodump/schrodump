@@ -60,6 +60,7 @@ function commandsFor(kind: EngineKind): string[][] {
     adapter.buildVerifyAssertions(verify).command,
   ];
   if (adapter.buildGlobalsDump) commands.push(adapter.buildGlobalsDump(dump).command);
+  if (adapter.buildGlobalsRestore) commands.push(adapter.buildGlobalsRestore(restore).command);
   return commands;
 }
 

@@ -112,6 +112,28 @@ export const postgresAdapter: EngineAdapter = {
     return { image, command, env: connEnv(connection), outputKind: "stdout" };
   },
 
+  // globals.bin is plain SQL (pg_dumpall --globals-only), which pg_restore cannot read; restore it
+  // with psql reading the script on stdin (-f -). ON_ERROR_STOP turns any failure into a non-zero
+  // exit. Run before the per-database restore so roles/tablespaces exist first.
+  buildGlobalsRestore(input) {
+    const connection = input.connection;
+    return {
+      image: this.imageFor(input.serverVersionNum),
+      command: [
+        "psql",
+        ...connArgs(connection),
+        "-d",
+        connection.database,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        "-",
+      ],
+      env: connEnv(connection),
+      outputKind: "stdout",
+    };
+  },
+
   buildVerifyAssertions(input) {
     const connection = input.connection;
     // Minimal restore verification: connect and count the restored user tables. ON_ERROR_STOP

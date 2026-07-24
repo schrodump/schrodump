@@ -13,6 +13,9 @@ export interface ClaimedJob {
   policyId: string | null;
   artifactId: string | null;
   correlationId: string;
+  // RESTORE-only: { target, confirmExistingDatabase, triggeredByUserId }. Null for BACKUP/VERIFY.
+  // Validated by restoreParamsOf before use.
+  restoreParams: unknown;
 }
 
 export type { VerifyLevel };

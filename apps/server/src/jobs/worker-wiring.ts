@@ -6,6 +6,7 @@
 // scopedPrisma — every query therefore filters organizationId explicitly. Credentials are decrypted
 // only to be USED (handed to a driver/probe), never shown, logged, or returned.
 
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
@@ -26,12 +27,18 @@ import { createBackupPorts } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
+import {
+  artifactBelongsToOrg,
+  createIdentityFile,
+  globalsKeyFor,
+  restoreParamsOf,
+  runRestorePipeline,
+} from "./restore-executor.js";
+import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
+import { runRestoreJob } from "./restore.js";
 import { createVerifyPorts } from "./verify-wiring.js";
 import { runVerifyJob, type VerifyLevel } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
-// TODO(Task 3): wire createRestorePorts and runRestoreJob
-// import { createRestorePorts } from "./restore-wiring.js";
-// import { runRestoreJob } from "./restore.js";
 
 // Identifies the tool that produced a manifest. No per-build version source exists yet (the server
 // package is 0.0.0); a stable literal keeps the manifest schema satisfied until one lands.
@@ -47,6 +54,14 @@ const PROBE_CONNECT_TIMEOUT_MS = 15_000;
 const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
+
+// Restore needs the full DumpScope (buildRestore reads scope.schemas for a SCHEMA target); the
+// backup path only cared about databases. Missing arrays default to empty.
+const RestoreScopeSchema = z.object({
+  databases: z.array(z.string()).default([]),
+  schemas: z.array(z.string()).default([]),
+  collections: z.array(z.string()).default([]),
+});
 
 type EngineProbeFn = (conn: ProbeConnection) => Promise<EngineProbeResult>;
 
@@ -420,9 +435,185 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
   };
 
   const runRestore = async (job: ClaimedJob): Promise<void> => {
-    // TODO(Task 3): Implement real restore executor with createRestorePorts and runRestoreJob.
-    // For now, fail the job as this is a documented v1 gap.
-    await failJob(job.id, "restore executor not yet implemented");
+    const params = restoreParamsOf(job.restoreParams);
+
+    if (job.artifactId === null) {
+      await failJob(job.id, "restore job has no target artifact");
+      return;
+    }
+
+    const artifact = await prisma.artifact.findUnique({
+      where: { id: job.artifactId },
+      include: {
+        destination: true,
+        job: { include: { policy: { include: { target: true } } } },
+      },
+    });
+    if (artifact === null) {
+      await failJob(job.id, "restore target artifact no longer exists");
+      return;
+    }
+
+    // SECURITY: the RESTORE job must reference an artifact in its OWN organization. This runs on raw
+    // prisma (system process), so the check is explicit and happens BEFORE any decrypt. A job
+    // pointing at another org's artifact is failed, never restored.
+    if (!artifactBelongsToOrg(artifact.organizationId, job.organizationId)) {
+      await failJob(job.id, "restore artifact does not belong to this organization");
+      return;
+    }
+
+    // The origin target is reached through the producing job's policy. A policy-less producer
+    // (manual/self-backup) has no target to restore into — a clear failure, not a guess.
+    const originTarget = artifact.job.policy?.target ?? null;
+    if (originTarget === null) {
+      await failJob(job.id, "cannot resolve the origin target for this artifact");
+      return;
+    }
+
+    const destination = await driverForDestination(
+      prisma,
+      deps.kek,
+      job.organizationId,
+      artifact.destinationId,
+    );
+    if (destination === null) {
+      await failJob(job.id, "restore destination unavailable");
+      return;
+    }
+
+    const engine = artifact.engine;
+    const adapter = resolveAdapter(engine);
+    const scopeParse = RestoreScopeSchema.safeParse(originTarget.scope);
+    const scope = scopeParse.success
+      ? scopeParse.data
+      : { databases: [], schemas: [], collections: [] };
+    const connectDatabase = probeDatabaseFor(engine, scope.databases);
+
+    const connectionFor = (password: string): TargetConnection => ({
+      host: originTarget.host,
+      port: originTarget.port,
+      database: connectDatabase,
+      username: originTarget.username,
+      password,
+      tls: originTarget.tls,
+    });
+
+    const wiringDeps: RestoreWiringDeps = {
+      loadArtifactRow: () =>
+        Promise.resolve({
+          manifestKeyIds: artifact.keyIds,
+          engine,
+          serverVersionNum: artifact.serverVersionNum,
+          destinationName: artifact.destination.name,
+        }),
+      availableKeys: async () => {
+        // ALL keys (active + retired): an artifact may have been encrypted with a now-retired key.
+        const keys = await prisma.encryptionKey.findMany({
+          where: { organizationId: job.organizationId },
+        });
+        return keys.map(toKeyRecord);
+      },
+      targetHasExistingData: async () => {
+        // Decrypt the credential to USE it (probe the origin target), never to show it.
+        const password = decryptCredential(
+          deps.kek,
+          parseEncryptedCredential(originTarget.encryptedCredential),
+        );
+        const probe = await PROBES[engine]({
+          host: originTarget.host,
+          port: originTarget.port,
+          database: connectDatabase,
+          username: originTarget.username,
+          password,
+          tls: originTarget.tls,
+          connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
+        });
+        // Conservative signal: any non-empty database in scope (or any probed database when the
+        // target is unscoped) counts as "holds data", so the overwrite gate errs toward requiring
+        // confirmation. A precise user-data check (table/row counts) is a follow-up; the smoke
+        // (Task 5) validates the gate.
+        const inScope =
+          scope.databases.length > 0
+            ? probe.databases.filter((database) => scope.databases.includes(database.name))
+            : probe.databases;
+        return inScope.some((database) => database.sizeBytes > 0);
+      },
+      audit: async (event) => {
+        await prisma.auditLog.create({
+          data: {
+            organizationId: job.organizationId,
+            userId: event.userId,
+            action: event.action,
+            targetType: "artifact",
+            targetId: event.artifactId,
+            correlationId: job.correlationId,
+            metadata: { destinationName: event.destinationName, keyId: event.keyId },
+          },
+        });
+      },
+      setJobState: (state, reason) => setJobState(job.id, state, reason),
+      runRestore: async (keyId: string): Promise<boolean> => {
+        // Materialize the operational identity for the key runRestoreJob resolved from the manifest.
+        const keyRow = await prisma.encryptionKey.findFirst({
+          where: { organizationId: job.organizationId, keyId },
+        });
+        if (keyRow === null || keyRow.encryptedIdentity === null) {
+          // resolveDecryptionKeyId already guaranteed an operational key that carries an identity;
+          // this is a structural guard against a corrupt row, not an expected path.
+          throw new Error("operational identity unavailable for the resolved key");
+        }
+        const ageIdentity = decryptCredential(
+          deps.kek,
+          parseEncryptedCredential(keyRow.encryptedIdentity),
+        );
+        const password = decryptCredential(
+          deps.kek,
+          parseEncryptedCredential(originTarget.encryptedCredential),
+        );
+        const connection = connectionFor(password);
+
+        return runRestorePipeline({
+          driver: destination.driver,
+          runner,
+          bucketKey: artifact.bucketKey,
+          globalsKey: globalsKeyFor(engine, artifact.serverVersionNum, artifact.bucketKey),
+          ageIdentity,
+          network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
+          timeoutMs: DUMP_TIMEOUT_MS,
+          correlationId: job.id,
+          buildRestoreDescriptor: () =>
+            adapter.buildRestore({
+              connection,
+              serverVersionNum: artifact.serverVersionNum,
+              target: params.target,
+              scope,
+            }),
+          buildGlobalsRestoreDescriptor: () =>
+            adapter.buildGlobalsRestore === undefined
+              ? null
+              : adapter.buildGlobalsRestore({
+                  connection,
+                  serverVersionNum: artifact.serverVersionNum,
+                  target: params.target,
+                  scope,
+                }),
+          writeIdentityFile: (identity) =>
+            createIdentityFile(deps.env.SCHRODUMP_SCRATCH_PATH ?? tmpdir(), job.id, identity),
+        });
+      },
+    };
+
+    await runRestoreJob(
+      {
+        jobId: job.id,
+        artifactId: artifact.id,
+        organizationId: job.organizationId,
+        userId: params.triggeredByUserId,
+        target: params.target,
+        confirmExistingDatabase: params.confirmExistingDatabase,
+      },
+      createRestorePorts(wiringDeps),
+    );
   };
 
   return { runBackup, runVerify, runRestore };

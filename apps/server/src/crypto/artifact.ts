@@ -17,8 +17,9 @@ import type { ExecutionDescriptor } from "@schrodump/core/execution";
 
 // Executor image carrying the audited `age` binary (built separately, like the engine executors).
 const AGE_IMAGE = "schrodump/age:1";
-// Where the runner mounts the decryption identity — never passed on argv.
-const AGE_IDENTITY_PATH = "/etc/schrodump/age-identity";
+// Where the runner mounts the decryption identity — never passed on argv. Exported so the restore
+// executor mounts the identity file at exactly the path the decrypt descriptor reads it from.
+export const AGE_IDENTITY_PATH = "/etc/schrodump/age-identity";
 
 export interface AgeKeyPair {
   // AGE-SECRET-KEY-1... — held server-side (operational) or offline by the operator (escrow).

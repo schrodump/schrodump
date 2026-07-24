@@ -2,7 +2,12 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { EngineDescriptorError, type DumpInput, type TargetConnection } from "../descriptor.js";
+import {
+  EngineDescriptorError,
+  type DumpInput,
+  type RestoreInput,
+  type TargetConnection,
+} from "../descriptor.js";
 import { postgresAdapter } from "./postgres.js";
 
 const CONN: TargetConnection = {
@@ -118,5 +123,34 @@ describe("postgresAdapter.buildGlobalsDump", () => {
       "--globals-only",
     ]);
     expect(descriptor?.outputKind).toBe("stdout");
+  });
+});
+
+describe("postgresAdapter.buildGlobalsRestore", () => {
+  const restoreInput: RestoreInput = {
+    connection: CONN,
+    serverVersionNum: 160002,
+    target: "FULL_CLUSTER",
+    scope: { databases: ["app"], schemas: [], collections: [] },
+  };
+
+  it("emits psql -f - reading the globals SQL on stdin (pg_restore cannot read plain SQL)", () => {
+    const descriptor = postgresAdapter.buildGlobalsRestore?.(restoreInput);
+    expect(descriptor?.command).toEqual([
+      "psql",
+      "-h",
+      "db.internal",
+      "-p",
+      "5432",
+      "-U",
+      "backup",
+      "-d",
+      "app",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-f",
+      "-",
+    ]);
+    expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
   });
 });

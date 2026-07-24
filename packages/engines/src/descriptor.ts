@@ -74,6 +74,10 @@ export interface EngineAdapter {
   // Only postgres implements this: pg_dumpall --globals-only, a descriptor separate from the
   // per-database dump (see capability `requiresSeparateGlobalsDump`).
   buildGlobalsDump?(input: DumpInput): ExecutionDescriptor;
+  // The dual of buildGlobalsDump: restore the plain-SQL globals script (roles/tablespaces) via
+  // psql. Only postgres implements it; pg_restore cannot read the plain SQL pg_dumpall emits, so
+  // globals need their own restore descriptor, run before the per-database restore.
+  buildGlobalsRestore?(input: RestoreInput): ExecutionDescriptor;
 }
 
 // Raised when an adapter refuses to produce a descriptor because doing so would be unsafe

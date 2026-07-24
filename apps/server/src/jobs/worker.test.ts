@@ -12,10 +12,10 @@ import {
 } from "./worker.js";
 
 const backupJob: ClaimedJob = {
-  id: "j1", organizationId: "o1", kind: "BACKUP", policyId: "p1", artifactId: null, correlationId: "backup:p1",
+  id: "j1", organizationId: "o1", kind: "BACKUP", policyId: "p1", artifactId: null, correlationId: "backup:p1", restoreParams: null,
 };
 const verifyJob: ClaimedJob = {
-  id: "j2", organizationId: "o1", kind: "VERIFY", policyId: null, artifactId: "a1", correlationId: "verify:a1",
+  id: "j2", organizationId: "o1", kind: "VERIFY", policyId: null, artifactId: "a1", correlationId: "verify:a1", restoreParams: null,
 };
 
 function makeDeps(over: {
@@ -117,6 +117,7 @@ describe("runWorkerOnce", () => {
     const runRestore = vi.fn(() => Promise.resolve());
     const restoreJob: ClaimedJob = {
       id: "j4", organizationId: "o1", kind: "RESTORE", policyId: null, artifactId: "a1", correlationId: "restore:a1",
+      restoreParams: { target: "DATABASE", confirmExistingDatabase: false, triggeredByUserId: "u1" },
     };
     const { deps, store } = makeDeps({ jobs: [restoreJob], restore: runRestore });
     expect(await runWorkerOnce(deps)).toBe("ran");
@@ -132,7 +133,7 @@ describe("runWorkerOnce", () => {
   });
 
   it("fails an unsupported kind", async () => {
-    const unknownJob: ClaimedJob = { ...verifyJob, id: "j3", kind: "UNKNOWN" as any };
+    const unknownJob: ClaimedJob = { ...verifyJob, id: "j3", kind: "UNKNOWN" as unknown as ClaimedJob["kind"] };
     const { deps, store } = makeDeps({ jobs: [unknownJob] });
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(store.failJob).toHaveBeenCalledWith("j3", expect.stringContaining("UNKNOWN"));
