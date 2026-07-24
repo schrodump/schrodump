@@ -25,6 +25,10 @@ export async function withAdvisoryLock<T>(
   }
 }
 
+// `prisma` MUST be a single-connection client (see createAdvisoryLockPrismaClient): a session-level
+// advisory lock lives on the connection that took it, so tryLock and unlock have to run on the same
+// one. Passing the shared pooled client would let the pool hand them different connections, and
+// pg_advisory_unlock would no-op while the lock strands.
 export function pgAdvisoryLock(prisma: PrismaClient): AdvisoryLock {
   return {
     tryLock: async (key) => {

@@ -16,7 +16,7 @@ import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
-import { createPrismaClient, type PrismaClient } from "./db.js";
+import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
@@ -94,7 +94,10 @@ export async function main(): Promise<void> {
 
   // --- worker boot ---
   const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
-  const lock = pgAdvisoryLock(prisma);
+  // The advisory lock must hold on ONE pinned connection for the whole drain; the shared client
+  // pools freely, so it gets its own single-connection client (never used for API/drain queries).
+  const advisoryLockPrisma = createAdvisoryLockPrismaClient(env.DATABASE_URL);
+  const lock = pgAdvisoryLock(advisoryLockPrisma);
 
   // 1. Orphan recovery: a RUNNING job at boot belongs to a process that died. Gated under the same
   //    advisory lock as the drain loop below: BackupJob has no owner/lease column, so a replica
@@ -110,10 +113,24 @@ export async function main(): Promise<void> {
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startWorker({
     intervalMs: env.WORKER_POLL_MS,
-    drainQueue: () => withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps)).then((n) => n ?? 0),
+    // A drain-level throw (claim query fails, tryLock throws) must be logged, not swallowed, or a
+    // wedged worker goes silent. Per-job crashes are already handled inside drainQueue.
+    drainQueue: () =>
+      withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps))
+        .then((n) => n ?? 0)
+        .catch((err) => {
+          logger.error({ err }, "worker drain tick failed");
+          return 0;
+        }),
   });
 
   // 3. Graceful shutdown: stop the loop before exit (scratch of an in-flight job is released by
   //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
-  installShutdown({ onSignal: () => { handle.stop(); } });
+  //    Also drop the dedicated advisory-lock connection so its session lock is released promptly.
+  installShutdown({
+    onSignal: async () => {
+      handle.stop();
+      await advisoryLockPrisma.$disconnect();
+    },
+  });
 }
