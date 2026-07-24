@@ -6,29 +6,37 @@ import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/
 import { resolveVerifyPlan, sanitizeReason, toBackupProbe } from "./worker-wiring.js";
 
 describe("resolveVerifyPlan", () => {
-  it("downgrades FULL_RESTORE to CHECKSUM and records the reason", () => {
-    expect(resolveVerifyPlan("FULL_RESTORE")).toEqual({
-      effectiveLevel: "CHECKSUM",
-      downgradeReason: "restore executor unavailable: FULL_RESTORE downgraded to CHECKSUM",
+  it("keeps FULL_RESTORE for postgres with no downgrade", () => {
+    expect(resolveVerifyPlan("FULL_RESTORE", "postgres")).toEqual({
+      effectiveLevel: "FULL_RESTORE",
+      downgradeReason: null,
     });
   });
 
+  it("downgrades FULL_RESTORE to CHECKSUM for non-postgres engines with a PostgreSQL-only reason", () => {
+    for (const engine of ["mysql", "mariadb", "mongodb"] as const) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(plan.downgradeReason).toMatch(/PostgreSQL only/i);
+    }
+  });
+
   it("keeps CHECKSUM unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("CHECKSUM")).toEqual({
+    expect(resolveVerifyPlan("CHECKSUM", "mysql")).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
   });
 
   it("keeps NONE unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("NONE")).toEqual({
+    expect(resolveVerifyPlan("NONE", "postgres")).toEqual({
       effectiveLevel: "NONE",
       downgradeReason: null,
     });
   });
 
   it("defaults a missing policy level to CHECKSUM without a downgrade", () => {
-    expect(resolveVerifyPlan(null)).toEqual({
+    expect(resolveVerifyPlan(null, "postgres")).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
