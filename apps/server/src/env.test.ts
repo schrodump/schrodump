@@ -10,6 +10,7 @@ describe("loadEnv worker config", () => {
   it("applies defaults when the worker vars are absent", () => {
     const env = loadEnv({ ...base } as NodeJS.ProcessEnv);
     expect(env.SCHRODUMP_SCRATCH_PATH).toBeUndefined();
+    expect(env.SCHRODUMP_SCRATCH_MAX_BYTES).toBe(107374182400);
     expect(env.SCHRODUMP_MAX_CONCURRENT_STAGED).toBe(2);
     expect(env.SCHRODUMP_EXECUTOR_NETWORK).toBe("schrodump_targets");
     expect(env.WORKER_POLL_MS).toBe(2000);
