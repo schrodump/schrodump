@@ -17,6 +17,8 @@ export interface ContainerSpec {
   readonly network: string;
   readonly mounts: readonly { source: string; target: string; readOnly: boolean }[];
   readonly workdir?: string;
+  // Source piped into the container's stdin; only set when RunOptions.stdin is provided.
+  readonly stdin?: Readable;
 }
 
 // The Docker surface DockerRunner depends on. A real dockerode-backed impl (DockerodeEngine)
@@ -61,6 +63,7 @@ export class DockerRunner implements Runner {
       network: opts.network,
       mounts: opts.mounts,
       ...(descriptor.workdir !== undefined ? { workdir: descriptor.workdir } : {}),
+      ...(opts.stdin !== undefined ? { stdin: opts.stdin } : {}),
     });
 
     const stderr = captureStderr(container.stderr, STDERR_LIMIT_BYTES);
@@ -180,6 +183,7 @@ class DockerodeEngine implements DockerEngine {
   }
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
+    const hasStdin = spec.stdin !== undefined;
     const createOptions: Docker.ContainerCreateOptions = {
       Image: spec.image,
       Cmd: spec.command,
@@ -187,6 +191,10 @@ class DockerodeEngine implements DockerEngine {
       Tty: false,
       AttachStdout: true,
       AttachStderr: true,
+      // Only opened when the caller supplies stdin (restore); the backup path never sets it,
+      // so behavior there is unchanged. StdinOnce closes the container's stdin for good once
+      // the host side ends it — no reopening after EOF.
+      ...(hasStdin ? { OpenStdin: true, AttachStdin: true, StdinOnce: true } : {}),
       HostConfig: {
         NetworkMode: spec.network,
         AutoRemove: false,
@@ -196,7 +204,14 @@ class DockerodeEngine implements DockerEngine {
     };
 
     const container = await this.#docker.createContainer(createOptions);
-    const attachStream = await container.attach({ stream: true, stdout: true, stderr: true });
+    const attachStream = await container.attach({
+      stream: true,
+      stdout: true,
+      stderr: true,
+      // hijack + stdin upgrade the attach connection to a duplex socket we can write into;
+      // without them the connection is read-only, same as before stdin support existed.
+      ...(hasStdin ? { stdin: true, hijack: true } : {}),
+    });
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     container.modem.demuxStream(attachStream, stdout, stderr);
@@ -204,6 +219,12 @@ class DockerodeEngine implements DockerEngine {
       stdout.end();
       stderr.end();
     });
+
+    if (spec.stdin !== undefined) {
+      // Ends attachStream's write side when the source is exhausted, so the container sees
+      // EOF on its stdin (paired with StdinOnce above) instead of hanging forever.
+      pipeline(spec.stdin, attachStream).catch(() => undefined);
+    }
 
     await container.start();
 
