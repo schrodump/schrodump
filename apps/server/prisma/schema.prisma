@@ -292,6 +292,9 @@ model BackupJob {
   kind           JobKind   @default(BACKUP)
   state          JobState  @default(PENDING)
   correlationId  String
+  // The artifact a VERIFY job targets. Null for BACKUP/RESTORE jobs. Structural link so the
+  // worker never parses correlationId.
+  artifactId     String?
   startedAt      DateTime?
   finishedAt     DateTime?
   exitCode       Int?
@@ -302,9 +305,10 @@ model BackupJob {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  policy       BackupPolicy? @relation(fields: [policyId], references: [id])
-  artifact     Artifact?
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policy         BackupPolicy? @relation(fields: [policyId], references: [id])
+  artifact       Artifact?     @relation("ProducedBy")
+  verifyArtifact Artifact?     @relation("VerifyTarget", fields: [artifactId], references: [id])
 
   @@unique([policyId, scheduledAt])
   @@index([organizationId])
@@ -334,8 +338,9 @@ model Artifact {
   updatedAt           DateTime      @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  job          BackupJob          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job          BackupJob          @relation("ProducedBy", fields: [jobId], references: [id], onDelete: Cascade)
   destination  StorageDestination @relation(fields: [destinationId], references: [id])
+  verifyJobs   BackupJob[]        @relation("VerifyTarget")
 
   @@index([organizationId])
   @@index([organizationId, state])

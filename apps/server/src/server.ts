@@ -2,18 +2,21 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
-import { createS3Driver } from "@schrodump/storage/s3";
-import type { StorageDriver } from "@schrodump/storage/driver";
 import { buildApp } from "./app.js";
 import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
 import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
+import { driverForDestination } from "./jobs/destination-driver.js";
+import { drainQueue } from "./jobs/worker.js";
+import { startWorker, installShutdown } from "./jobs/worker-loop.js";
+import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
+import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
+import { recoverOrphanedJobs } from "./scheduler/scheduler.js";
+import { prismaSchedulerStore } from "./scheduler/wiring.js";
 import { betterAuthResolver, createAuth } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
-import { decryptCredential, parseEncryptedCredential } from "./crypto/envelope.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
-import { scopedPrisma } from "./data/scope.js";
-import { createPrismaClient, type PrismaClient } from "./db.js";
+import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
 import { createLogger } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
@@ -22,29 +25,6 @@ import { createJobsService, prismaDestinationStore, prismaPolicyStore } from "./
 // A stable per-instance auth secret derived from the KEK when none is configured explicitly.
 function deriveAuthSecret(kek: Buffer): string {
   return createHash("sha256").update(kek).update("schrodump-better-auth").digest("hex");
-}
-
-async function driverForDestination(
-  prisma: PrismaClient,
-  kek: Buffer,
-  organizationId: string,
-  destinationId: string,
-): Promise<{ driver: StorageDriver; prefix: string } | null> {
-  const dest = await scopedPrisma(prisma, organizationId).storageDestination.findFirst({
-    where: { id: destinationId },
-  });
-  if (dest === null) return null;
-  const secret = decryptCredential(kek, parseEncryptedCredential(dest.encryptedSecretAccessKey));
-  const driver = createS3Driver({
-    ...(dest.endpoint !== null ? { endpoint: dest.endpoint } : {}),
-    region: dest.region,
-    bucket: dest.bucket,
-    prefix: dest.prefix,
-    accessKeyId: dest.accessKeyId,
-    secretAccessKey: secret,
-    forcePathStyle: dest.forcePathStyle,
-  });
-  return { driver, prefix: dest.prefix };
 }
 
 async function destinationCanary(
@@ -111,4 +91,46 @@ export async function main(): Promise<void> {
   });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
+
+  // --- worker boot ---
+  const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
+  // The advisory lock must hold on ONE pinned connection for the whole drain; the shared client
+  // pools freely, so it gets its own single-connection client (never used for API/drain queries).
+  const advisoryLockPrisma = createAdvisoryLockPrismaClient(env.DATABASE_URL);
+  const lock = pgAdvisoryLock(advisoryLockPrisma);
+
+  // 1. Orphan recovery: a RUNNING job at boot belongs to a process that died. Gated under the same
+  //    advisory lock as the drain loop below: BackupJob has no owner/lease column, so a replica
+  //    booting mid rolling-restart could otherwise mark another LIVE replica's RUNNING job FAILED.
+  //    null means another holder has the lock — a live replica, so recovery is correctly skipped.
+  const schedulerStore = prismaSchedulerStore(prisma);
+  const recovered = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () => recoverOrphanedJobs(schedulerStore));
+  if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
+
+  // 2. Single-flight worker (same advisory lock keeps one replica draining).
+  const store = createWorkerStore(prisma);
+  const executor = createJobExecutor({ prisma, kek, env });
+  const workerDeps = { store, executor, log: logger, sanitizeReason };
+  const handle = startWorker({
+    intervalMs: env.WORKER_POLL_MS,
+    // A drain-level throw (claim query fails, tryLock throws) must be logged, not swallowed, or a
+    // wedged worker goes silent. Per-job crashes are already handled inside drainQueue.
+    drainQueue: () =>
+      withAdvisoryLock(lock, WORKER_LOCK_KEY, () => drainQueue(workerDeps))
+        .then((n) => n ?? 0)
+        .catch((err) => {
+          logger.error({ err }, "worker drain tick failed");
+          return 0;
+        }),
+  });
+
+  // 3. Graceful shutdown: stop the loop before exit (scratch of an in-flight job is released by
+  //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
+  //    Also drop the dedicated advisory-lock connection so its session lock is released promptly.
+  installShutdown({
+    onSignal: async () => {
+      handle.stop();
+      await advisoryLockPrisma.$disconnect();
+    },
+  });
 }

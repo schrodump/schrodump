@@ -10,8 +10,9 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 - `jobs/` — lógica de cada job (backup, verify, restore, retention, catalog-rebuild,
   self-backup) como funções + o `-wiring.ts` que as liga ao Prisma/runner/storage.
 - `scheduler/` — avalia policies e cria jobs. É **processo de sistema**, não requisição de
-  tenant: é o **único lugar** com query cross-organization. Idempotente por
-  `(policyId, scheduledAt)`; recuperação de órfãos marca `RUNNING → FAILED` no boot.
+  tenant: lê policies cross-organization e escreve jobs `organizationId`-scoped. Idempotente por
+  `(policyId, scheduledAt)`; recuperação de órfãos marca `RUNNING → FAILED` no boot. O worker
+  (`jobs/claim.ts` + `jobs/worker-wiring.ts`) é o outro processo de sistema com o mesmo status.
 - `crypto/` — os três domínios de cripto (abaixo). `probe/` — teste de conexão real.
 - `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — o `scopedPrisma`.
 
@@ -19,7 +20,9 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 
 - **Todo modelo de domínio carrega `organizationId`.** Sem exceção, inclusive em rota interna.
   O acesso é sempre via `scopedPrisma(orgId)` (client extension que injeta `organizationId`);
-  esquecer o filtro é impossível, não só difícil. A exceção é o scheduler, acima.
+  esquecer o filtro é impossível, não só difícil. As exceções são os processos de sistema — o
+  scheduler e o worker (`jobs/claim.ts`, `jobs/worker-wiring.ts`) —, que usam prisma cru e filtram
+  `organizationId` explicitamente em cada query.
 - **Toda entrada de rota passa por Zod antes do Prisma.** O vetor é objeto não validado indo
   para `where` — `express-mongo-sanitize` e afins NÃO protegem o Prisma.
 - **Credencial é write-only da perspectiva do usuário.** Nunca é decriptada para **exibir**.
@@ -46,14 +49,15 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 
 ## Env (o que o server realmente lê)
 
-`env.ts` valida com Zod e lê **apenas**: `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`,
-`SCHRODUMP_URL`, `SCHRODUMP_ADMIN_EMAIL`, `SCHRODUMP_ADMIN_PASSWORD`. Os `ADMIN_*` são
-`min(1)` — passar string vazia é valor **inválido**, não "não setado", e derruba o boot;
-deixe-os ausentes para criar o admin pelo link de setup.
+`env.ts` valida com Zod. Além de `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,
+`SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (e `BETTER_AUTH_SECRET`/`LOG_LEVEL`), agora lê
+a config de worker/executor: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
+`SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK` e `WORKER_POLL_MS`. Scratch path
+ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — passar string vazia é
+valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
+link de setup.
 
-> **Gap:** o `compose.yaml` passa `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
-> `SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK` e `DOCKER_HOST` — que o
-> `env.ts` **ainda não lê**. A wiring de scratch/executor do worker consome isso quando entrar.
+> **Nota:** `DOCKER_HOST` não passa pelo `env.ts` — o runner (dockerode) o lê direto do ambiente.
 
 ## Prisma
 
@@ -79,8 +83,9 @@ deixe-os ausentes para criar o admin pelo link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- Restore retorna **501**: a execução (dump→compress→encrypt→upload consumindo jobs `PENDING`)
-  ainda não está ligada. Orquestração existe como função pura; o loop consumidor não.
+- Restore retorna **501**: o worker já consome jobs `PENDING` (o backup encadeia o verify), mas o
+  executor de RESTORE não está ligado — a orquestração existe como função pura; o executor que a
+  roda, não. Um `RESTORE` que chegasse à fila é recusado como kind não suportado.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.

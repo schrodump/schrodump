@@ -4,6 +4,10 @@
 import type { Writable } from "node:stream";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 
+// The concrete Docker-backed Runner, surfaced on the package's primary entry so composers depend
+// on `@schrodump/runner/runner` rather than the docker.ts implementation module.
+export { createDockerRunner } from "./docker.js";
+
 export interface RunMount {
   readonly source: string;
   readonly target: string;

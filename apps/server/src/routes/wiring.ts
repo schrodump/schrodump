@@ -180,10 +180,21 @@ export function toArtifactRecord(row: {
 
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
 export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsService {
-  const enqueue = async (organizationId: string, kind: "BACKUP" | "VERIFY", correlationId: string): Promise<string> => {
+  const enqueue = async (
+    organizationId: string,
+    kind: "BACKUP" | "VERIFY",
+    ref: { policyId: string } | { artifactId: string },
+  ): Promise<string> => {
     const db = scopedPrisma(prisma, organizationId);
+    const correlationId = "policyId" in ref ? `backup:${ref.policyId}` : `verify:${ref.artifactId}`;
     const job = await db.backupJob.create({
-      data: { organizationId, kind, state: "PENDING", correlationId },
+      data: {
+        organizationId,
+        kind,
+        state: "PENDING",
+        correlationId,
+        ...("policyId" in ref ? { policyId: ref.policyId } : { artifactId: ref.artifactId }),
+      },
       select: { id: true },
     });
     return job.id;
@@ -197,8 +208,8 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
       ),
     // Real dispatch (probe / descriptor / runner composition) is handled by the worker that picks
     // up the PENDING job; here we only enqueue it.
-    enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", `backup:${policyId}`),
-    enqueueVerify: (organizationId, artifactId) => enqueue(organizationId, "VERIFY", `verify:${artifactId}`),
+    enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", { policyId }),
+    enqueueVerify: (organizationId, artifactId) => enqueue(organizationId, "VERIFY", { artifactId }),
     testConnection: (organizationId, targetId) => probeTarget(prisma, kek, organizationId, targetId),
   };
 }

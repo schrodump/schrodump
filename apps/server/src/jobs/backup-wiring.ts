@@ -80,7 +80,15 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       partSize: PART_SIZE,
       metadata: {},
     });
-    await runPromise;
+    // A process that ran without complaint proves nothing: a non-zero exit means the dump did not
+    // produce the data. Throw BEFORE returning so runBackupJob's catch marks the job FAILED and no
+    // artifact is persisted — the alternative is an empty/failed dump uploaded, born UNOBSERVED, and
+    // auto-verified green, the exact outcome the product thesis forbids. The message carries only the
+    // exit code; the runner's stderr is sanitized but stays out of here regardless.
+    const result = await runPromise;
+    if (result.exitCode !== 0) {
+      throw new Error(`dump execution failed (exit code ${result.exitCode})`);
+    }
     return { checksum: hash.digest("hex"), sizeBytes };
   };
 
