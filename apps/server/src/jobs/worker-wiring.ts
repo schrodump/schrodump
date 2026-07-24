@@ -28,7 +28,6 @@ import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
 import {
   artifactBelongsToOrg,
-  createIdentityFile,
   globalsKeyFor,
   restoreParamsOf,
   restoreScopeOf,
@@ -55,9 +54,11 @@ const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 
-// Restore writes the decryption identity to disk; it MUST land on the configured scratch volume
-// (gc-swept, and host-encrypted in the deploy), never a tmpdir fallback — the operational identity
-// decrypts every artifact for the org. A tiny reservation estimate: the identity is ~100 bytes.
+// Restore writes the decryption identity AND the decrypted cleartext dump to disk; they MUST land
+// on the configured scratch volume (gc-swept, and host-encrypted in the deploy), never a tmpdir
+// fallback — the operational identity decrypts every artifact for the org. The reservation estimate
+// stays deliberately small (the identity is ~100 bytes): v1 restore is single-stream with no
+// size-based staging, so the dump is not pre-sized against free space here.
 const IDENTITY_SCRATCH_BYTES = 4096;
 const RESTORE_SCRATCH_REQUIRED_REASON =
   "restore requires a configured scratch path for the decryption identity";
@@ -604,14 +605,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
           timeoutMs: DUMP_TIMEOUT_MS,
           correlationId: job.id,
-          buildRestoreDescriptor: () =>
+          buildRestoreDescriptor: (sourcePath) =>
             adapter.buildRestore({
               connection,
               serverVersionNum: artifact.serverVersionNum,
               target: params.target,
               scope,
+              sourcePath,
             }),
-          buildGlobalsRestoreDescriptor: () =>
+          buildGlobalsRestoreDescriptor: (sourcePath) =>
             adapter.buildGlobalsRestore === undefined
               ? null
               : adapter.buildGlobalsRestore({
@@ -619,25 +621,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   serverVersionNum: artifact.serverVersionNum,
                   target: params.target,
                   scope,
+                  sourcePath,
                 }),
-          writeIdentityFile: async (identity) => {
-            // I1: reserve a per-job scratch DIRECTORY (ScratchManager.gc() reclaims a directory if a
-            // hard kill skips the finally unlink; a bare root file would be skipped by gc). Write the
-            // 0600 identity inside it; cleanup unlinks the file and releases the reservation.
+          reserveStaging: async () => {
+            // I1: reserve the per-job scratch DIRECTORY (ScratchManager.gc() reclaims it if a hard
+            // kill skips the finally cleanup; a bare root file would be skipped by gc). It holds the
+            // 0600 identity AND the decrypted cleartext dump files; runRestorePipeline removes both
+            // in finally, and release() recursively removes the dir as a backstop.
             const reservation = await scratch.reserve(job.id, IDENTITY_SCRATCH_BYTES);
-            try {
-              const file = await createIdentityFile(reservation.path, job.id, identity);
-              return {
-                path: file.path,
-                cleanup: async () => {
-                  await file.cleanup();
-                  await reservation.release();
-                },
-              };
-            } catch (err) {
-              await reservation.release();
-              throw err;
-            }
+            return { dir: reservation.path, cleanup: () => reservation.release() };
           },
         });
       },

@@ -121,12 +121,15 @@ export const postgresAdapter: EngineAdapter = {
   // roles/tablespaces exist before the per-database restore.
   buildGlobalsRestore(input) {
     const connection = input.connection;
-    return {
-      image: this.imageFor(input.serverVersionNum),
-      command: ["psql", ...connArgs(connection), "-d", connection.database, "-f", "-"],
-      env: connEnv(connection),
-      outputKind: "stdout",
-    };
+    const command = ["psql", ...connArgs(connection), "-d", connection.database, "-f"];
+    if (input.sourcePath !== undefined) {
+      // Read the globals SQL from the mounted dump file instead of stdin (the staged-file pipeline).
+      command.push(input.sourcePath);
+      return { image: this.imageFor(input.serverVersionNum), command, env: connEnv(connection), outputKind: "directory" };
+    }
+    // No sourcePath: read the script on stdin (`-f -`).
+    command.push("-");
+    return { image: this.imageFor(input.serverVersionNum), command, env: connEnv(connection), outputKind: "stdout" };
   },
 
   buildVerifyAssertions(input) {

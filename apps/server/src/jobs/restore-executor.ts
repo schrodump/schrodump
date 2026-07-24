@@ -6,15 +6,26 @@
 // into the origin target. Not run in CI (needs Docker + S3 + a target DB); its correctness is the
 // dev smoke. The pure helpers here ARE unit-tested (restore-executor.test.ts).
 //
+// STAGED-FILE pipeline: the decrypted+gunzipped dump is written to a scratch FILE, then that file
+// is mounted read-only into the engine restore executor, which reads the FILE (its sourcePath), not
+// a second stdin. Feeding the S3 ciphertext into age on stdin stays reliable — age reads its stdin
+// to EOF and never closes early. The flaky part was the SECOND stdin into pg_restore: it closed its
+// stdin the instant it had the whole custom-format archive, racing the stream teardown (spurious
+// gunzip Z_BUF_ERROR, an age backpressure deadlock, truncated-input exit 1). Staging removes it.
+//
 // Security: this is the first artifact-decryption path and the first write into a live target. The
 // operational age identity is written to a 0600 scratch file, mounted READ-ONLY into the age
-// executor (never on argv), and deleted in `finally`. The identity and the decrypted target
-// credential never reach a log, the response, or BackupJob.reason.
+// executor (never on argv), and deleted in `finally`. The decrypted dump file is CLEARTEXT on the
+// scratch volume: 0600, inside the 0700 reserved dir, and always removed in `finally` (success or
+// throw). The identity and the decrypted target credential never reach a log, the response, or
+// BackupJob.reason.
 
 import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { chmod, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 import { z } from "zod";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
@@ -90,61 +101,46 @@ export function globalsKeyFor(
 
 export interface RestoreStep {
   readonly key: string;
-  readonly descriptor: ExecutionDescriptor;
+  // Builds the engine restore descriptor for this step given the path the decrypted dump is mounted
+  // at inside the executor. Deferred because that path only exists once the step has staged the dump.
+  readonly buildDescriptor: (sourcePath: string) => ExecutionDescriptor;
 }
 
 // The ordered restore steps. Globals (roles/tablespaces) MUST be restored before the per-database
 // artifact for postgres, else the per-db restore fails on a missing role. The descriptor builders
-// are only invoked for the steps that run.
+// are deferred (they take the staged dump's mount path) and only invoked for the steps that run.
 export function planRestoreSteps(
   bucketKey: string,
-  buildRestoreDescriptor: () => ExecutionDescriptor,
+  buildRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor,
   globalsKey: string | null,
-  buildGlobalsRestoreDescriptor: () => ExecutionDescriptor | null,
+  buildGlobalsRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor | null,
 ): RestoreStep[] {
   const steps: RestoreStep[] = [];
   if (globalsKey !== null) {
-    const globalsDescriptor = buildGlobalsRestoreDescriptor();
-    if (globalsDescriptor !== null) steps.push({ key: globalsKey, descriptor: globalsDescriptor });
+    steps.push({
+      key: globalsKey,
+      buildDescriptor: (sourcePath): ExecutionDescriptor => {
+        const descriptor = buildGlobalsRestoreDescriptor(sourcePath);
+        // Structural guard: globalsKey is non-null only for engines that also implement
+        // buildGlobalsRestore (both derive from requiresSeparateGlobalsDump), so this is never hit.
+        if (descriptor === null) {
+          throw new Error("globals restore descriptor unavailable despite a globals object");
+        }
+        return descriptor;
+      },
+    });
   }
-  steps.push({ key: bucketKey, descriptor: buildRestoreDescriptor() });
+  steps.push({ key: bucketKey, buildDescriptor: buildRestoreDescriptor });
   return steps;
 }
 
 // ---------------------------------------------------------------------------
-// Identity file (0600, deleted in finally)
+// The staged-file pipeline (Docker/S3/target — smoke-verified, not unit-tested)
 // ---------------------------------------------------------------------------
 
-export interface IdentityFile {
-  readonly path: string;
-  cleanup(): Promise<void>;
-}
-
-// Writes the KEK-decrypted operational identity to a 0600 file the age executor mounts read-only.
-// The mode is set explicitly (writeFile's mode is subject to umask), mirroring ScratchManager's
-// 0700 enforcement. cleanup is idempotent so it is always safe to call in a finally block.
-export async function createIdentityFile(
-  dir: string,
-  jobId: string,
-  identity: string,
-): Promise<IdentityFile> {
-  const path = join(dir, `restore-identity-${jobId}-${randomUUID()}`);
-  await writeFile(path, identity, { mode: 0o600 });
-  await chmod(path, 0o600);
-  let removed = false;
-  return {
-    path,
-    cleanup: async (): Promise<void> => {
-      if (removed) return;
-      removed = true;
-      await rm(path, { force: true });
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// The streaming pipeline (Docker/S3/target — smoke-verified, not unit-tested)
-// ---------------------------------------------------------------------------
+// Where the decrypted dump file is mounted read-only inside the engine restore executor. The engine
+// descriptor reads the dump from THIS path (its sourcePath), never a second stdin.
+const RESTORE_DUMP_PATH = "/var/lib/schrodump/restore-source";
 
 export interface RestorePipelineDeps {
   driver: StorageDriver;
@@ -160,22 +156,29 @@ export interface RestorePipelineDeps {
   timeoutMs: number;
   // Threaded into every run for log correlation and the runner's typed errors.
   correlationId: string;
-  // Engine restore descriptor (pg_restore / mysql / mongorestore), built by the caller which holds
-  // the decrypted target connection.
-  buildRestoreDescriptor: () => ExecutionDescriptor;
-  // Postgres globals restore (psql), or null when the engine has no separate globals.
-  buildGlobalsRestoreDescriptor: () => ExecutionDescriptor | null;
-  // Materializes the identity to a 0600 file mounted read-only into the age executor.
-  writeIdentityFile: (identity: string) => Promise<IdentityFile>;
+  // Engine restore descriptor (pg_restore / mysql / mongorestore) built for the mount path the
+  // decrypted dump is staged at. Built by the caller which holds the decrypted target connection.
+  buildRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor;
+  // Postgres globals restore (psql) for the staged path, or null when the engine has no globals.
+  buildGlobalsRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor | null;
+  // Reserves a 0700 scratch dir that holds BOTH the 0600 identity and the decrypted cleartext dump
+  // files; cleanup releases the reservation (recursively removing the dir).
+  reserveStaging: () => Promise<{ dir: string; cleanup: () => Promise<void> }>;
 }
 
-// Downloads the encrypted object, pipes it through the age-decrypt executor (identity mounted,
-// never on argv) then gunzip, into the engine restore executor connected to the origin target.
-// Returns true iff every executor exits 0; throws on a non-zero exit or a source-stream error so
-// a truncated/failed restore never reports ok. The identity file is always removed in finally.
+// Downloads each encrypted object, decrypts (age, identity mounted, never on argv) and gunzips it to
+// a scratch FILE, then mounts that file into the engine restore executor connected to the origin
+// target. Returns true iff every restore executor exits 0; throws on a non-zero exit or a source
+// error so a truncated/failed restore never reports ok. The identity file and every decrypted dump
+// are always removed in finally; cleanup releases the reserved scratch dir.
 export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boolean> {
-  const identityFile = await deps.writeIdentityFile(deps.ageIdentity);
+  const staging = await deps.reserveStaging();
+  const identityPath = join(staging.dir, `restore-identity-${randomUUID()}`);
   try {
+    // 0600, mode set explicitly (writeFile's mode is subject to umask), mirroring ScratchManager.
+    await writeFile(identityPath, deps.ageIdentity, { mode: 0o600 });
+    await chmod(identityPath, 0o600);
+
     const steps = planRestoreSteps(
       deps.bucketKey,
       deps.buildRestoreDescriptor,
@@ -183,39 +186,41 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
       deps.buildGlobalsRestoreDescriptor,
     );
     for (const step of steps) {
-      await restoreOne(deps, identityFile.path, step);
+      await restoreOne(deps, identityPath, staging.dir, step);
     }
     return true;
   } finally {
-    await identityFile.cleanup();
+    // Remove the identity first, then release the reservation. release() recursively removes the
+    // dir, sweeping any decrypted dump a per-step cleanup missed after a hard failure.
+    await rm(identityPath, { force: true });
+    await staging.cleanup();
   }
 }
 
 async function restoreOne(
   deps: RestorePipelineDeps,
   identityPath: string,
+  stagingDir: string,
   step: RestoreStep,
 ): Promise<void> {
-  // S3 ciphertext -> age --decrypt (identity mounted ro) -> gzip'd dump -> gunzip -> engine restore.
+  // S3 ciphertext -> age --decrypt (identity mounted ro) -> gunzip -> a scratch FILE. Then mount
+  // that file into the engine restore executor and let it read the FILE (no second stdin).
   const source = await deps.driver.get(step.key);
   const decrypted = new PassThrough();
-  const gunzipped = createGunzip();
+  const dumpPath = join(stagingDir, `dump-${randomUUID()}`);
 
-  // Fail fast on a source/intermediate stream error. Without this, an S3 or decrypt error mid-stream
-  // is swallowed by the runner's stdin pipe (the container never sees EOF) and only surfaces as
-  // RUNNER_TIMEOUT (RT3a). Surface it promptly instead. The message is generic — a raw driver error
-  // can embed the failing URI, and it must never reach BackupJob.reason.
-  const streamError = new Promise<never>((_resolve, reject) => {
-    const onError = (): void => reject(new Error("restore source stream failed"));
-    source.on("error", onError);
-    decrypted.on("error", onError);
-    gunzipped.on("error", onError);
+  // Fail fast on a source-read (S3) error. `source` is piped into the age executor's stdin by the
+  // runner, OUTSIDE the pipeline chain below, so its errors are not caught by that pipeline. Without
+  // this guard an S3 error mid-stream never closes age's stdin (no EOF), age hangs, and the failure
+  // only surfaces as RUNNER_TIMEOUT. The message is generic — a raw driver error can embed the
+  // failing URI, and it must never reach BackupJob.reason.
+  const sourceError = new Promise<never>((_resolve, reject) => {
+    source.on("error", () => reject(new Error("restore source stream failed")));
   });
-  streamError.catch(() => undefined); // no unhandledRejection when the runs win the race
+  sourceError.catch(() => undefined); // no unhandledRejection when the run wins the race
 
   const identityMount: RunMount = { source: identityPath, target: AGE_IDENTITY_PATH, readOnly: true };
-
-  const decryptRun = deps.runner.run(buildAgeDecryptDescriptor(), {
+  const ageRun = deps.runner.run(buildAgeDecryptDescriptor(), {
     network: deps.network,
     mounts: [identityMount],
     stdin: source,
@@ -223,28 +228,37 @@ async function restoreOne(
     timeoutMs: deps.timeoutMs,
     correlationId: deps.correlationId,
   });
+  ageRun.catch(() => undefined); // if the sourceError path wins, don't leak a late rejection
 
-  decrypted.pipe(gunzipped);
+  try {
+    // Read age's output to EOF, gunzip, into the scratch file (0600). No teardown race: the writable
+    // end is a FILE, which never closes early the way pg_restore's stdin did. age reads the S3
+    // ciphertext fully and never closes early, so racing the source error only guards an S3 failure.
+    await Promise.race([
+      pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 })),
+      sourceError,
+    ]);
 
-  const restoreRun = deps.runner.run(step.descriptor, {
-    network: deps.network,
-    mounts: [],
-    stdin: gunzipped,
-    timeoutMs: deps.timeoutMs,
-    correlationId: deps.correlationId,
-  });
+    // Success is StatusCode 0, never inferred from EOF: a process that ran without complaint proves
+    // nothing. Check the age exit code only after its output is fully staged.
+    const ageResult = await ageRun;
+    if (ageResult.exitCode !== 0) {
+      throw new Error(`age decrypt failed (exit code ${ageResult.exitCode})`);
+    }
 
-  const runs = Promise.all([decryptRun, restoreRun]);
-  runs.catch(() => undefined); // if the streamError path wins, don't leak a late rejection
-  const [decryptResult, restoreResult] = await Promise.race([runs, streamError]);
-
-  // A process that ran without complaint proves nothing: success is StatusCode 0, never inferred
-  // from EOF. Throw BEFORE returning so runRestoreJob marks the job FAILED — the alternative is a
-  // half-restored target reported ok.
-  if (decryptResult.exitCode !== 0) {
-    throw new Error(`age decrypt failed (exit code ${decryptResult.exitCode})`);
-  }
-  if (restoreResult.exitCode !== 0) {
-    throw new Error(`restore execution failed (exit code ${restoreResult.exitCode})`);
+    // Mount the decrypted dump read-only; the engine restore reads the file, NOT stdin.
+    const dumpMount: RunMount = { source: dumpPath, target: RESTORE_DUMP_PATH, readOnly: true };
+    const restoreResult = await deps.runner.run(step.buildDescriptor(RESTORE_DUMP_PATH), {
+      network: deps.network,
+      mounts: [dumpMount],
+      timeoutMs: deps.timeoutMs,
+      correlationId: deps.correlationId,
+    });
+    if (restoreResult.exitCode !== 0) {
+      throw new Error(`restore execution failed (exit code ${restoreResult.exitCode})`);
+    }
+  } finally {
+    // The decrypted dump is cleartext on the scratch volume — always remove it (success and throw).
+    await rm(dumpPath, { force: true });
   }
 }

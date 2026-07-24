@@ -143,4 +143,20 @@ describe("postgresAdapter.buildGlobalsRestore", () => {
     expect(descriptor?.command).not.toContain("ON_ERROR_STOP=1");
     expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
   });
+
+  it("emits psql -f <sourcePath> reading the globals SQL from the mounted file, still WITHOUT ON_ERROR_STOP", () => {
+    // The staged-file pipeline mounts the decrypted globals script and passes its path; psql reads
+    // the file instead of stdin. The best-effort stance (no ON_ERROR_STOP) is unchanged.
+    const descriptor = postgresAdapter.buildGlobalsRestore?.({
+      ...restoreInput,
+      sourcePath: "/var/lib/schrodump/restore-source",
+    });
+    expect(descriptor?.command).toEqual([
+      "psql", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app",
+      "-f", "/var/lib/schrodump/restore-source",
+    ]);
+    expect(descriptor?.command).not.toContain("-");
+    expect(descriptor?.command).not.toContain("ON_ERROR_STOP=1");
+    expect(descriptor?.env.PGPASSWORD).toBe("s3cret");
+  });
 });

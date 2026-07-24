@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { chmod, mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   artifactBelongsToOrg,
-  createIdentityFile,
   globalsKeyFor,
   planRestoreSteps,
   restoreParamsOf,
@@ -69,63 +65,42 @@ describe("globalsKeyFor", () => {
 });
 
 describe("planRestoreSteps", () => {
-  const descriptor = (label: string): ExecutionDescriptor => ({
+  // A restore descriptor built for a given mount path; the command carries a label (to assert
+  // ordering) AND the sourcePath (to assert each step is built with the path it stages the dump at).
+  const descriptor = (label: string, sourcePath: string): ExecutionDescriptor => ({
     image: label,
-    command: [label],
+    command: [label, sourcePath],
     env: {},
-    outputKind: "stdout",
+    outputKind: "directory",
   });
 
-  it("restores globals BEFORE the per-database artifact for postgres", () => {
+  it("restores globals BEFORE the per-database artifact, each built with its sourcePath", () => {
     const steps = planRestoreSteps(
       "k/artifact.bin",
-      () => descriptor("restore"),
+      (sourcePath) => descriptor("restore", sourcePath),
       "k/globals.bin",
-      () => descriptor("globals"),
+      (sourcePath) => descriptor("globals", sourcePath),
     );
     expect(steps.map((s) => s.key)).toEqual(["k/globals.bin", "k/artifact.bin"]);
-    expect(steps[0]?.descriptor.image).toBe("globals");
-    expect(steps[1]?.descriptor.image).toBe("restore");
+
+    // The builders are deferred: each step wires the mount path THROUGH to its descriptor.
+    const globals = steps[0]?.buildDescriptor("/stage/globals");
+    expect(globals?.image).toBe("globals");
+    expect(globals?.command).toEqual(["globals", "/stage/globals"]);
+
+    const artifact = steps[1]?.buildDescriptor("/stage/artifact");
+    expect(artifact?.image).toBe("restore");
+    expect(artifact?.command).toEqual(["restore", "/stage/artifact"]);
   });
 
   it("is a single step when there is no globals object", () => {
-    const steps = planRestoreSteps("k/artifact.bin", () => descriptor("restore"), null, () => null);
+    const steps = planRestoreSteps(
+      "k/artifact.bin",
+      (sourcePath) => descriptor("restore", sourcePath),
+      null,
+      () => null,
+    );
     expect(steps.map((s) => s.key)).toEqual(["k/artifact.bin"]);
-  });
-});
-
-describe("createIdentityFile", () => {
-  const cleanups: Array<() => Promise<void>> = [];
-  afterEach(async () => {
-    for (const c of cleanups.splice(0)) await c();
-  });
-
-  it("writes the identity 0600 and removes it on cleanup", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "restore-identity-test-"));
-    cleanups.push(() => rm(dir, { recursive: true, force: true }));
-
-    const identity = "AGE-SECRET-KEY-1EXAMPLEIDENTITY";
-    const file = await createIdentityFile(dir, "job-1", identity);
-
-    // Restore passes a reserved scratch directory; the identity must land INSIDE it.
-    expect(file.path.startsWith(dir)).toBe(true);
-    const info = await stat(file.path);
-    // Only the owner may read the operational identity.
-    expect(info.mode & 0o777).toBe(0o600);
-    expect(await readFile(file.path, "utf8")).toBe(identity);
-
-    await file.cleanup();
-    await expect(stat(file.path)).rejects.toThrow();
-  });
-
-  it("cleanup is idempotent (safe to call in finally after an early failure)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "restore-identity-test-"));
-    cleanups.push(() => rm(dir, { recursive: true, force: true }));
-    // Force a restrictive umask-independent baseline for the assertion above.
-    await chmod(dir, 0o700);
-
-    const file = await createIdentityFile(dir, "job-2", "AGE-SECRET-KEY-1X");
-    await file.cleanup();
-    await expect(file.cleanup()).resolves.toBeUndefined();
+    expect(steps[0]?.buildDescriptor("/stage/x").command).toEqual(["restore", "/stage/x"]);
   });
 });
