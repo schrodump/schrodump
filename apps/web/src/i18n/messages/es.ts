@@ -184,7 +184,7 @@ export const es: Record<MessageKey, string> = {
   "restore.confirmName": "Escribe el nombre de la base de datos para confirmar",
   "restore.mismatch": "El nombre no coincide con la base de datos de destino.",
   "restore.submit": "Iniciar restore",
-  "restore.serverPending": "La ejecución de restore todavía no está disponible en el servidor.",
+  "restore.enqueued": "Restore encolado",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Base de datos",
   "restoreTarget.SCHEMA": "Schema",

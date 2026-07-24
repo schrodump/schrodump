@@ -147,10 +147,18 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
         ) : null}
 
         {restore.isError ? <ErrorState message={restore.error.message} /> : null}
-        <p className="text-xs text-muted-foreground">{t("restore.serverPending")}</p>
+        {restore.isSuccess ? (
+          <p role="status" className="text-sm text-[var(--color-state-verified)]">
+            {t("restore.enqueued")}
+          </p>
+        ) : null}
 
         <div className="flex gap-2">
-          <Button type="submit" variant="destructive" disabled={!canSubmit || restore.isPending}>
+          <Button
+            type="submit"
+            variant="destructive"
+            disabled={!canSubmit || restore.isPending || restore.isSuccess}
+          >
             {restore.isPending ? t("common.loading") : t("restore.submit")}
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>

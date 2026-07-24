@@ -182,7 +182,7 @@ export const en = {
   "restore.confirmName": "Type the database name to confirm",
   "restore.mismatch": "The name does not match the target database.",
   "restore.submit": "Start restore",
-  "restore.serverPending": "Restore execution is not available on the server yet.",
+  "restore.enqueued": "Restore enqueued",
   "restoreTarget.FULL_CLUSTER": "Full cluster",
   "restoreTarget.DATABASE": "Database",
   "restoreTarget.SCHEMA": "Schema",

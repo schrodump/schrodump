@@ -61,12 +61,10 @@ export function useTriggerVerify() {
   });
 }
 
-// The server currently returns 501 for restore execution; the payload shape below is what the
-// endpoint will accept once wiring lands.
 export function useTriggerRestore() {
   return useMutation({
     mutationFn: (input: { artifactId: string; target: string; confirmExistingDatabase: boolean }) =>
-      api.post(`/artifacts/${input.artifactId}/restore`, {
+      api.post<{ jobId: string }>(`/artifacts/${input.artifactId}/restore`, {
         target: input.target,
         confirmExistingDatabase: input.confirmExistingDatabase,
       }),

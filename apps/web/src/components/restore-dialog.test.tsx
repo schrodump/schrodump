@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
 import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
@@ -56,6 +56,10 @@ describe("RestoreButton", () => {
 });
 
 describe("RestoreDialog", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   async function openDialog() {
     const user = userEvent.setup();
     renderButton("operator");
@@ -91,5 +95,32 @@ describe("RestoreDialog", () => {
     await user.clear(screen.getByLabelText("Type the database name to confirm"));
     await user.type(screen.getByLabelText("Type the database name to confirm"), "shop");
     expect(submit).toBeEnabled();
+  });
+
+  it("submits the restore and shows the enqueued confirmation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: () => Promise.resolve({ jobId: "job-2" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = await openDialog();
+    await user.click(screen.getByLabelText("Database"));
+    await user.type(screen.getByLabelText("Target database"), "shop");
+
+    await user.click(screen.getByRole("button", { name: "Start restore" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/artifacts/artifact-1/restore",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ target: "DATABASE", confirmExistingDatabase: false }),
+      }),
+    );
+
+    expect(await screen.findByText("Restore enqueued")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start restore" })).toBeDisabled();
   });
 });

@@ -184,7 +184,7 @@ export const ptBR: Record<MessageKey, string> = {
   "restore.confirmName": "Digite o nome do banco para confirmar",
   "restore.mismatch": "O nome não confere com o banco de destino.",
   "restore.submit": "Iniciar restore",
-  "restore.serverPending": "A execução de restore ainda não está disponível no servidor.",
+  "restore.enqueued": "Restore enfileirado",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Banco",
   "restoreTarget.SCHEMA": "Schema",
