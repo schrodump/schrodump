@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import type { Readable, Writable } from "node:stream";
+import type { Writable } from "node:stream";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 
 // The concrete Docker-backed Runner, surfaced on the package's primary entry so composers depend
@@ -20,8 +20,6 @@ export interface RunOptions {
   readonly mounts: RunMount[];
   // Destination for the container's stdout when descriptor.outputKind === 'stdout'.
   readonly stdout?: Writable;
-  // Source piped into the container's stdin; used by restore, never inherited.
-  readonly stdin?: Readable;
   readonly timeoutMs: number;
   readonly correlationId: string;
 }

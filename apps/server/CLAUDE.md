@@ -78,8 +78,10 @@ link de setup.
 2. **Fingerprint da KEK** — SHA-256 de material derivado (nunca a chave), gravado no `AppConfig`
    no 1º boot; boot falha se divergir. É por isso que trocar a KEK contra um banco existente
    recusa o boot em vez de gerar artefatos que ninguém abre.
-3. **Artefatos** — `age` (binário via runner, execução diferida), sempre 2 recipients
-   (operacional + escrow). Pipeline: dump → compressão → criptografia (nunca inverter).
+3. **Artefatos** — `age` **in-process** via a lib `age-encryption` (`Encrypter` no backup,
+   `Decrypter` no restore; keygen pela mesma lib), sempre 2 recipients (operacional + escrow). Não
+   há executor `age`: cifrar/decifrar num container exigia stdin sobre attach hijacked, cujo demux
+   corrompia o stream. Pipeline: dump → compressão → criptografia (nunca inverter).
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 

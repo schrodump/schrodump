@@ -82,7 +82,8 @@ setado — são `describe.skipIf` de outra forma:
   por patch, usuário não-root, `dumb-init` como PID 1, `prisma migrate deploy` no entrypoint.
   **Sem nenhum client de banco dentro** — dump/restore rodam em executores efêmeros. Alvo de
   tamanho e a poda de dependências (`docker/prune-store.mjs`) estão documentados lá.
-- `docker/executors/` — `age.Dockerfile` e `mydumper.Dockerfile`, versão **e digest** pinados.
+- `docker/executors/` — `mydumper.Dockerfile` (STAGED mysql/mariadb), versão **e digest** pinados.
+  A cripto de artefato é **in-process** (`age-encryption`), não há executor `age`.
 - CI: `ci.yml` (check + integração + build/smoke da imagem), `security.yml` (audit, Trivy,
   gitleaks, SPDX), `release.yml` (multi-arch, cosign, SBOM em tag `v*`), `cla.yml`
   (**desabilitado** até o texto do CLA sair de `TODO` em `CONTRIBUTING.md`).

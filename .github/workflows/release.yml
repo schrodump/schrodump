@@ -152,16 +152,15 @@ jobs:
   executors:
     name: publish executor images
     runs-on: ubuntu-latest
-    # The server resolves these by name at backup time (schrodump/age:1, schrodump/mydumper:1), so
-    # a release that ships the server without them ships a product that cannot take a backup. They
-    # move on their own cadence: the floating :1 tag is what the application code references, and
-    # the exact version tag is what an operator pins to.
+    # The server resolves this by name at backup time (schrodump/mydumper:1), so a release that ships
+    # the server without it ships a product that cannot take a STAGED mysql/mariadb backup. Artifact
+    # encryption is in-process (age-encryption), so there is no age executor. The executor moves on its
+    # own cadence: the floating :1 tag is what the application code references, and the exact version
+    # tag is what an operator pins to.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: age
-            version: "1.3.1"
           - name: mydumper
             version: "1.0.3-1"
     steps:

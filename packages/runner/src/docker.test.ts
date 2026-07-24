@@ -122,19 +122,6 @@ describe("DockerRunner.run", () => {
     await new DockerRunner(engine).run(DESCRIPTOR, opts({ network: "schrodump_targets" }));
     expect(engine.lastSpec?.network).toBe("schrodump_targets");
   });
-
-  it("threads RunOptions.stdin through to the engine's container spec", async () => {
-    const engine = new FakeEngine();
-    const input = Readable.from([Buffer.from("payload")]);
-    await new DockerRunner(engine).run(DESCRIPTOR, opts({ stdin: input }));
-    expect(engine.lastSpec?.stdin).toBe(input);
-  });
-
-  it("leaves the engine's container spec without stdin when RunOptions.stdin is unset", async () => {
-    const engine = new FakeEngine();
-    await new DockerRunner(engine).run(DESCRIPTOR, opts());
-    expect(engine.lastSpec?.stdin).toBeUndefined();
-  });
 });
 
 describe("sanitizeStderr", () => {
