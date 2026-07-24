@@ -54,13 +54,12 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
   const job = await deps.store.claimNextJob();
   if (job === null) return "idle";
 
+  // Only the executor's own run may fail the job. A crash here means the job never reached a
+  // terminal state, so failJob is correct.
+  let backup: BackupResult | null = null;
   try {
     if (job.kind === "BACKUP") {
-      const result = await deps.executor.runBackup(job);
-      if (result.ok && result.artifactId !== null && result.verifyLevel !== "NONE") {
-        await deps.store.enqueueVerify(job.organizationId, result.artifactId);
-        deps.log.info({ jobId: job.id, artifactId: result.artifactId }, "backup ok — verify enqueued");
-      }
+      backup = await deps.executor.runBackup(job);
     } else if (job.kind === "VERIFY") {
       await deps.executor.runVerify(job);
     } else {
@@ -70,6 +69,19 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
     const reason = deps.sanitizeReason(err);
     deps.log.error({ jobId: job.id, reason }, "job crashed — marking FAILED");
     await deps.store.failJob(job.id, reason);
+    return "ran";
+  }
+
+  // Chaining runs AFTER the job is already terminal (SUCCEEDED). A failure to enqueue the follow-up
+  // verify must NOT retroactively FAIL a backup that actually succeeded — it is only logged.
+  if (backup !== null && backup.ok && backup.artifactId !== null && backup.verifyLevel !== "NONE") {
+    try {
+      await deps.store.enqueueVerify(job.organizationId, backup.artifactId);
+      deps.log.info({ jobId: job.id, artifactId: backup.artifactId }, "backup ok — verify enqueued");
+    } catch (err) {
+      const reason = deps.sanitizeReason(err);
+      deps.log.error({ jobId: job.id, reason }, "backup ok but verify enqueue failed");
+    }
   }
   return "ran";
 }

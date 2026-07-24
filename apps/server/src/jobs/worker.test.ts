@@ -22,9 +22,14 @@ function makeDeps(over: {
   jobs?: (ClaimedJob | null)[];
   backup?: JobExecutor["runBackup"];
   verify?: JobExecutor["runVerify"];
-}): { deps: WorkerDeps; store: { enqueueVerify: ReturnType<typeof vi.fn>; failJob: ReturnType<typeof vi.fn> } } {
+  enqueueVerify?: WorkerStore["enqueueVerify"];
+}): {
+  deps: WorkerDeps;
+  store: { enqueueVerify: ReturnType<typeof vi.fn>; failJob: ReturnType<typeof vi.fn> };
+  log: { info: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+} {
   const queue = [...(over.jobs ?? [])];
-  const enqueueVerify = vi.fn(() => Promise.resolve("v1"));
+  const enqueueVerify = vi.fn(over.enqueueVerify ?? (() => Promise.resolve("v1")));
   const failJob = vi.fn(() => Promise.resolve());
   const store: WorkerStore = {
     claimNextJob: () => Promise.resolve(queue.length > 0 ? (queue.shift() as ClaimedJob | null) : null),
@@ -35,8 +40,12 @@ function makeDeps(over: {
     runBackup: over.backup ?? (() => Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "CHECKSUM" })),
     runVerify: over.verify ?? (() => Promise.resolve()),
   };
-  const log = { info: () => {}, error: () => {} };
-  return { deps: { store, executor, log, sanitizeReason: () => "sanitized" }, store: { enqueueVerify, failJob } };
+  const log = { info: vi.fn(), error: vi.fn() };
+  return {
+    deps: { store, executor, log, sanitizeReason: () => "sanitized" },
+    store: { enqueueVerify, failJob },
+    log,
+  };
 }
 
 describe("runWorkerOnce", () => {
@@ -78,6 +87,20 @@ describe("runWorkerOnce", () => {
     });
     await runWorkerOnce(deps);
     expect(store.enqueueVerify).not.toHaveBeenCalled();
+  });
+
+  it("does not FAIL a SUCCEEDED backup when the follow-up verify enqueue throws — only logs", async () => {
+    const { deps, store, log } = makeDeps({
+      jobs: [backupJob],
+      enqueueVerify: () => Promise.reject(new Error("insert into BackupJob failed")),
+    });
+    expect(await runWorkerOnce(deps)).toBe("ran");
+    expect(store.enqueueVerify).toHaveBeenCalledWith("o1", "a1");
+    expect(store.failJob).not.toHaveBeenCalled(); // the backup already succeeded via its ports
+    expect(log.error).toHaveBeenCalledWith(
+      { jobId: "j1", reason: "sanitized" },
+      "backup ok but verify enqueue failed",
+    );
   });
 
   it("runs a VERIFY job and chains nothing", async () => {
