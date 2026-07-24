@@ -31,6 +31,12 @@ Execução via Docker e gestão de scratch. Prevalece sobre o `CLAUDE.md` da rai
 > delete no `finally`, e **filesystem cifrado no host** — este último é responsabilidade do
 > operador e precisa estar na documentação de deploy.
 
+> **Gap conhecido:** não há handler de `SIGTERM`/`SIGINT` no runner nem no server. O sinal chega
+> (o `dumb-init` entrega, o shutdown é limpo), mas o processo sai na hora e o scratch de um job
+> em andamento **não é liberado no shutdown** — só na varredura do próximo boot (`sweep`, por
+> idade). A janela em que o dump fica em claro é essa. Corrigir é instalar o handler que aciona o
+> delete antes de sair. Ver `docs/roadmap.md` e `docs/security.md`.
+
 ## SPDX
 
 ```

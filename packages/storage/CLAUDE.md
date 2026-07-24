@@ -22,6 +22,14 @@ Driver S3-compatible. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
 Não configure expiração no bucket. A deleção é sempre explícita, comandada pela
 aplicação depois de `resolveRetention`.
 
+## Canary (`canary.ts`)
+
+Exercita **PUT → GET → DELETE** contra um objeto descartável sob o prefixo real configurado, e
+reporta qual passo falhou. O DELETE faz parte de propósito: validar só a credencial (ou só
+PUT+GET) deixa passar uma chave com `s3:PutObject` mas sem `s3:DeleteObject` — backups rodam por
+meses e a retenção falha silenciosa. É a mesma tese do verify aplicada ao destino: uma
+credencial que escreve mas não gerencia produz um backup que você não consegue reter.
+
 ## `forcePathStyle`
 
 É configuração **explícita** do usuário, não detecção automática. Obrigatório em MinIO,
