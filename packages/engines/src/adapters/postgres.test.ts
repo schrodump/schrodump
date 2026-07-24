@@ -185,3 +185,18 @@ describe("postgresAdapter.buildRestore", () => {
     expect(descriptor.env.PGPASSWORD).toBe("s3cret");
   });
 });
+
+describe("postgresAdapter.buildVerifySandbox", () => {
+  it("describes a postgres sandbox of the artifact's major with bootstrap creds and readiness", () => {
+    const s = postgresAdapter.buildVerifySandbox!(160002, "secret-123");
+    expect(s.image).toBe("postgres:16-alpine");
+    expect(s.env.POSTGRES_USER).toBe("verify");
+    expect(s.env.POSTGRES_PASSWORD).toBe("secret-123");
+    expect(s.env.POSTGRES_DB).toBe("verify");
+    expect(s.readinessCommand).toEqual(["pg_isready", "-U", "verify", "-d", "verify"]);
+    expect(s.port).toBe(5432);
+    expect(s.username).toBe("verify");
+    expect(s.database).toBe("verify");
+    expect(s.password).toBe("secret-123");
+  });
+});

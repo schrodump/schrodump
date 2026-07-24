@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { EngineDescriptorError, type EngineAdapter, type TargetConnection } from "../descriptor.js";
+import { EngineDescriptorError, type EngineAdapter, type TargetConnection, type VerifySandbox } from "../descriptor.js";
 
 const MIN_MAJOR = 13;
 const MAX_MAJOR = 18;
@@ -156,6 +156,24 @@ export const postgresAdapter: EngineAdapter = {
       ],
       env: connEnv(connection),
       outputKind: "stdout",
+    };
+  },
+
+  buildVerifySandbox(serverVersionNum, password): VerifySandbox {
+    const username = "verify";
+    const database = "verify";
+    return {
+      image: this.imageFor(serverVersionNum),
+      env: {
+        POSTGRES_USER: username,
+        POSTGRES_PASSWORD: password,
+        POSTGRES_DB: database,
+      },
+      readinessCommand: ["pg_isready", "-U", username, "-d", database],
+      port: 5432,
+      username,
+      password,
+      database,
     };
   },
 };

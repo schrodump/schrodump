@@ -65,6 +65,16 @@ export interface VerifyInput {
   readonly scope: DumpScope;
 }
 
+export interface VerifySandbox {
+  readonly image: string;
+  readonly env: Record<string, string>;
+  readonly readinessCommand: string[];
+  readonly port: number;
+  readonly username: string;
+  readonly password: string;
+  readonly database: string;
+}
+
 export interface EngineAdapter {
   readonly kind: EngineKind;
   imageFor(serverVersionNum: number): string;
@@ -78,6 +88,9 @@ export interface EngineAdapter {
   // psql. Only postgres implements it; pg_restore cannot read the plain SQL pg_dumpall emits, so
   // globals need their own restore descriptor, run before the per-database restore.
   buildGlobalsRestore?(input: RestoreInput): ExecutionDescriptor;
+  // Only postgres implements this: describe the ephemeral sandbox container for FULL_RESTORE verify,
+  // where the artifact is restored to prove it (image, bootstrap env, readiness probe, credentials).
+  buildVerifySandbox?(serverVersionNum: number, password: string): VerifySandbox;
 }
 
 // Raised when an adapter refuses to produce a descriptor because doing so would be unsafe
