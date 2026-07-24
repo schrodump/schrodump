@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useTestConnection } from "@/hooks/use-mutations";
 import { useTargets } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
+import { formatServerVersion } from "@/lib/format";
 import type { Target } from "@/lib/types";
 
 function TestConnection({ targetId }: { targetId: string }) {
@@ -25,7 +26,7 @@ function TestConnection({ targetId }: { targetId: string }) {
       {test.isSuccess && test.data.ok ? (
         <span className="text-sm text-[var(--color-state-verified)]">
           {test.data.serverVersionNum !== null
-            ? t("targets.probe.version", { version: test.data.serverVersionNum })
+            ? t("targets.probe.version", { version: formatServerVersion(test.data.serverVersionNum) })
             : t("targets.probe.ok")}
         </span>
       ) : null}
