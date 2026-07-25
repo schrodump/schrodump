@@ -148,19 +148,40 @@ export interface VerifyPlan {
 // running CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting
 // the central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a restore pipeline that
 // cannot run for that artifact yet. STREAM of any engine keeps FULL_RESTORE (wired via
-// runFullRestore). The sealed-destination downgrade lives in the domain (runVerifyJob) and is
-// orthogonal to this one. `engine` stays a parameter for call-site clarity even though the decision
-// is by executionMode alone.
+// runFullRestore) EXCEPT unscoped mongo (see below). The sealed-destination downgrade lives in the
+// domain (runVerifyJob) and is orthogonal to this one.
+//
+// Unscoped mongo is downgraded too, for a different reason than STAGED: mongodump --archive on a
+// replica set produces a full-instance archive (mongodb.ts's buildDump REFUSES a scoped dump on a
+// replica set — MONGODB_OPLOG_REQUIRES_FULL_DUMP — so every replica set is forced unscoped), and
+// mongorestore --archive restores each user db under its own embedded name, never into `admin`.
+// originDatabaseFor collapses an unscoped mongo origin to "admin" (there is no single origin db for
+// a multi-db archive), so buildVerifyAssertions would count collections in admin — which holds only
+// system collections and the bootstrapped `verify` root user, never the restored app data. That
+// count is unrelated to what actually restored: an empty admin would FAIL a good backup, and a
+// populated admin.system.users would VERIFY one that never proved the app data landed. Both blur
+// the VERIFIED/FAILED distinction. Downgrading to CHECKSUM is the same honest deferral as the STAGED
+// case: a good unscoped-mongo artifact stays VERIFIED via CHECKSUM instead of getting a wrong
+// verdict. A SCOPED mongo target (scopedDatabases.length > 0) has a real origin db and keeps
+// FULL_RESTORE.
 export function resolveVerifyPlan(
   policyLevel: VerifyLevel | null,
   engine: EngineKind,
   executionMode: ExecutionMode,
+  scopedDatabases: string[],
 ): VerifyPlan {
   const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
   if (requested === "FULL_RESTORE" && executionMode === "STAGED") {
     return {
       effectiveLevel: "CHECKSUM",
       downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
+    };
+  }
+  if (requested === "FULL_RESTORE" && engine === "mongodb" && scopedDatabases.length === 0) {
+    return {
+      effectiveLevel: "CHECKSUM",
+      downgradeReason:
+        "unscoped MongoDB artifacts cannot be FULL_RESTORE-verified in v1 (multi-db archive): downgraded to CHECKSUM",
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };
@@ -526,7 +547,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
-    const plan = resolveVerifyPlan(policyLevel, artifact.engine, artifact.executionMode);
+    // The origin scope the producing target was scoped to, parsed up front (rather than only inside
+    // runFullRestore) so resolveVerifyPlan can see it: an UNSCOPED mongo artifact needs its own
+    // downgrade (see resolveVerifyPlan) distinct from the STAGED one. A policy-less producer or a
+    // malformed stored scope degrades to unscoped (never throws) — this is verify, not restore.
+    const originScope = ScopeSchema.safeParse(producingJob.policy?.target?.scope);
+    const scopedDatabases = originScope.success ? originScope.data.databases : [];
+    const plan = resolveVerifyPlan(policyLevel, artifact.engine, artifact.executionMode, scopedDatabases);
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -566,11 +593,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         try {
           const sandboxPassword = randomUUID();
           // The origin db the artifact restores INTO, resolved from the producing target's scope the
-          // same way the backup chose its dump db (originDatabaseFor). A policy-less producer or a
-          // malformed stored scope degrades to an unscoped origin (engine default) rather than
-          // throwing — this is verify, not restore: never condemn a good artifact over a scope parse.
-          const originScope = ScopeSchema.safeParse(artifact.job.policy?.target?.scope);
-          const scopedDatabases = originScope.success ? originScope.data.databases : [];
+          // same way the backup chose its dump db (originDatabaseFor). scopedDatabases was already
+          // parsed above (outside this closure) so resolveVerifyPlan could see it too; reused here
+          // rather than re-parsed. A policy-less producer or a malformed stored scope degrades to an
+          // unscoped origin (engine default) rather than throwing — this is verify, not restore: never
+          // condemn a good artifact over a scope parse.
           const originDatabase = originDatabaseFor(engine, scopedDatabases);
 
           // buildVerifySandbox is optional (only engines with an in-process restore implement it).

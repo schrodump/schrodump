@@ -16,9 +16,18 @@ import {
 import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
-  it("keeps FULL_RESTORE for STREAM with no downgrade, for any engine", () => {
+  it("keeps FULL_RESTORE for STREAM with no downgrade, for any non-mongo engine unscoped", () => {
+    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
+      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", [])).toEqual({
+        effectiveLevel: "FULL_RESTORE",
+        downgradeReason: null,
+      });
+    }
+  });
+
+  it("keeps FULL_RESTORE for STREAM with no downgrade, for any engine when scoped", () => {
     for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
-      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM")).toEqual({
+      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", ["app"])).toEqual({
         effectiveLevel: "FULL_RESTORE",
         downgradeReason: null,
       });
@@ -27,32 +36,54 @@ describe("resolveVerifyPlan", () => {
 
   it("downgrades FULL_RESTORE to CHECKSUM for a STAGED artifact, for any engine including postgres", () => {
     for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
-      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STAGED");
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STAGED", []);
       expect(plan.effectiveLevel).toBe("CHECKSUM");
       expect(plan.downgradeReason).toMatch(/STAGED artifacts cannot be FULL_RESTORE-verified/i);
     }
   });
 
+  it("downgrades an UNSCOPED mongo FULL_RESTORE (STREAM) to CHECKSUM with a mongo-specific reason", () => {
+    const plan = resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", []);
+    expect(plan.effectiveLevel).toBe("CHECKSUM");
+    expect(plan.downgradeReason).toMatch(/unscoped MongoDB/i);
+  });
+
+  it("keeps FULL_RESTORE for a SCOPED mongo artifact (STREAM) — does not downgrade", () => {
+    expect(resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", ["app"])).toEqual({
+      effectiveLevel: "FULL_RESTORE",
+      downgradeReason: null,
+    });
+  });
+
+  it("does not downgrade unscoped non-mongo engines (postgres/mysql unaffected)", () => {
+    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
+      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", [])).toEqual({
+        effectiveLevel: "FULL_RESTORE",
+        downgradeReason: null,
+      });
+    }
+  });
+
   it("keeps CHECKSUM unchanged with no downgrade reason regardless of executionMode", () => {
-    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STREAM")).toEqual({
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STREAM", [])).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
-    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STAGED")).toEqual({
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STAGED", [])).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
   });
 
   it("keeps NONE unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("NONE", "postgres", "STREAM")).toEqual({
+    expect(resolveVerifyPlan("NONE", "postgres", "STREAM", [])).toEqual({
       effectiveLevel: "NONE",
       downgradeReason: null,
     });
   });
 
   it("defaults a missing policy level to CHECKSUM without a downgrade", () => {
-    expect(resolveVerifyPlan(null, "postgres", "STREAM")).toEqual({
+    expect(resolveVerifyPlan(null, "postgres", "STREAM", [])).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
