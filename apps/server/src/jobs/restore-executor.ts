@@ -26,7 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { open, rm } from "node:fs/promises";
+import { chmod, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -292,6 +292,9 @@ async function restoreOne(
       // throwaway executor read it. (Never reproduces on Docker Desktop, whose VM file-sharing masks
       // the mount's ownership; it is a native-Linux executor failure, caught by CI.)
       await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o644 }));
+      // createWriteStream's mode is masked by umask; enforce 0644 explicitly (mirrors writeMongoConfig)
+      // so the mongo executor can read it regardless of the worker process's umask.
+      await chmod(dumpPath, 0o644);
     } catch (err) {
       // A source error rewritten above already carries RESTORE_SOURCE_FAILED and surfaces here
       // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
@@ -341,6 +344,8 @@ async function restoreOne(
       correlationId: deps.correlationId,
     });
     if (restoreResult.exitCode !== 0) {
+      // eslint-disable-next-line no-console
+      console.error(`[REPRO2] restore executor exit=${restoreResult.exitCode} key=${step.key} stderr=${JSON.stringify(restoreResult.stderr)}`);
       throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
         code: "RESTORE_EXECUTOR_FAILED",
         correlationId: deps.correlationId,
