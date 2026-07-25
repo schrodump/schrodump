@@ -82,7 +82,7 @@ describe("mongodbAdapter.buildDump", () => {
 });
 
 describe("mongodbAdapter.buildRestore", () => {
-  it("STREAM reads from a mounted archive file with --drop, no --oplogReplay for DATABASE target", () => {
+  it("STREAM reads from a mounted archive file with --drop, no --oplogReplay", () => {
     const descriptor = mongodbAdapter.buildRestore(
       restoreInput({
         target: "DATABASE",
@@ -97,14 +97,17 @@ describe("mongodbAdapter.buildRestore", () => {
     expect(descriptor.outputKind).toBe("directory");
   });
 
-  it("includes --oplogReplay only for FULL_CLUSTER target", () => {
+  it("never emits --oplogReplay, even for a FULL_CLUSTER target", () => {
+    // RestoreInput carries no fact saying whether the source archive has an oplog (buildDump's
+    // own facts.isReplicaSet choice is not threaded through), and mongorestore hard-refuses
+    // --oplogReplay against an archive that lacks one — see the comment in buildRestore.
     const descriptor = mongodbAdapter.buildRestore(
       restoreInput({
         target: "FULL_CLUSTER",
         sourcePath: "/var/lib/schrodump/restore-source",
       }),
     );
-    expect(descriptor.command).toContain("--oplogReplay");
+    expect(descriptor.command).not.toContain("--oplogReplay");
   });
 
   it("includes --tls when connection.tls is true", () => {

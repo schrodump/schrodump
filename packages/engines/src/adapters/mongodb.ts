@@ -92,8 +92,17 @@ export const mongodbAdapter: EngineAdapter = {
 
   buildRestore(input) {
     const connection = input.connection;
-    // --oplogReplay applies to a full-instance restore of an oplog-bearing archive.
-    const oplogArgs = input.target === "FULL_CLUSTER" ? ["--oplogReplay"] : [];
+    // --oplogReplay is NEVER emitted, deliberately, even for a FULL_CLUSTER target. mongorestore
+    // hard-refuses it ("no oplog file to replay") unless the SOURCE archive was dumped with
+    // --oplog, and RestoreInput carries no fact telling this builder whether it was — buildDump's
+    // own choice (facts.isReplicaSet) is not threaded through to restore, in either the real
+    // restore path or FULL_RESTORE verify's sandbox restore (which never re-probes the origin by
+    // design). Guessing "yes" is a hard crash of the WHOLE restore for the guaranteed-common case
+    // (buildDump refuses a scoped dump on a replica set, so any scoped mongo artifact — the only
+    // kind FULL_RESTORE verify's sandbox ever restores, since resolveVerifyPlan downgrades
+    // unscoped mongo to CHECKSUM — is provably never oplog-bearing); guessing "no" only means an
+    // actual replica-set-sourced FULL_CLUSTER restore skips replaying that supplementary oplog
+    // window, a data-consistency nuance, not a failure. Tracked in docs/roadmap.md.
     const command = [
       "mongorestore",
       ...mongoConnArgs(connection),
@@ -110,7 +119,6 @@ export const mongodbAdapter: EngineAdapter = {
 
     if (input.sourcePath !== undefined) {
       command.push(`--archive=${input.sourcePath}`);
-      command.push(...oplogArgs);
       return {
         image: this.imageFor(input.serverVersionNum),
         command,
@@ -120,7 +128,6 @@ export const mongodbAdapter: EngineAdapter = {
     }
 
     command.push("--archive");
-    command.push(...oplogArgs);
     return {
       image: this.imageFor(input.serverVersionNum),
       command,
