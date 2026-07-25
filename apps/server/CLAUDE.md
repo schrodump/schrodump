@@ -96,9 +96,12 @@ link de setup.
   e seleção de sub-escopo real para mysql/mongo (hoje sempre restore completo). Verify de
   `FULL_RESTORE` reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) +
   assert de contagem de tabelas/coleções (`resolveVerifyPlan`/`runFullRestore` em
-  `jobs/worker-wiring.ts`) e roda de verdade para STREAM de qualquer engine, com uma exceção: mongo
-  **não escopado** degrada para `CHECKSUM` (um archive de replica set não tem um único banco de
-  origem para o assert contar). Smoke gated em `jobs/full-restore-verify.integration.test.ts`
+  `jobs/worker-wiring.ts`) e roda de verdade para STREAM de qualquer engine, com uma exceção:
+  artefato **não escopado de engine não-postgres** (mysql/mariadb/mongo) degrada para `CHECKSUM` — um
+  archive multi-banco (todo backup de replica set, e mysql sem escopo) não tem um único banco de
+  origem para o assert contar, então FULL_RESTORE emitiria um veredito errado (postgres não sofre: o
+  `-Fc` restaura no banco `verify` fixo e o assert conta todos os schemas não-sistema ali). Smoke
+  gated em `jobs/full-restore-verify.integration.test.ts`
   (postgres) e `jobs/mysql-mongo-full-restore-verify.integration.test.ts` (mysql/mongo).
 - **Backup de mongo exige `SCHRODUMP_SCRATCH_PATH` configurado** — a senha do `mongodump`/
   `mongorestore` só viaja via arquivo `--config` montado (nunca argv/env), e esse arquivo precisa
