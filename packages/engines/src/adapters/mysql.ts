@@ -6,6 +6,7 @@ import {
   type EngineAdapter,
   type ExecutionDescriptor,
   type TargetConnection,
+  type VerifySandbox,
 } from "../descriptor.js";
 
 // mydumper is not shipped in the official mysql/mariadb images; the parallel staged path uses
@@ -208,6 +209,29 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
         ],
         env: connEnv(connection),
         outputKind: "stdout",
+      };
+    },
+
+    // Unlike postgres (db-name-agnostic -Fc dump), a mysqldump restore runs `USE <origin>` / a
+    // single-db dump has no CREATE DATABASE — the origin database must already exist. MYSQL_DATABASE
+    // pre-creates it at bootstrap so the restore (buildRestore) has somewhere to land.
+    buildVerifySandbox(serverVersionNum, password, database): VerifySandbox {
+      const username = "root";
+      return {
+        image: this.imageFor(serverVersionNum),
+        env: {
+          MYSQL_ROOT_PASSWORD: password,
+          MYSQL_DATABASE: database,
+        },
+        // -h 127.0.0.1 forces mysqladmin ping to probe TCP, not the local unix socket: the mysql
+        // entrypoint runs a socket-only bootstrap server for its init scripts before stopping it
+        // and starting the real TCP-listening server — same lesson as postgres's pg_isready -h
+        // 127.0.0.1 fix (see postgres.ts buildVerifySandbox).
+        readinessCommand: ["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"],
+        port: 3306,
+        username,
+        password,
+        database,
       };
     },
   };

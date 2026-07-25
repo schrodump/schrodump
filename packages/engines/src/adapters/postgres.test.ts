@@ -189,8 +189,10 @@ describe("postgresAdapter.buildRestore", () => {
 });
 
 describe("postgresAdapter.buildVerifySandbox", () => {
-  it("describes a postgres sandbox of the artifact's major with bootstrap creds and readiness", () => {
-    const s = postgresAdapter.buildVerifySandbox!(160002, "secret-123");
+  it("describes a postgres sandbox of the artifact's major with bootstrap creds and readiness, ignoring the origin database", () => {
+    // A -Fc dump is db-name-agnostic (pg_restore -d can target any database), so postgres always
+    // uses its fixed "verify" sandbox db regardless of what the artifact's origin database was.
+    const s = postgresAdapter.buildVerifySandbox!(160002, "secret-123", "shop");
     expect(s.image).toBe("postgres:16-alpine");
     expect(s.env.POSTGRES_USER).toBe("verify");
     expect(s.env.POSTGRES_PASSWORD).toBe("secret-123");

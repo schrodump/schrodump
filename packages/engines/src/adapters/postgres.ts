@@ -159,7 +159,9 @@ export const postgresAdapter: EngineAdapter = {
     };
   },
 
-  buildVerifySandbox(serverVersionNum, password): VerifySandbox {
+  // `database` (the artifact's origin db) is ignored: a -Fc dump is db-name-agnostic, so the
+  // sandbox always restores into its own fixed "verify" db regardless of the origin name.
+  buildVerifySandbox(serverVersionNum, password, _database): VerifySandbox {
     const username = "verify";
     const database = "verify";
     return {

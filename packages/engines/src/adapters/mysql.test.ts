@@ -196,3 +196,32 @@ describe("buildRestore", () => {
     expect(script).toContain("< '/tmp/it'\\''s-a-path'");
   });
 });
+
+describe("buildVerifySandbox", () => {
+  it("describes a mysql sandbox that pre-creates the origin database, with TCP-forced readiness", () => {
+    const s = mysqlAdapter.buildVerifySandbox!(80036, "pw", "shop");
+    expect(s.image).toBe("mysql:8.0");
+    expect(s.env.MYSQL_ROOT_PASSWORD).toBe("pw");
+    expect(s.env.MYSQL_DATABASE).toBe("shop");
+    // -h 127.0.0.1 forces mysqladmin ping to probe TCP, not the local unix socket: the mysql
+    // entrypoint runs a socket-only bootstrap server before the real TCP-listening server starts
+    // (same lesson as postgres's pg_isready -h 127.0.0.1 fix).
+    expect(s.readinessCommand).toEqual(["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]);
+    expect(s.port).toBe(3306);
+    expect(s.username).toBe("root");
+    expect(s.database).toBe("shop");
+    expect(s.password).toBe("pw");
+  });
+
+  it("describes a mariadb sandbox using the mariadb:<maj.min> image", () => {
+    const s = mariadbAdapter.buildVerifySandbox!(110402, "pw", "shop");
+    expect(s.image).toBe("mariadb:11.4");
+    expect(s.env.MYSQL_ROOT_PASSWORD).toBe("pw");
+    expect(s.env.MYSQL_DATABASE).toBe("shop");
+    expect(s.readinessCommand).toEqual(["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]);
+    expect(s.port).toBe(3306);
+    expect(s.username).toBe("root");
+    expect(s.database).toBe("shop");
+    expect(s.password).toBe("pw");
+  });
+});

@@ -92,9 +92,13 @@ export interface EngineAdapter {
   // psql. Only postgres implements it; pg_restore cannot read the plain SQL pg_dumpall emits, so
   // globals need their own restore descriptor, run before the per-database restore.
   buildGlobalsRestore?(input: RestoreInput): ExecutionDescriptor;
-  // Only postgres implements this: describe the ephemeral sandbox container for FULL_RESTORE verify,
-  // where the artifact is restored to prove it (image, bootstrap env, readiness probe, credentials).
-  buildVerifySandbox?(serverVersionNum: number, password: string): VerifySandbox;
+  // Describe the ephemeral sandbox container for FULL_RESTORE verify, where the artifact is
+  // restored to prove it (image, bootstrap env, readiness probe, credentials). `database` is the
+  // artifact's origin database name: postgres ignores it (a -Fc dump is db-name-agnostic, so the
+  // sandbox always uses a fixed "verify" db), but mysql/mariadb restores INTO the origin db name
+  // (mysqldump's `USE <origin>` / a single-db dump has no CREATE DATABASE), so their sandboxes
+  // must pre-create it.
+  buildVerifySandbox?(serverVersionNum: number, password: string, database: string): VerifySandbox;
 }
 
 // Raised when an adapter refuses to produce a descriptor because doing so would be unsafe
