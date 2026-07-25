@@ -690,6 +690,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
               // globals first (roles/tablespaces), then the per-database artifact. runRestorePipeline
               // resolves true or THROWS a typed SchrodumpError (mapped by the outer catch).
+              try {
               await runRestorePipeline({
                 driver: destination.driver,
                 runner,
@@ -739,6 +740,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                     }
                   : {}),
               });
+              } catch (e) {
+                // eslint-disable-next-line no-console
+                console.error(`[REPRO] ${engine} restore pipeline threw:`, e instanceof Error ? `${e.name}: ${e.message}` : e);
+                throw e;
+              }
 
               // Restore landed. Assert a usable schema: count the restored user tables. Collect the
               // executor's stdout through a PassThrough (as backup-wiring collects a run's stream);
@@ -764,6 +770,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 },
               );
               const count = Number.parseInt(Buffer.concat(chunks).toString("utf8").trim(), 10);
+              // eslint-disable-next-line no-console
+              console.error(`[REPRO] ${engine} assert exit=${assertRun.exitCode} count=${count} rawStdout=${JSON.stringify(Buffer.concat(chunks).toString("utf8"))} stderr=${JSON.stringify(assertRun.stderr)}`);
               // VERIFIED iff the assertion exited clean AND found at least one user table; anything
               // else is a restore that produced no usable schema → FAILED (a claim about the artifact).
               return assertRun.exitCode === 0 && Number.isFinite(count) && count >= 1

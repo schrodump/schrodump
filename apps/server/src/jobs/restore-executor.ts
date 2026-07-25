@@ -330,6 +330,8 @@ async function restoreOne(
       correlationId: deps.correlationId,
     });
     if (restoreResult.exitCode !== 0) {
+      // eslint-disable-next-line no-console
+      console.error(`[REPRO] restore executor exit=${restoreResult.exitCode} key=${step.key} stderr=${JSON.stringify(restoreResult.stderr)}`);
       throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
         code: "RESTORE_EXECUTOR_FAILED",
         correlationId: deps.correlationId,
