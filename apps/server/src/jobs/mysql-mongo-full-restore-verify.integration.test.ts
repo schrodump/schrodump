@@ -114,7 +114,16 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
     // MYSQL_DATABASE + MYSQL_USER/PASSWORD pre-creates the smoke db and a user granted ONLY on it
     // (host '%', so it accepts the executor-network connection) — the least-privilege credential
     // required so the RICH probe reports just this one database (see the file header).
-    origin = await new GenericContainer("mysql:8")
+    //
+    // Pinned to mysql:8.0, NOT mysql:8. The dump AND the verify sandbox run in the image
+    // mysqlAdapter.imageFor derives from the probed server version — `mysql:<major>.<minor>`. For
+    // mysql:8.0 that is `mysql:8.0`, the SAME tag testcontainers pulls for this origin, so the
+    // executor image is already present (dockerode does not pull). `mysql:8` resolves to 8.4.x →
+    // imageFor `mysql:8.4`, a DIFFERENT tag that is never pulled, and the dump executor then 404s.
+    // Postgres/mongo avoid this by construction (origin tag == imageFor output); mysql must pick a
+    // major.minor tag to match. This is the MySQL 8.0 pin the roadmap documents and probe.integration
+    // already uses.
+    origin = await new GenericContainer("mysql:8.0")
       .withEnvironment({
         MYSQL_ROOT_PASSWORD,
         MYSQL_DATABASE: SMOKE_DB,
