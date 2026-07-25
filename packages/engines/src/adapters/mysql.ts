@@ -26,7 +26,18 @@ function connEnv(connection: TargetConnection): Record<string, string> {
 
 function tlsArgs(family: SqlFamily, tls: boolean): string[] {
   if (family === "mariadb") return tls ? ["--ssl"] : [];
-  return [tls ? "--ssl-mode=REQUIRED" : "--ssl-mode=DISABLED"];
+  if (tls) return ["--ssl-mode=REQUIRED"];
+  // MySQL 8's default caching_sha2_password plugin refuses to transmit the password over an INSECURE
+  // connection (--ssl-mode=DISABLED) unless the client fetches the server's RSA public key to encrypt
+  // it. Without --get-server-public-key the mysql/mysqldump client aborts the FIRST time it
+  // authenticates a given account against a cold auth cache with `ERROR 2061 (HY000): Authentication
+  // plugin 'caching_sha2_password' reported error: Authentication requires secure connection.` — which
+  // is EVERY fresh verify sandbox (root has never authenticated over TLS/socket to warm the cache) and
+  // any TLS-disabled restore target whose password the server has not cached. Verified against
+  // mysql:8.0: the flag turns that 2061 into a clean auth. With TLS on the password already travels the
+  // secure channel, so the flag is neither needed nor emitted. mariadb-dump/mariadb have no such option
+  // (MariaDB defaults to mysql_native_password), so it is strictly mysql-family.
+  return ["--ssl-mode=DISABLED", "--get-server-public-key"];
 }
 
 // mariadb:11+ dropped the `mysql`/`mysqldump` -> mariadb compat symlinks that mariadb:10.x still

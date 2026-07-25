@@ -83,6 +83,39 @@ describe("mysqlAdapter.buildDump", () => {
     expect(descriptor.outputKind).toBe("stdout");
   });
 
+  // caching_sha2_password (MySQL 8 default) refuses to send the password over an insecure connection
+  // without the server's RSA public key: a TLS-disabled dump must add --get-server-public-key or the
+  // client aborts with ERROR 2061 on a cold auth cache. mysql-family only (mariadb has no such flag).
+  it("STREAM adds --ssl-mode=DISABLED and --get-server-public-key when TLS is off (mysql)", () => {
+    const descriptor = mysqlAdapter.buildDump(
+      dumpInput({ connection: { ...CONN, tls: false } }),
+    );
+    expect(descriptor.command).toEqual([
+      "mysqldump",
+      "--single-transaction",
+      "-h",
+      "db.internal",
+      "-P",
+      "3306",
+      "-u",
+      "backup",
+      "--ssl-mode=DISABLED",
+      "--get-server-public-key",
+      "--databases",
+      "app",
+    ]);
+  });
+
+  // MariaDB uses mysql_native_password and its client has no --get-server-public-key; a TLS-off
+  // mariadb dump must NOT emit it (or mariadb-dump exits on an unknown option) — nor --ssl-mode.
+  it("STREAM omits --get-server-public-key (and --ssl-mode) when TLS is off (mariadb)", () => {
+    const descriptor = mariadbAdapter.buildDump(
+      dumpInput({ serverVersionNum: 110402, connection: { ...CONN, tls: false } }),
+    );
+    expect(descriptor.command).not.toContain("--get-server-public-key");
+    expect(descriptor.command.join(" ")).not.toContain("--ssl-mode");
+  });
+
   it("STAGED emits mydumper to a directory with its own image", () => {
     const descriptor = mysqlAdapter.buildDump(
       dumpInput({ executionMode: "STAGED", parallelism: 4, stagingPath: "/scratch/out" }),
@@ -206,6 +239,36 @@ describe("buildRestore", () => {
       "exec 'mariadb' '-h' 'db.internal' '-P' '3306' '-u' 'backup' '--ssl' 'app' < " +
         `'${SOURCE_PATH}'`,
     ]);
+  });
+
+  // A TLS-disabled STREAM restore is exactly the cold-cache case that breaks: the fresh verify
+  // sandbox (and any TLS-off target) rejects caching_sha2_password without --get-server-public-key.
+  it("STREAM adds --get-server-public-key when TLS is off (mysql), keeping the password off argv", () => {
+    const descriptor = mysqlAdapter.buildRestore({
+      ...restoreInput,
+      connection: { ...CONN, tls: false },
+      executionMode: "STREAM",
+      sourcePath: SOURCE_PATH,
+    });
+    expect(descriptor.command).toEqual([
+      "sh",
+      "-c",
+      "exec 'mysql' '-h' 'db.internal' '-P' '3306' '-u' 'backup' '--ssl-mode=DISABLED' " +
+        `'--get-server-public-key' 'app' < '${SOURCE_PATH}'`,
+    ]);
+    expect(descriptor.env.MYSQL_PWD).toBe("s3cret");
+    expect(descriptor.command.join(" ")).not.toContain("s3cret");
+  });
+
+  it("STREAM omits --get-server-public-key when TLS is off (mariadb)", () => {
+    const descriptor = mariadbAdapter.buildRestore({
+      ...restoreInput,
+      serverVersionNum: 110402,
+      connection: { ...CONN, tls: false },
+      executionMode: "STREAM",
+      sourcePath: SOURCE_PATH,
+    });
+    expect(descriptor.command.join(" ")).not.toContain("--get-server-public-key");
   });
 
   it("shell-quotes a source path containing a single quote, without breaking the redirect", () => {
