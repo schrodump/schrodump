@@ -95,6 +95,11 @@ export const mongodbAdapter: EngineAdapter = {
       "--config",
       MONGO_CONFIG_PATH,
       ...(connection.tls ? ["--tls"] : []),
+      // --drop drops each collection in the ARCHIVE before restoring it (mongo's --clean). It is NOT
+      // namespace-scoped: it never reads input.scope. Today the only caller is FULL_RESTORE verify,
+      // which restores a full archive into a fresh throwaway sandbox — safe. WARNING: when sub-scope
+      // restore (DATABASE/COLLECTION into a real, possibly-non-empty target) lands, --drop would drop
+      // every namespace present in the archive, not just the scoped one — add --nsInclude scoping then.
       "--drop",
     ];
 
