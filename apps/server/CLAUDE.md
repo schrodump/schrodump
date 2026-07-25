@@ -85,15 +85,26 @@ link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- **Restore roda ponta a ponta só para PostgreSQL:** a rota enfileira, o worker despacha `RESTORE` e
-  roda o pipeline real (download → decrypt in-process → gunzip → arquivo montado → `pg_restore`). Os
-  descritores `buildRestore` de mysql/mongo não foram adaptados ao executor staged-file nem passaram
-  por smoke, então `runRestoreJob` recusa não-postgres com erro claro e a UI desabilita o botão
-  (backup/verify dessas engines seguem normais). O que falta: adaptar+smoke por engine e seleção de
-  sub-escopo (hoje sempre restore completo). Verify de `FULL_RESTORE` já roda de verdade para
-  postgres — reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) e
-  assert de contagem de tabelas (`resolveVerifyPlan`/`runFullRestore` em `jobs/worker-wiring.ts`);
-  para as outras três engines ele degrada para `CHECKSUM`, nunca bloqueia.
+- **Restore roda ponta a ponta para as quatro engines, mas só artefato STREAM:** a rota enfileira,
+  o worker despacha `RESTORE` e roda o pipeline real (download → decrypt in-process → gunzip →
+  arquivo montado → `pg_restore`/`mysql`/`mongorestore`). A tranca é por **`executionMode`, não por
+  engine** — `runRestoreJob` (`jobs/restore.ts`) recusa qualquer artefato `STAGED` (mydumper em
+  diretório, ou `-Fd` do postgres) com erro claro, de qualquer engine, porque falta o pipeline de
+  diretório (untar-to-directory); a UI espelha a mesma tranca (`canRestoreEngine` em
+  `apps/web/src/lib/domain.ts` hoje libera as quatro — o campo `executionMode` não é exposto no
+  `Artifact` da API ainda, então o servidor segue sendo a tranca real). O que falta: pipeline STAGED
+  e seleção de sub-escopo real para mysql/mongo (hoje sempre restore completo). Verify de
+  `FULL_RESTORE` reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) +
+  assert de contagem de tabelas/coleções (`resolveVerifyPlan`/`runFullRestore` em
+  `jobs/worker-wiring.ts`) e roda de verdade para STREAM de qualquer engine, com uma exceção: mongo
+  **não escopado** degrada para `CHECKSUM` (um archive de replica set não tem um único banco de
+  origem para o assert contar). Smoke gated em `jobs/full-restore-verify.integration.test.ts`
+  (postgres) e `jobs/mysql-mongo-full-restore-verify.integration.test.ts` (mysql/mongo).
+- **Backup de mongo exige `SCHRODUMP_SCRATCH_PATH` configurado** — a senha do `mongodump`/
+  `mongorestore` só viaja via arquivo `--config` montado (nunca argv/env), e esse arquivo precisa
+  viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.
+  Sem scratch configurado, backup de mongo falha alto e cedo (`MONGO_CONFIG_SCRATCH_REQUIRED_
+  REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.
