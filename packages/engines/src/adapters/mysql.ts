@@ -28,6 +28,24 @@ function tlsArgs(family: SqlFamily, tls: boolean): string[] {
   return [tls ? "--ssl-mode=REQUIRED" : "--ssl-mode=DISABLED"];
 }
 
+// mariadb:11+ dropped the `mysql` -> mariadb compat symlink that mariadb:10.x still ships
+// (verified: `docker run --rm mariadb:11 which mysql` fails with exit 1; `mariadb:10.11 which
+// mysql` resolves via a symlink to `mariadb`). The mysql family never ships a `mariadb` binary
+// either way. Hardcoding "mysql" for both families (as buildDump/buildVerifyAssertions already
+// do, below) would make a shell-exec restore fail outright (exit 127) against mariadb 11+.
+function clientBinary(family: SqlFamily): string {
+  return family === "mariadb" ? "mariadb" : "mysql";
+}
+
+// Single-quote a value for safe interpolation into a POSIX shell command string: close the
+// quote, emit an escaped literal quote, reopen. Used only for buildRestore's STREAM branch,
+// where connection host/user/db and sourcePath (not secrets, but not compile-time constants
+// either) must be interpolated into a `sh -c` script rather than passed as separate argv
+// elements.
+function shQuote(value: string): string {
+  return "'" + value.split("'").join("'\\''") + "'";
+}
+
 // One implementation, two table entries: mysql and mariadb differ only in the image base and
 // the TLS flag. Adding "mariadb separado" is a registry entry, not a new branch.
 function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
@@ -109,8 +127,16 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
 
     buildRestore(input) {
       const connection = input.connection;
-      if (input.sourcePath !== undefined) {
-        // mydumper output → myloader from a directory.
+
+      if (input.executionMode === "STAGED") {
+        if (input.sourcePath === undefined) {
+          throw new EngineDescriptorError(
+            "MYSQL_RESTORE_SOURCE_PATH_REQUIRED",
+            "a STAGED mysql/mariadb restore requires sourcePath",
+          );
+        }
+        // mydumper output → myloader from a directory. Unreachable while STAGED restore is
+        // gated in v1 (apps/server refuses non-STREAM artifacts); kept for when it ships.
         return {
           image: MYDUMPER_IMAGE,
           command: ["myloader", ...connArgs(connection), "-B", connection.database, "-d", input.sourcePath],
@@ -118,12 +144,51 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
           outputKind: "directory",
         };
       }
-      // mysqldump output → mysql client reading the stream on stdin.
+
+      if (input.sourcePath === undefined) {
+        throw new EngineDescriptorError(
+          "MYSQL_RESTORE_SOURCE_PATH_REQUIRED",
+          "a STREAM mysql/mariadb restore requires sourcePath",
+        );
+      }
+
+      // STREAM: the artifact is a mysqldump SQL script mounted at sourcePath (restore always
+      // stages the decrypted artifact to a file now — no stdin path; see e44e43e).
+      //
+      // FAIL-LOUD MECHANISM — verified against the real client images, not assumed:
+      // `docker run --rm mysql:8 mysql --help 2>&1 | grep -i abort` finds nothing; MySQL 8.4.10's
+      // client has no --abort-source-on-error flag at all. `docker run --rm mariadb:11 mariadb
+      // --help 2>&1 | grep -i abort` finds `--abort-source-on-error` (a MariaDB-only extension of
+      // the interactive `source filename` command). Because this flag is absent from the real
+      // MySQL client and this adapter is shared by both families (one implementation, two table
+      // entries), Option A (`-e "source <path>" --abort-source-on-error`) can't be the mechanism
+      // here.
+      //
+      // Option B instead: run the client under `sh -c`, redirecting the mounted dump onto its
+      // stdin. In that batch/non-interactive mode (as opposed to `-e "source ..."`) both `mysql`
+      // and `mariadb` clients abort on the FIRST SQL error by default — confirmed in both
+      // --help outputs: `-f, --force  Continue even if we get an SQL error` defaults to FALSE.
+      // Without fail-loud, the client would run past a broken statement and the executor would
+      // read a clean exit code from a partially-restored database — the exact hole postgres's
+      // --exit-on-error closes (see postgres.ts buildRestore).
+      //
+      // Only non-secret values are interpolated into the shell string: host/port/user (connArgs),
+      // the TLS flag, connection.database, and our own constant sourcePath — each single-quoted
+      // (shQuote). The password is never in argv or the shell string; it stays in MYSQL_PWD (env).
+      const shellArgs = [
+        clientBinary(family),
+        ...connArgs(connection),
+        ...tlsArgs(family, connection.tls),
+        connection.database,
+      ];
+      const shellCommand =
+        "exec " + shellArgs.map(shQuote).join(" ") + " < " + shQuote(input.sourcePath);
+
       return {
         image: this.imageFor(input.serverVersionNum),
-        command: ["mysql", ...connArgs(connection), connection.database],
+        command: ["sh", "-c", shellCommand],
         env: connEnv(connection),
-        outputKind: "stdout",
+        outputKind: "directory",
       };
     },
 
