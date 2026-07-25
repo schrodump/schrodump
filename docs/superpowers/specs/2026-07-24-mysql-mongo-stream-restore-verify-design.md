@@ -107,13 +107,19 @@ sandbox needs credentials, and `mongorestore` must authenticate. Run the sandbox
 image's root bootstrap:
 - Image `mongo:<major>` (`imageFor`).
 - Env: `MONGO_INITDB_ROOT_USERNAME=verify`, `MONGO_INITDB_ROOT_PASSWORD=<random>`.
-- Readiness: `mongosh --host 127.0.0.1 --quiet --eval <ping>` — **force TCP**. Credentials for the
-  ping/restore/assertion follow the engine's **existing** hygiene: never a `--password` on argv. The
-  restore reuses `buildRestore`'s `--config <MONGO_CONFIG_PATH>` (a mounted config carrying the URI),
-  and the assertion reuses `buildVerifyAssertions`' `SCHRODUMP_MONGO_*` env + password-via-env, both
-  already in the codebase. The verify wiring supplies the sandbox host/creds through those same
-  channels — the plan states how the config is materialized for the sandbox (mirror how restore
-  materializes it for the origin target).
+- Readiness: `mongosh --host 127.0.0.1 --quiet --eval <ping>` — **force TCP**. Credentials never sit
+  on argv: `mongodump`/`mongorestore` take the password from `--config <MONGO_CONFIG_PATH>`; the
+  `mongosh` assertion takes it from `MONGODB_PASSWORD` env (already coded in `buildVerifyAssertions`).
+
+> **Gap this project must fix (discovered during planning): the mongo `--config` file is never
+> materialized or mounted by anything.** The descriptors reference `/etc/schrodump/mongodb.yaml`, but
+> `backup-wiring`/`worker-wiring` run every executor with `mounts: []`, and no code writes the file —
+> so **mongo backup itself is not wired end-to-end** (mongodump would read a missing config). This
+> plan adds a helper that writes the config (a `0600` scratch file containing `password: <pw>`) and a
+> `RunMount` at `MONGO_CONFIG_PATH`, wired into the mongo executors for **backup** (mongodump),
+> **restore** (mongorestore), and the **verify sandbox** restore. MySQL has no such gap — it passes
+> the password via `MYSQL_PWD` env. Fixing mongo backup is therefore a prerequisite inside this
+> project, and the smoke is the first end-to-end exercise of the mongo dump/restore path.
 - Connection for restore + assertion: `{ username: "verify", password, host, port, database: <origin>,
   tls: false }`, authSource `admin`.
 
