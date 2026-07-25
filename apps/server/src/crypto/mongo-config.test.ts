@@ -22,11 +22,14 @@ describe("writeMongoConfig", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("writes `password: <json-quoted>` into the reserved dir at mode 0600", async () => {
+  // 0644, not 0600: the mongodump/mongorestore executor bind-mounts this file and reads it as a uid
+  // that does not own it, so owner-only would be `permission denied` inside the container (native
+  // Linux; Docker Desktop masks it). The enclosing 0700 reservation dir keeps it confidential.
+  it("writes `password: <json-quoted>` into the reserved dir, world-readable (0644) for the executor", async () => {
     const { mount } = await writeMongoConfig(dir, "hunter2");
     expect(await readFile(mount.source, "utf8")).toBe('password: "hunter2"\n');
     expect(dirname(mount.source)).toBe(dir);
-    expect((await stat(mount.source)).mode & 0o777).toBe(0o600);
+    expect((await stat(mount.source)).mode & 0o777).toBe(0o644);
   });
 
   it("returns a read-only RunMount targeting the engines-exported MONGO_CONFIG_PATH (never hardcoded)", async () => {
