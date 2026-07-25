@@ -11,8 +11,9 @@ import {
 // The official mongo:<major> image ships mongodump/mongorestore (MongoDB Database Tools),
 // verified empirically: `docker run --rm mongo:8 which mongodump` -> /usr/bin/mongodump.
 
-// The password is delivered through this mounted config file (apps/server materializes it as a 0600
-// scratch file — see crypto/mongo-config.ts — and bind-mounts it here); it never reaches argv.
+// The password is delivered through this mounted config file (apps/server materializes it as a 0644
+// file inside a 0700 scratch dir — see crypto/mongo-config.ts for why world-read is both required by
+// the non-owner executor uid and safe — and bind-mounts it here); it never reaches argv.
 // mongodump/mongorestore load the password from `--config`. Exported so the composer mounts THIS
 // path rather than hardcoding it.
 export const MONGO_CONFIG_PATH = "/etc/schrodump/mongodb.yaml";

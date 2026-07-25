@@ -368,7 +368,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
     // Mongo's password reaches mongodump ONLY through a bind-mounted `--config` file (never argv);
     // every other engine passes it via env and mounts nothing. That file is a cleartext credential,
-    // so it lives on the scratch volume (0700 reserved dir, 0600 file, gc-swept, deploy-encrypted) and
+    // so it lives on the scratch volume (0700 reserved dir, 0644 file, gc-swept, deploy-encrypted) and
     // is removed in the finally around runBackupJob. Mongo is STREAM-only (stagedCapable:false), so
     // runBackupJob never takes a STAGED reservation on this job id — no collision with this one.
     let mongoConfigMount: RunMount | undefined;
