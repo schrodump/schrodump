@@ -55,6 +55,10 @@ export interface RestoreInput {
   readonly serverVersionNum: number;
   readonly target: RestoreTarget;
   readonly scope: DumpScope;
+  // The artifact's own execution mode (not a preference — the gate in restore.ts already refused
+  // anything but STREAM, so this is always "STREAM" in v1; carried anyway so a descriptor is honest
+  // about what it was asked to restore, mirroring DumpInput.executionMode).
+  readonly executionMode: ExecutionMode;
   // Path to the artifact inside the executor (stream on stdin or a staged directory).
   readonly sourcePath?: string;
 }

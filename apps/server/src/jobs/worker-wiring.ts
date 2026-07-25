@@ -32,6 +32,7 @@ import { createBackupPorts } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
+import type { ExecutionMode } from "./execution-mode.js";
 import {
   artifactBelongsToOrg,
   globalsKeyFor,
@@ -135,18 +136,24 @@ export interface VerifyPlan {
 }
 
 // The plan a VERIFY job runs under: the originating policy's level (CHECKSUM when there is no
-// policy), and whether that level was degraded. FULL_RESTORE reuses the postgres-only restore
-// pipeline, so it is downgraded to CHECKSUM for every OTHER engine (mysql/mariadb/mongodb): running
-// CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting the
-// central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a verifier that does not
-// exist for that engine. Postgres keeps FULL_RESTORE (wired via runFullRestore). The sealed-
-// destination downgrade lives in the domain (runVerifyJob) and is orthogonal to this one.
-export function resolveVerifyPlan(policyLevel: VerifyLevel | null, engine: EngineKind): VerifyPlan {
+// policy), and whether that level was degraded. FULL_RESTORE reuses the STREAM-only restore
+// pipeline (restore.ts's gate), so it is downgraded to CHECKSUM for a STAGED artifact of ANY engine:
+// running CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting
+// the central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a restore pipeline that
+// cannot run for that artifact yet. STREAM of any engine keeps FULL_RESTORE (wired via
+// runFullRestore). The sealed-destination downgrade lives in the domain (runVerifyJob) and is
+// orthogonal to this one. `engine` stays a parameter for call-site clarity even though the decision
+// is by executionMode alone.
+export function resolveVerifyPlan(
+  policyLevel: VerifyLevel | null,
+  engine: EngineKind,
+  executionMode: ExecutionMode,
+): VerifyPlan {
   const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
-  if (requested === "FULL_RESTORE" && engine !== "postgres") {
+  if (requested === "FULL_RESTORE" && executionMode === "STAGED") {
     return {
       effectiveLevel: "CHECKSUM",
-      downgradeReason: "FULL_RESTORE runs for PostgreSQL only in v1: downgraded to CHECKSUM",
+      downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };
@@ -341,7 +348,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         createdAt: new Date(startedAt).toISOString(),
         durationMs: Date.now() - startedAt,
       }),
-      persistArtifact: async ({ probe, recipients, upload }): Promise<string> => {
+      persistArtifact: async ({ probe, mode, recipients, upload }): Promise<string> => {
         const artifact = await prisma.artifact.create({
           data: {
             organizationId: job.organizationId,
@@ -351,6 +358,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             bucketKey: upload.bucketKey,
             manifestKey: upload.manifestKey,
             engine,
+            executionMode: mode,
             serverVersionNum: probe.serverVersionNum,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
@@ -417,7 +425,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
-    const plan = resolveVerifyPlan(policyLevel, artifact.engine);
+    const plan = resolveVerifyPlan(policyLevel, artifact.engine, artifact.executionMode);
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -530,6 +538,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                     serverVersionNum: artifact.serverVersionNum,
                     target: "FULL_CLUSTER",
                     scope: verifyScope,
+                    executionMode: artifact.executionMode,
                     sourcePath,
                   }),
                 buildGlobalsRestoreDescriptor: (sourcePath) =>
@@ -540,6 +549,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                         serverVersionNum: artifact.serverVersionNum,
                         target: "FULL_CLUSTER",
                         scope: verifyScope,
+                        executionMode: artifact.executionMode,
                         sourcePath,
                       }),
                 reserveStaging: async () => {
@@ -685,6 +695,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         Promise.resolve({
           manifestKeyIds: artifact.keyIds,
           engine,
+          executionMode: artifact.executionMode,
           serverVersionNum: artifact.serverVersionNum,
           destinationName: artifact.destination.name,
         }),
@@ -780,6 +791,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               serverVersionNum: artifact.serverVersionNum,
               target: params.target,
               scope,
+              executionMode: artifact.executionMode,
               sourcePath,
             }),
           buildGlobalsRestoreDescriptor: (sourcePath) =>
@@ -790,6 +802,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   serverVersionNum: artifact.serverVersionNum,
                   target: params.target,
                   scope,
+                  executionMode: artifact.executionMode,
                   sourcePath,
                 }),
           reserveStaging: async () => {

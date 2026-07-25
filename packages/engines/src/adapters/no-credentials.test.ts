@@ -47,6 +47,7 @@ function commandsFor(kind: EngineKind): string[][] {
     serverVersionNum: VERSION[kind],
     target: "DATABASE",
     scope: EMPTY_SCOPE,
+    executionMode: "STREAM",
   };
   const verify: VerifyInput = {
     connection: CONN,

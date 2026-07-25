@@ -9,37 +9,43 @@ import { createJobExecutor, resolveVerifyPlan, sanitizeReason, toBackupProbe } f
 import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
-  it("keeps FULL_RESTORE for postgres with no downgrade", () => {
-    expect(resolveVerifyPlan("FULL_RESTORE", "postgres")).toEqual({
-      effectiveLevel: "FULL_RESTORE",
-      downgradeReason: null,
-    });
-  });
-
-  it("downgrades FULL_RESTORE to CHECKSUM for non-postgres engines with a PostgreSQL-only reason", () => {
-    for (const engine of ["mysql", "mariadb", "mongodb"] as const) {
-      const plan = resolveVerifyPlan("FULL_RESTORE", engine);
-      expect(plan.effectiveLevel).toBe("CHECKSUM");
-      expect(plan.downgradeReason).toMatch(/PostgreSQL only/i);
+  it("keeps FULL_RESTORE for STREAM with no downgrade, for any engine", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM")).toEqual({
+        effectiveLevel: "FULL_RESTORE",
+        downgradeReason: null,
+      });
     }
   });
 
-  it("keeps CHECKSUM unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("CHECKSUM", "mysql")).toEqual({
+  it("downgrades FULL_RESTORE to CHECKSUM for a STAGED artifact, for any engine including postgres", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STAGED");
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(plan.downgradeReason).toMatch(/STAGED artifacts cannot be FULL_RESTORE-verified/i);
+    }
+  });
+
+  it("keeps CHECKSUM unchanged with no downgrade reason regardless of executionMode", () => {
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STREAM")).toEqual({
+      effectiveLevel: "CHECKSUM",
+      downgradeReason: null,
+    });
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STAGED")).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
   });
 
   it("keeps NONE unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("NONE", "postgres")).toEqual({
+    expect(resolveVerifyPlan("NONE", "postgres", "STREAM")).toEqual({
       effectiveLevel: "NONE",
       downgradeReason: null,
     });
   });
 
   it("defaults a missing policy level to CHECKSUM without a downgrade", () => {
-    expect(resolveVerifyPlan(null, "postgres")).toEqual({
+    expect(resolveVerifyPlan(null, "postgres", "STREAM")).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });

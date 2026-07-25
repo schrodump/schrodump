@@ -132,6 +132,7 @@ describe("postgresAdapter.buildGlobalsRestore", () => {
     serverVersionNum: 160002,
     target: "FULL_CLUSTER",
     scope: { databases: ["app"], schemas: [], collections: [] },
+    executionMode: "STREAM",
   };
 
   it("emits psql -f - reading the globals SQL on stdin, WITHOUT ON_ERROR_STOP", () => {
@@ -167,6 +168,7 @@ describe("postgresAdapter.buildRestore", () => {
     serverVersionNum: 160002,
     target: "DATABASE",
     scope: { databases: ["app"], schemas: [], collections: [] },
+    executionMode: "STREAM",
   };
 
   it("runs pg_restore --clean --if-exists --exit-on-error, reading the mounted dump as a file", () => {

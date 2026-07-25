@@ -326,6 +326,7 @@ model Artifact {
   bucketKey           String
   manifestKey         String
   engine              EngineKind
+  executionMode       ExecutionMode @default(STREAM)
   serverVersionNum    Int
   sizeRawBytes        BigInt
   sizeCompressedBytes BigInt
