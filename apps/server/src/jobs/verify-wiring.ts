@@ -25,9 +25,10 @@ export interface VerifyWiringDeps {
 }
 
 // Restore-executor codes that mean the restore actually ran against the dump and rejected it —
-// the artifact is the problem. Every other SchrodumpError code (RESTORE_SOURCE_FAILED, RUNNER_*)
-// and every non-SchrodumpError is our own infra failing to even attempt the restore: INCONCLUSIVE,
-// never FAILED — we must not condemn a backup because our sandbox couldn't run.
+// the artifact is the problem. Every other SchrodumpError code (RESTORE_SOURCE_FAILED,
+// RESTORE_WRITE_FAILED — our scratch disk, not the dump —, RUNNER_*) and every non-SchrodumpError
+// is our own infra failing to even attempt the restore: INCONCLUSIVE, never FAILED — we must not
+// condemn a backup because our sandbox couldn't run.
 const RESTORE_FAILED_CODES = new Set(["RESTORE_DECRYPT_FAILED", "RESTORE_EXECUTOR_FAILED"]);
 
 export function classifyVerifyError(err: unknown): VerifyProof {

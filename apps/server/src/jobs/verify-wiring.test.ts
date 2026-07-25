@@ -26,6 +26,10 @@ describe("classifyVerifyError", () => {
     expect(classifyVerifyError(err("RESTORE_EXECUTOR_FAILED"))).toBe("FAILED");
   });
 
+  it("classifies a scratch write failure as INCONCLUSIVE — our disk failed, not the artifact", () => {
+    expect(classifyVerifyError(err("RESTORE_WRITE_FAILED"))).toBe("INCONCLUSIVE");
+  });
+
   it("never FAILs a backup on a surprise — a non-SchrodumpError is INCONCLUSIVE", () => {
     expect(classifyVerifyError(new Error("surprise"))).toBe("INCONCLUSIVE");
   });
