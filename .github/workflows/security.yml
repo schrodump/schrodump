@@ -107,6 +107,14 @@ jobs:
       # injection the day one of these values stops being trustworthy.
       - name: Gitleaks
         run: |
+          # Pre-pull with retries: the implicit pull inside `docker run` has none, so a transient
+          # Docker Hub timeout fails the job (exit 125) for a reason unrelated to secrets. A real
+          # leak still fails the scan below (exit 1); only the flaky pull is retried.
+          for attempt in 1 2 3; do
+            docker pull zricethezav/gitleaks:v8.30.1 && break
+            echo "gitleaks image pull failed (attempt ${attempt}/3); retrying..." >&2
+            sleep "$((attempt * 5))"
+          done
           docker run --rm -v "$GITHUB_WORKSPACE:/repo" \
             zricethezav/gitleaks:v8.30.1 detect \
             --source=/repo --redact --verbose --exit-code=1
