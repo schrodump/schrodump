@@ -21,6 +21,10 @@ const EnvSchema = z.object({
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.
   SCHRODUMP_SCHEDULER_TICK_MS: z.coerce.number().int().default(30000),
+  // Bounds the awaited drain on SIGTERM. Kept under docker's default 10s stop grace so the abort +
+  // scratch cleanup finish before SIGKILL. The abort itself is sub-second; this only caps a wedged
+  // Docker teardown from holding the process past the window.
+  SCHRODUMP_SHUTDOWN_GRACE_MS: z.coerce.number().int().default(8000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

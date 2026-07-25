@@ -15,6 +15,7 @@ describe("loadEnv worker config", () => {
     expect(env.SCHRODUMP_EXECUTOR_NETWORK).toBe("schrodump_targets");
     expect(env.WORKER_POLL_MS).toBe(2000);
     expect(env.SCHRODUMP_SCHEDULER_TICK_MS).toBe(30000);
+    expect(env.SCHRODUMP_SHUTDOWN_GRACE_MS).toBe(8000);
   });
 
   it("coerces the numeric vars", () => {
@@ -25,12 +26,14 @@ describe("loadEnv worker config", () => {
       SCHRODUMP_MAX_CONCURRENT_STAGED: "4",
       WORKER_POLL_MS: "500",
       SCHRODUMP_SCHEDULER_TICK_MS: "15000",
+      SCHRODUMP_SHUTDOWN_GRACE_MS: "5000",
     } as NodeJS.ProcessEnv);
     expect(env.SCHRODUMP_SCRATCH_PATH).toBe("/scratch");
     expect(env.SCHRODUMP_SCRATCH_MAX_BYTES).toBe(1024);
     expect(env.SCHRODUMP_MAX_CONCURRENT_STAGED).toBe(4);
     expect(env.WORKER_POLL_MS).toBe(500);
     expect(env.SCHRODUMP_SCHEDULER_TICK_MS).toBe(15000);
+    expect(env.SCHRODUMP_SHUTDOWN_GRACE_MS).toBe(5000);
   });
 
   it("rejects SCHRODUMP_MAX_CONCURRENT_STAGED below 1", () => {

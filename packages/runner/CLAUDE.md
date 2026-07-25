@@ -31,11 +31,16 @@ Execução via Docker e gestão de scratch. Prevalece sobre o `CLAUDE.md` da rai
 > delete no `finally`, e **filesystem cifrado no host** — este último é responsabilidade do
 > operador e precisa estar na documentação de deploy.
 
-> **Gap conhecido:** não há handler de `SIGTERM`/`SIGINT` no runner nem no server. O sinal chega
-> (o `dumb-init` entrega, o shutdown é limpo), mas o processo sai na hora e o scratch de um job
-> em andamento **não é liberado no shutdown** — só na varredura do próximo boot (`sweep`, por
-> idade). A janela em que o dump fica em claro é essa. Corrigir é instalar o handler que aciona o
-> delete antes de sair. Ver `docs/roadmap.md` e `docs/security.md`.
+> **`SIGTERM` gracioso:** o server instala o handler (`jobs/shutdown.ts`), não o runner. No sinal:
+> para de reivindicar novos jobs, aborta o `AbortSignal` compartilhado — o que faz o `run()`/
+> `withEphemeralService()` em andamento (Task 1) matar o container à força e rejeitar
+> `RUNNER_ABORTED` — espera o tick assentar (`whenIdle()`, Task 2) sob um budget
+> (`SCHRODUMP_SHUTDOWN_GRACE_MS`, default 8s) e só então desconecta. O `finally` do executor libera
+> a reserva de scratch nesse abort do mesmo jeito que libera num erro comum, então o dump em claro
+> de um job interrompido normalmente **é removido no shutdown**, não só na próxima varredura.
+> Residual: um `SIGKILL` que chega antes do grace expirar (ou antes do handler terminar) pula esse
+> caminho inteiro — aí a varredura de boot (`sweep`, por idade) continua sendo o backstop. Ver
+> `docs/roadmap.md` e `docs/security.md`.
 
 ## SPDX
 
