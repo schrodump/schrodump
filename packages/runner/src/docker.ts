@@ -137,6 +137,17 @@ export class DockerRunner implements Runner {
     spec: EphemeralServiceSpec,
     use: (handle: EphemeralServiceHandle) => Promise<T>,
   ): Promise<T> {
+    // Pre-flight the network exactly as run() does, and BEFORE startService — a missing network makes
+    // container.start() throw AFTER createContainer already succeeded, orphaning the container we'd
+    // never get a handle to remove. Failing here means no container is created in that case.
+    if (!(await this.#engine.networkExists(spec.network))) {
+      throw new SchrodumpError(`docker network "${spec.network}" does not exist`, {
+        code: "RUNNER_NETWORK_MISSING",
+        correlationId: spec.correlationId,
+        context: { network: spec.network },
+      });
+    }
+
     const svc = await this.#engine.startService(spec);
 
     try {
@@ -291,9 +302,18 @@ class DockerodeEngine implements DockerEngine {
       },
     });
 
-    await container.start();
+    // Once createContainer succeeds the container exists and must be reaped even if start/inspect
+    // throws (e.g. a start failure), otherwise it leaks — withEphemeralService only ever gets a
+    // handle to remove on the RETURN path. Force-remove on throw, then rethrow the original error.
+    let info: Docker.ContainerInspectInfo;
+    try {
+      await container.start();
+      info = await container.inspect();
+    } catch (err) {
+      await container.remove({ force: true }).catch(() => undefined);
+      throw err;
+    }
 
-    const info = await container.inspect();
     const ipAddress = info.NetworkSettings.Networks[spec.network]?.IPAddress;
     // No IP yet (e.g. some network drivers resolve it only via DNS) — fall back to the
     // container's own name, which Docker always registers as a DNS alias on user-defined networks.

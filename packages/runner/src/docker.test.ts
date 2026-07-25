@@ -34,6 +34,7 @@ class FakeEngine implements DockerEngine {
   readonly #readyAfter: number;
   execCalls = 0;
   serviceRemoved = false;
+  startServiceCalled = false;
   lastServiceHost: string | undefined;
 
   constructor(options: FakeEngineOptions = { readyAfter: 1 }) {
@@ -62,6 +63,7 @@ class FakeEngine implements DockerEngine {
   }
 
   async startService(spec: EphemeralServiceSpec): Promise<StartedService> {
+    this.startServiceCalled = true;
     const host = `svc-${spec.image}`;
     this.lastServiceHost = host;
     return {
@@ -201,6 +203,18 @@ describe("DockerRunner.withEphemeralService", () => {
       }),
     ).rejects.toThrow("boom");
     expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("throws RUNNER_NETWORK_MISSING and never starts a service when the network is missing", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    engine.networkOk = false;
+    await expect(
+      new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "x"),
+    ).rejects.toMatchObject({ code: "RUNNER_NETWORK_MISSING" });
+    // No container is created when the pre-flight fails — startService is never reached, so nothing
+    // can leak. (The internal force-remove-on-throw inside DockerodeEngine.startService is
+    // real-Docker-only; not unit-tested here.)
+    expect(engine.startServiceCalled).toBe(false);
   });
 });
 
