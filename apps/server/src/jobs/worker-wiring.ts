@@ -184,7 +184,14 @@ export function resolveVerifyPlan(
       downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
     };
   }
-  if (requested === "FULL_RESTORE" && engine !== "postgres" && scopedDatabases.length === 0) {
+  // An empty-string db name is not a real scope entry: the route rejects it (targets.ts .min(1)).
+  // "Scoped" is judged EXACTLY as originDatabaseFor resolves the origin db — the FIRST entry, non-
+  // empty — so the two can never disagree over what a legacy/malformed [""] (or [""].concat(...))
+  // stored scope means. Were this to read [""] as scoped while originDatabaseFor collapses to the
+  // system db, we would keep FULL_RESTORE and mint the exact false VERIFIED above.
+  const firstScoped = scopedDatabases[0];
+  const isScoped = firstScoped !== undefined && firstScoped.length > 0;
+  if (requested === "FULL_RESTORE" && engine !== "postgres" && !isScoped) {
     return {
       effectiveLevel: "CHECKSUM",
       downgradeReason: `unscoped ${engine} artifacts cannot be FULL_RESTORE-verified in v1 (multi-database archive): downgraded to CHECKSUM`,

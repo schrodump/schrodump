@@ -62,6 +62,22 @@ describe("resolveVerifyPlan", () => {
     expect(plan.downgradeReason).toMatch(/unscoped mongodb artifacts cannot be FULL_RESTORE-verified/i);
   });
 
+  it("treats a scope whose first entry is empty as unscoped — consistent with originDatabaseFor (M3)", () => {
+    // An empty-string db name is not a real scope entry (targets.ts .min(1) rejects it at the border).
+    // resolveVerifyPlan and originDatabaseFor must never disagree: both key off the first NON-EMPTY
+    // entry, so [""] and ["", "app"] are unscoped (downgrade → no false VERIFIED), while ["app"] is
+    // scoped (keeps FULL_RESTORE). originDatabaseFor("mysql", [""]) === "mysql" pins the same rule.
+    for (const scope of [[""], ["", "app"]]) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", "mysql", "STREAM", scope);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(originDatabaseFor("mysql", scope)).toBe("mysql");
+    }
+    expect(resolveVerifyPlan("FULL_RESTORE", "mysql", "STREAM", ["app"])).toEqual({
+      effectiveLevel: "FULL_RESTORE",
+      downgradeReason: null,
+    });
+  });
+
   it("keeps CHECKSUM unchanged with no downgrade reason regardless of executionMode", () => {
     expect(resolveVerifyPlan("CHECKSUM", "mysql", "STREAM", [])).toEqual({
       effectiveLevel: "CHECKSUM",

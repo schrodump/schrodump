@@ -90,4 +90,18 @@ describe("targets — credential is write-only", () => {
     expect(res.statusCode).toBe(403);
     await app.close();
   });
+
+  // M3: an empty-string db name is never a valid scope entry (a [""] scope is ambiguous downstream —
+  // resolveVerifyPlan/originDatabaseFor treat it as unscoped). Reject it at the border so it is not
+  // storable in the first place.
+  it("rejects a scope containing an empty database name (400)", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets",
+      payload: { ...CREATE_PAYLOAD, scope: { databases: [""], schemas: [], collections: [] } },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
 });

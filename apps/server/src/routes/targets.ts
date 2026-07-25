@@ -10,7 +10,10 @@ import { scopedPrisma } from "../data/scope.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
 const ScopeSchema = z.object({
-  databases: z.array(z.string()),
+  // An empty db name is never a valid scope entry: it is not storable here, and downstream a `[""]`
+  // scope is ambiguous — resolveVerifyPlan/originDatabaseFor (worker-wiring.ts) treat it as unscoped.
+  // Reject it at the border so the two can never disagree over what a stored scope means.
+  databases: z.array(z.string().min(1)),
   schemas: z.array(z.string()),
   collections: z.array(z.string()),
 });
