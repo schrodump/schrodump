@@ -147,23 +147,30 @@ export interface VerifyPlan {
 // pipeline (restore.ts's gate), so it is downgraded to CHECKSUM for a STAGED artifact of ANY engine:
 // running CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting
 // the central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a restore pipeline that
-// cannot run for that artifact yet. STREAM of any engine keeps FULL_RESTORE (wired via
-// runFullRestore) EXCEPT unscoped mongo (see below). The sealed-destination downgrade lives in the
+// cannot run for that artifact yet. STREAM keeps FULL_RESTORE (wired via runFullRestore) EXCEPT for
+// an UNSCOPED non-postgres artifact (see below). The sealed-destination downgrade lives in the
 // domain (runVerifyJob) and is orthogonal to this one.
 //
-// Unscoped mongo is downgraded too, for a different reason than STAGED: mongodump --archive on a
-// replica set produces a full-instance archive (mongodb.ts's buildDump REFUSES a scoped dump on a
-// replica set — MONGODB_OPLOG_REQUIRES_FULL_DUMP — so every replica set is forced unscoped), and
-// mongorestore --archive restores each user db under its own embedded name, never into `admin`.
-// originDatabaseFor collapses an unscoped mongo origin to "admin" (there is no single origin db for
-// a multi-db archive), so buildVerifyAssertions would count collections in admin — which holds only
-// system collections and the bootstrapped `verify` root user, never the restored app data. That
-// count is unrelated to what actually restored: an empty admin would FAIL a good backup, and a
-// populated admin.system.users would VERIFY one that never proved the app data landed. Both blur
-// the VERIFIED/FAILED distinction. Downgrading to CHECKSUM is the same honest deferral as the STAGED
-// case: a good unscoped-mongo artifact stays VERIFIED via CHECKSUM instead of getting a wrong
-// verdict. A SCOPED mongo target (scopedDatabases.length > 0) has a real origin db and keeps
-// FULL_RESTORE.
+// Why an UNSCOPED non-postgres artifact downgrades too — a different reason than STAGED. For these
+// engines an unscoped artifact is a MULTI-DATABASE archive, but the verify sandbox restores it and
+// then counts objects in the SINGLE origin db originDatabaseFor resolves — which, unscoped, collapses
+// to a SYSTEM db that never holds the restored app data, so the assertion's count is unrelated to
+// whether the data actually landed:
+//   - mysql/mariadb: an unscoped mysqldump embeds `USE <db>` per user database; originDatabaseFor
+//     collapses to the "mysql" SYSTEM db, whose ~30 always-present system tables make the table
+//     count >= 1 REGARDLESS of whether any user data restored → a FALSE VERIFIED.
+//   - mongodb: mongodump --archive on a replica set is a full-instance archive (mongodb.ts's buildDump
+//     REFUSES a scoped dump on a replica set — MONGODB_OPLOG_REQUIRES_FULL_DUMP — so every replica set
+//     is forced unscoped); originDatabaseFor collapses to "admin", which holds only system collections
+//     and the bootstrapped `verify` root user. An empty admin would FAIL a good backup; a populated
+//     admin.system.users would VERIFY one that never proved the app data landed.
+// Both blur VERIFIED/FAILED, so both downgrade to CHECKSUM — the same honest deferral as STAGED: a
+// good unscoped artifact stays VERIFIED via CHECKSUM instead of getting a wrong verdict. A SCOPED
+// target (a non-empty database in scope) has a real origin db and keeps FULL_RESTORE.
+//
+// POSTGRES is exempt: its -Fc dump is db-name-agnostic and restores into the fixed "verify" sandbox
+// db, where the assertion counts ALL non-system schemas — so it needs no scope and cannot hit this
+// system-db collapse.
 export function resolveVerifyPlan(
   policyLevel: VerifyLevel | null,
   engine: EngineKind,
@@ -177,11 +184,10 @@ export function resolveVerifyPlan(
       downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
     };
   }
-  if (requested === "FULL_RESTORE" && engine === "mongodb" && scopedDatabases.length === 0) {
+  if (requested === "FULL_RESTORE" && engine !== "postgres" && scopedDatabases.length === 0) {
     return {
       effectiveLevel: "CHECKSUM",
-      downgradeReason:
-        "unscoped MongoDB artifacts cannot be FULL_RESTORE-verified in v1 (multi-db archive): downgraded to CHECKSUM",
+      downgradeReason: `unscoped ${engine} artifacts cannot be FULL_RESTORE-verified in v1 (multi-database archive): downgraded to CHECKSUM`,
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };

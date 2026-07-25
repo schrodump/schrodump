@@ -16,13 +16,14 @@ import {
 import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
-  it("keeps FULL_RESTORE for STREAM with no downgrade, for any non-mongo engine unscoped", () => {
-    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
-      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", [])).toEqual({
-        effectiveLevel: "FULL_RESTORE",
-        downgradeReason: null,
-      });
-    }
+  it("keeps FULL_RESTORE for an UNSCOPED postgres STREAM artifact (its -Fc dump needs no scope)", () => {
+    // Postgres is the ONLY engine exempt from the unscoped downgrade: its db-name-agnostic -Fc dump
+    // restores into the fixed "verify" sandbox db and the assertion counts all non-system schemas
+    // there, so it never hits the system-db collapse the other engines do.
+    expect(resolveVerifyPlan("FULL_RESTORE", "postgres", "STREAM", [])).toEqual({
+      effectiveLevel: "FULL_RESTORE",
+      downgradeReason: null,
+    });
   });
 
   it("keeps FULL_RESTORE for STREAM with no downgrade, for any engine when scoped", () => {
@@ -42,26 +43,23 @@ describe("resolveVerifyPlan", () => {
     }
   });
 
-  it("downgrades an UNSCOPED mongo FULL_RESTORE (STREAM) to CHECKSUM with a mongo-specific reason", () => {
+  it("downgrades an UNSCOPED mysql/mariadb FULL_RESTORE (STREAM) to CHECKSUM — guards the system-db false VERIFIED", () => {
+    // C1: originDatabaseFor collapses an unscoped mysql/mariadb origin to the "mysql" SYSTEM db,
+    // whose ~30 always-present system tables make the verify table count >= 1 REGARDLESS of whether
+    // any user data landed. Downgrade to CHECKSUM rather than mint a false VERIFIED.
+    for (const engine of ["mysql", "mariadb"] as const) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", []);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(plan.downgradeReason).toMatch(
+        new RegExp(`unscoped ${engine} artifacts cannot be FULL_RESTORE-verified`, "i"),
+      );
+    }
+  });
+
+  it("downgrades an UNSCOPED mongo FULL_RESTORE (STREAM) to CHECKSUM (full-instance archive)", () => {
     const plan = resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", []);
     expect(plan.effectiveLevel).toBe("CHECKSUM");
-    expect(plan.downgradeReason).toMatch(/unscoped MongoDB/i);
-  });
-
-  it("keeps FULL_RESTORE for a SCOPED mongo artifact (STREAM) — does not downgrade", () => {
-    expect(resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", ["app"])).toEqual({
-      effectiveLevel: "FULL_RESTORE",
-      downgradeReason: null,
-    });
-  });
-
-  it("does not downgrade unscoped non-mongo engines (postgres/mysql unaffected)", () => {
-    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
-      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", [])).toEqual({
-        effectiveLevel: "FULL_RESTORE",
-        downgradeReason: null,
-      });
-    }
+    expect(plan.downgradeReason).toMatch(/unscoped mongodb artifacts cannot be FULL_RESTORE-verified/i);
   });
 
   it("keeps CHECKSUM unchanged with no downgrade reason regardless of executionMode", () => {
