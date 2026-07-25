@@ -178,8 +178,26 @@ export const mongodbAdapter: EngineAdapter = {
       // --host 127.0.0.1 forces mongosh to probe TCP explicitly rather than relying on mongosh's
       // own default resolution — the same defensive posture as postgres's pg_isready -h 127.0.0.1
       // and mysql's mysqladmin ping -h 127.0.0.1 (see postgres.ts / mysql.ts buildVerifySandbox).
-      // `ping` is unauthenticated in MongoDB, so this works before the root user is even usable.
-      readinessCommand: ["mongosh", "--host", "127.0.0.1", "--quiet", "--eval", "db.runCommand({ping:1}).ok"],
+      //
+      // Unlike postgres/mysql, an unauthenticated ping is NOT enough here. Postgres's and mysql's
+      // bootstrap temp servers are socket-only (no TCP), so forcing TCP alone already guarantees
+      // the readiness probe only ever reaches the real server. Mongo's bootstrap sequence is
+      // different: the *temporary* mongod that creates the root user ALSO binds TCP on
+      // 127.0.0.1:27017, with --auth stripped — verified empirically against mongo:8. An
+      // unauthenticated `ping` (pre-auth-allowed by MongoDB by design) succeeds against that temp
+      // server in a few ms, well before the real, auth-enforcing server (with the root user) is
+      // up — declaring the sandbox ready while mongorestore/verify then races a server that's
+      // about to restart. Requiring auth as the `verify` root user (who only exists once the real
+      // server is up, in `admin`) closes that race: the probe can only succeed against the real
+      // server. The password is read from $MONGO_INITDB_ROOT_PASSWORD, expanded by the
+      // container's own shell from the container's own env (set below) — it never appears on our
+      // argv or in this command array.
+      readinessCommand: [
+        "sh",
+        "-c",
+        'exec mongosh -u verify -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin ' +
+          "--host 127.0.0.1 --quiet --eval 'db.runCommand({ping:1}).ok'",
+      ],
       port: 27017,
       username,
       password,

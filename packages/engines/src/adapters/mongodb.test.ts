@@ -149,19 +149,31 @@ describe("mongodbAdapter.buildVerifySandbox", () => {
     expect(s.env.MONGO_INITDB_ROOT_PASSWORD).toBe("pw");
     // --host 127.0.0.1 forces mongosh to probe TCP rather than whatever mongosh would otherwise
     // default to, the same defensive lesson as postgres's pg_isready -h 127.0.0.1 and mysql's
-    // mysqladmin ping -h 127.0.0.1 (see postgres.ts / mysql.ts buildVerifySandbox).
+    // mysqladmin ping -h 127.0.0.1 (see postgres.ts / mysql.ts buildVerifySandbox). Unlike
+    // postgres/mysql, the readiness check must also be AUTHENTICATED: mongo's temp bootstrap
+    // server binds TCP with --auth stripped, so an unauthenticated ping false-positives against
+    // it before the real (root-user) server is up. Requiring auth as "verify" against admin means
+    // only the real server can pass.
     expect(s.readinessCommand).toEqual([
-      "mongosh",
-      "--host",
-      "127.0.0.1",
-      "--quiet",
-      "--eval",
-      "db.runCommand({ping:1}).ok",
+      "sh",
+      "-c",
+      'exec mongosh -u verify -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin ' +
+        "--host 127.0.0.1 --quiet --eval 'db.runCommand({ping:1}).ok'",
     ]);
     expect(s.port).toBe(27017);
     expect(s.username).toBe("verify");
     expect(s.password).toBe("pw");
     expect(s.database).toBe("shop");
+  });
+
+  it("never puts the actual password on argv — only the env-var reference", () => {
+    const s = mongodbAdapter.buildVerifySandbox!(80000, "s3cret-pw", "shop");
+    for (const arg of s.readinessCommand) {
+      expect(arg).not.toContain("s3cret-pw");
+    }
+    const joined = s.readinessCommand.join(" ");
+    expect(joined).toContain("$MONGO_INITDB_ROOT_PASSWORD");
+    expect(s.env.MONGO_INITDB_ROOT_PASSWORD).toBe("s3cret-pw");
   });
 });
 
