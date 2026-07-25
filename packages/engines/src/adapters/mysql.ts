@@ -29,13 +29,19 @@ function tlsArgs(family: SqlFamily, tls: boolean): string[] {
   return [tls ? "--ssl-mode=REQUIRED" : "--ssl-mode=DISABLED"];
 }
 
-// mariadb:11+ dropped the `mysql` -> mariadb compat symlink that mariadb:10.x still ships
-// (verified: `docker run --rm mariadb:11 which mysql` fails with exit 1; `mariadb:10.11 which
-// mysql` resolves via a symlink to `mariadb`). The mysql family never ships a `mariadb` binary
-// either way. Hardcoding "mysql" for both families (as buildDump/buildVerifyAssertions already
-// do, below) would make a shell-exec restore fail outright (exit 127) against mariadb 11+.
+// mariadb:11+ dropped the `mysql`/`mysqldump` -> mariadb compat symlinks that mariadb:10.x still
+// ships (verified: `docker run --rm mariadb:11 which mariadb-dump mariadb` resolves to
+// /usr/bin/mariadb-dump and /usr/bin/mariadb, while `mysqldump`/`mysql` are ABSENT; mariadb:10.11
+// still resolves `mysql`/`mysqldump` via symlinks -> mariadb/mariadb-dump). The mysql family never
+// ships the `mariadb*` names either way. So EVERY client invocation — dump (buildDump), restore
+// (buildRestore) and the verify assertion (buildVerifyAssertions) — must select the family-correct
+// binary, or it exits 127 against a mariadb 11+ target (which the capability matrix advertises).
 function clientBinary(family: SqlFamily): string {
   return family === "mariadb" ? "mariadb" : "mysql";
+}
+
+function dumpBinary(family: SqlFamily): string {
+  return family === "mariadb" ? "mariadb-dump" : "mysqldump";
 }
 
 // Single-quote a value for safe interpolation into a POSIX shell command string: close the
@@ -89,7 +95,7 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
         };
       }
 
-      // STREAM: mysqldump --single-transaction to stdout.
+      // STREAM: mysqldump/mariadb-dump --single-transaction to stdout.
       const databaseArgs =
         input.scope.databases.length > 0
           ? ["--databases", ...input.scope.databases]
@@ -97,7 +103,7 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
       const descriptor: ExecutionDescriptor = {
         image: this.imageFor(input.serverVersionNum),
         command: [
-          "mysqldump",
+          dumpBinary(family),
           "--single-transaction",
           ...connArgs(connection),
           ...tlsArgs(family, connection.tls),
@@ -196,11 +202,12 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
     buildVerifyAssertions(input) {
       const connection = input.connection;
       // Connect to the restored database and count its tables; DATABASE() avoids interpolating
-      // the identifier into the SQL text.
+      // the identifier into the SQL text. Family-aware binary (see clientBinary): mariadb 11+ has
+      // no `mysql` client, so hardcoding it would exit 127 on the verify assertion.
       return {
         image: this.imageFor(input.serverVersionNum),
         command: [
-          "mysql",
+          clientBinary(family),
           ...connArgs(connection),
           connection.database,
           "-N",

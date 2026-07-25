@@ -61,6 +61,28 @@ describe("mysqlAdapter.buildDump", () => {
     expect(descriptor.outputKind).toBe("stdout");
   });
 
+  // mariadb:11+ dropped the `mysqldump` compat symlink (verified: `docker run --rm mariadb:11 which
+  // mariadb-dump mariadb` resolves both; `mysqldump`/`mysql` are absent). The dump binary is
+  // therefore family-aware, or a mariadb 11+ backup exits 127 (FAILED) — mirroring buildRestore.
+  it("STREAM emits mariadb-dump (not mysqldump) for the mariadb family", () => {
+    const descriptor = mariadbAdapter.buildDump(dumpInput({ serverVersionNum: 110402 }));
+    expect(descriptor.command).toEqual([
+      "mariadb-dump",
+      "--single-transaction",
+      "-h",
+      "db.internal",
+      "-P",
+      "3306",
+      "-u",
+      "backup",
+      "--ssl",
+      "--databases",
+      "app",
+    ]);
+    expect(descriptor.env.MYSQL_PWD).toBe("s3cret");
+    expect(descriptor.outputKind).toBe("stdout");
+  });
+
   it("STAGED emits mydumper to a directory with its own image", () => {
     const descriptor = mysqlAdapter.buildDump(
       dumpInput({ executionMode: "STAGED", parallelism: 4, stagingPath: "/scratch/out" }),
@@ -194,6 +216,53 @@ describe("buildRestore", () => {
     });
     const script = descriptor.command[2];
     expect(script).toContain("< '/tmp/it'\\''s-a-path'");
+  });
+});
+
+describe("buildVerifyAssertions", () => {
+  const verifyInput = {
+    connection: CONN,
+    serverVersionNum: 80036,
+    scope: { databases: [], schemas: [], collections: [] },
+  };
+
+  it("counts tables via the mysql client for the mysql family", () => {
+    const descriptor = mysqlAdapter.buildVerifyAssertions(verifyInput);
+    expect(descriptor.command).toEqual([
+      "mysql",
+      "-h",
+      "db.internal",
+      "-P",
+      "3306",
+      "-u",
+      "backup",
+      "app",
+      "-N",
+      "-e",
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()",
+    ]);
+    expect(descriptor.env.MYSQL_PWD).toBe("s3cret");
+    expect(descriptor.command.join(" ")).not.toContain("s3cret");
+  });
+
+  // mariadb 11+ has no `mysql` client binary (only `mariadb`); hardcoding "mysql" would exit 127
+  // on the verify assertion, silently turning a good restore INCONCLUSIVE. Family-aware, like dump.
+  it("counts tables via the mariadb client for the mariadb family", () => {
+    const descriptor = mariadbAdapter.buildVerifyAssertions({ ...verifyInput, serverVersionNum: 110402 });
+    expect(descriptor.command).toEqual([
+      "mariadb",
+      "-h",
+      "db.internal",
+      "-P",
+      "3306",
+      "-u",
+      "backup",
+      "app",
+      "-N",
+      "-e",
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()",
+    ]);
+    expect(descriptor.env.MYSQL_PWD).toBe("s3cret");
   });
 });
 
