@@ -19,7 +19,7 @@ import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
 import type { ProbeConnection, ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
-import { createDockerRunner } from "@schrodump/runner/runner";
+import { createDockerRunner, type RunMount } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
 import {
   resolveDecryptionKeyId,
@@ -27,6 +27,7 @@ import {
   type EncryptionKeyRecord,
 } from "../crypto/artifact.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { writeMongoConfig } from "../crypto/mongo-config.js";
 import type { Env } from "../env.js";
 import { createBackupPorts } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
@@ -74,6 +75,12 @@ const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 const DUMP_SCRATCH_BYTES = 4096;
 const RESTORE_SCRATCH_REQUIRED_REASON =
   "restore requires a configured scratch path for the decrypted dump";
+// Mongo delivers the dump/restore password through a bind-mounted `--config` file (off argv). A
+// RunMount.source must be a Docker-daemon path, so that file has to live on the shared scratch
+// volume — mongo backup therefore requires scratch, and says so plainly instead of failing deep in
+// the executor. The reservation is tiny (the file is a single `password:` line).
+const MONGO_CONFIG_SCRATCH_REQUIRED_REASON =
+  "mongodb backup requires a configured scratch path for the --config credential file";
 
 type EngineProbeFn = (conn: ProbeConnection) => Promise<EngineProbeResult>;
 
@@ -277,6 +284,27 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       tls: target.tls,
     };
 
+    // Mongo's password reaches mongodump ONLY through a bind-mounted `--config` file (never argv);
+    // every other engine passes it via env and mounts nothing. That file is a cleartext credential,
+    // so it lives on the scratch volume (0700 reserved dir, 0600 file, gc-swept, deploy-encrypted) and
+    // is removed in the finally around runBackupJob. Mongo is STREAM-only (stagedCapable:false), so
+    // runBackupJob never takes a STAGED reservation on this job id — no collision with this one.
+    let mongoConfigMount: RunMount | undefined;
+    let releaseMongoConfig: (() => Promise<void>) | null = null;
+    if (engine === "mongodb") {
+      if (scratch === null) {
+        await failJob(job.id, MONGO_CONFIG_SCRATCH_REQUIRED_REASON);
+        return { ok: false, artifactId: null, verifyLevel: "NONE" };
+      }
+      const reservation = await scratch.reserve(job.id, DUMP_SCRATCH_BYTES);
+      const configFile = await writeMongoConfig(reservation.path, password);
+      mongoConfigMount = configFile.mount;
+      releaseMongoConfig = async () => {
+        await configFile.cleanup();
+        await reservation.release();
+      };
+    }
+
     const startedAt = Date.now();
     const stagingPathFor = (): string | undefined =>
       deps.env.SCHRODUMP_SCRATCH_PATH !== undefined
@@ -292,6 +320,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
       prefix: destination.prefix,
       timeoutMs: DUMP_TIMEOUT_MS,
+      // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
+      ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
       setState: (state, reason) => setJobState(job.id, state, reason),
       probe: () => Promise.resolve(backupProbe),
       reserveScratch: async (estimatedBytes) => {
@@ -374,20 +404,26 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       },
     });
 
-    const outcome = await runBackupJob(
-      {
-        jobId: job.id,
-        organizationId: job.organizationId,
-        requestedParallelism: policy.parallelism,
-        // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
-        // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
-        stagedThresholdBytes: deps.env.SCHRODUMP_SCRATCH_MAX_BYTES,
-        scratchConfigured: scratch !== null,
-      },
-      ports,
-    );
+    try {
+      const outcome = await runBackupJob(
+        {
+          jobId: job.id,
+          organizationId: job.organizationId,
+          requestedParallelism: policy.parallelism,
+          // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
+          // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
+          stagedThresholdBytes: deps.env.SCHRODUMP_SCRATCH_MAX_BYTES,
+          scratchConfigured: scratch !== null,
+        },
+        ports,
+      );
 
-    return { ok: outcome.ok, artifactId: outcome.artifactId, verifyLevel: policy.verifyLevel };
+      return { ok: outcome.ok, artifactId: outcome.artifactId, verifyLevel: policy.verifyLevel };
+    } finally {
+      // Remove the mongo `--config` credential file (and release its reservation) whether the dump
+      // succeeded or threw; a no-op for the other engines.
+      if (releaseMongoConfig !== null) await releaseMongoConfig();
+    }
   };
 
   const runVerify = async (job: ClaimedJob): Promise<void> => {
@@ -559,6 +595,18 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   const reservation = await scratchManager.reserve(job.id, DUMP_SCRATCH_BYTES);
                   return { dir: reservation.path, cleanup: () => reservation.release() };
                 },
+                // Mongo's mongorestore needs the `--config` password file mounted here too; the
+                // sandbox uses the throwaway root password. Unreachable until buildVerifySandbox exists
+                // for mongo (Task 7) — mongo FULL_RESTORE returns INCONCLUSIVE before this call today —
+                // but wired so the sandbox restore is correct the moment it lands.
+                ...(engine === "mongodb"
+                  ? {
+                      provideExtraMounts: async (dir: string) => {
+                        const configFile = await writeMongoConfig(dir, conn.password);
+                        return { mounts: [configFile.mount], cleanup: configFile.cleanup };
+                      },
+                    }
+                  : {}),
               });
 
               // Restore landed. Assert a usable schema: count the restored user tables. Collect the
@@ -808,6 +856,17 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   executionMode: artifact.executionMode,
                   sourcePath,
                 }),
+          // Mongo restore reads its password from the mounted `--config` file (off argv); the pipeline
+          // materializes it into the reserved staging dir (same swept volume as the dump) and removes
+          // it before releasing that dir. Other engines carry the password in env → no mount.
+          ...(engine === "mongodb"
+            ? {
+                provideExtraMounts: async (dir: string) => {
+                  const configFile = await writeMongoConfig(dir, connection.password);
+                  return { mounts: [configFile.mount], cleanup: configFile.cleanup };
+                },
+              }
+            : {}),
           reserveStaging: async () => {
             // I1: reserve the per-job scratch DIRECTORY (ScratchManager.gc() reclaims it if a hard
             // kill skips the finally cleanup; a bare root file would be skipped by gc). It holds the

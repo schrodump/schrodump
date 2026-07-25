@@ -6,10 +6,11 @@ import { EngineDescriptorError, type EngineAdapter, type TargetConnection } from
 // The official mongo:<major> image ships mongodump/mongorestore (MongoDB Database Tools),
 // verified empirically: `docker run --rm mongo:8 which mongodump` -> /usr/bin/mongodump.
 
-// The password is delivered through this mounted config file (runner materializes
-// env MONGODB_PASSWORD into it); it never reaches argv. mongodump/mongorestore load the
-// password from `--config`.
-const MONGO_CONFIG_PATH = "/etc/schrodump/mongodb.yaml";
+// The password is delivered through this mounted config file (apps/server materializes it as a 0600
+// scratch file — see crypto/mongo-config.ts — and bind-mounts it here); it never reaches argv.
+// mongodump/mongorestore load the password from `--config`. Exported so the composer mounts THIS
+// path rather than hardcoding it.
+export const MONGO_CONFIG_PATH = "/etc/schrodump/mongodb.yaml";
 
 function mongoConnArgs(connection: TargetConnection): string[] {
   return [

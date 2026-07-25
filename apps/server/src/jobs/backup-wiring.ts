@@ -13,7 +13,7 @@ import { resolveCapabilities } from "@schrodump/core/capabilities";
 import type { EngineKind } from "@schrodump/core/types";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { Manifest } from "@schrodump/core/manifest";
-import type { Runner } from "@schrodump/runner/runner";
+import type { RunMount, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { manifestKey, writeManifest } from "@schrodump/storage/manifest-sidecar";
 import type { ExecutionMode } from "./execution-mode.js";
@@ -31,6 +31,11 @@ export interface BackupWiringDeps {
   network: string;
   prefix: string;
   timeoutMs: number;
+  // The mongo dump reads its password from a `--config` file that must be bind-mounted into the
+  // mongodump executor (kept off argv). Set ONLY for the mongodb engine; every other engine passes
+  // the password via env (PGPASSWORD/MYSQL_PWD) and runs with no mount. Materialized + cleaned up by
+  // the composer (worker-wiring), which holds the decrypted password.
+  configMount?: RunMount;
   setState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
   probe(): Promise<ProbeResult>;
   reserveScratch(estimatedBytes: number): Promise<Reservation>;
@@ -63,7 +68,9 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     const dumpOut = new PassThrough();
     const runPromise = deps.runner.run(descriptor, {
       network: deps.network,
-      mounts: [],
+      // Empty for every engine except mongodb, whose password is delivered through the mounted
+      // `--config` file rather than argv/env.
+      mounts: deps.configMount !== undefined ? [deps.configMount] : [],
       stdout: dumpOut,
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,

@@ -112,4 +112,41 @@ describe("createBackupPorts.executeAndUpload", () => {
     expect(upload.checksum).toMatch(/^[0-9a-f]+$/);
     expect(upload.sizeCompressedBytes).toBeGreaterThan(0);
   });
+
+  // The mongo `--config` credential mount is the one thing this task wires into the dump run: the
+  // password must ride in on a mount, never argv. Capture what the runner actually received.
+  it("mounts configMount into the dump run when set (mongo), and nothing otherwise", async () => {
+    const capture: RunOptions[] = [];
+    const capturingRunner: Runner = {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push(opts);
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+
+    const run = async (configMount?: RunOptions["mounts"][number]): Promise<void> => {
+      const { deps, recipient } = await makeDeps(0);
+      const ports = createBackupPorts({
+        ...deps,
+        runner: capturingRunner,
+        ...(configMount !== undefined ? { configMount } : {}),
+      });
+      await ports.executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      });
+    };
+
+    const mount = { source: "/scratch/job-1/mongo-config.yaml", target: "/etc/schrodump/mongodb.yaml", readOnly: true };
+    await run(mount);
+    expect(capture[0]?.mounts).toEqual([mount]);
+
+    capture.length = 0;
+    await run(undefined);
+    expect(capture[0]?.mounts).toEqual([]);
+  });
 });

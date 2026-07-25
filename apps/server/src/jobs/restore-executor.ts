@@ -191,6 +191,12 @@ export interface RestorePipelineDeps {
   // reservation (recursively removing the dir). The age identity is NOT written here — it decrypts
   // in-process, in memory.
   reserveStaging: () => Promise<{ dir: string; cleanup: () => Promise<void> }>;
+  // Extra read-only credential mounts every engine restore executor needs (today only mongo's
+  // `--config` password file). Materialized into the reserved staging dir AFTER it exists — so the
+  // secret lands on the same swept 0700 volume as the decrypted dump and needs no second scratch
+  // reservation (avoiding a self-deadlock on the staged-concurrency semaphore) — and removed before
+  // the staging dir is released. Absent for engines that pass the password via env.
+  provideExtraMounts?: (stagingDir: string) => Promise<{ mounts: RunMount[]; cleanup: () => Promise<void> }>;
 }
 
 // Downloads each encrypted object, decrypts it in-process (age Decrypter, identity held in memory,
@@ -200,6 +206,9 @@ export interface RestorePipelineDeps {
 // dump is always removed in finally; cleanup releases the reserved scratch dir.
 export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boolean> {
   const staging = await deps.reserveStaging();
+  // Materialize any credential mount (mongo's `--config`) into the reserved dir before the executors
+  // run; empty for engines that pass the password via env.
+  const extra = deps.provideExtraMounts ? await deps.provideExtraMounts(staging.dir) : null;
   try {
     const steps = planRestoreSteps(
       deps.bucketKey,
@@ -208,12 +217,14 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
       deps.buildGlobalsRestoreDescriptor,
     );
     for (const step of steps) {
-      await restoreOne(deps, staging.dir, step);
+      await restoreOne(deps, staging.dir, step, extra?.mounts ?? []);
     }
     return true;
   } finally {
+    // Remove the credential file before the dir is swept (narrows the cleartext window), then
     // release() recursively removes the reserved dir, sweeping any decrypted dump a per-step cleanup
     // missed after a hard failure.
+    if (extra !== null) await extra.cleanup();
     await staging.cleanup();
   }
 }
@@ -233,6 +244,9 @@ async function restoreOne(
   deps: RestorePipelineDeps,
   stagingDir: string,
   step: RestoreStep,
+  // Credential mounts (mongo `--config`) added to this executor alongside the dump mount; [] for
+  // engines that carry the password in env.
+  extraMounts: readonly RunMount[],
 ): Promise<void> {
   // S3 ciphertext -> in-process age decrypt -> gunzip -> a scratch FILE. Then mount that file into
   // the engine restore executor and let it read the FILE (its sourcePath), never a stdin.
@@ -300,11 +314,12 @@ async function restoreOne(
       await dumpHandle.close();
     }
 
-    // Mount the decrypted dump read-only; the engine restore reads the file, NOT stdin.
+    // Mount the decrypted dump read-only; the engine restore reads the file, NOT stdin. Any
+    // credential mount (mongo `--config`) rides alongside it — [] for the other engines.
     const dumpMount: RunMount = { source: dumpPath, target: RESTORE_DUMP_PATH, readOnly: true };
     const restoreResult = await deps.runner.run(step.buildDescriptor(RESTORE_DUMP_PATH), {
       network: deps.network,
-      mounts: [dumpMount],
+      mounts: [dumpMount, ...extraMounts],
       timeoutMs: deps.timeoutMs,
       correlationId: deps.correlationId,
     });
