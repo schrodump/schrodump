@@ -466,7 +466,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           const sandboxPassword = randomUUID();
           // buildVerifySandbox is optional (only engines with an in-process restore implement it).
           // Undefined means a non-postgres engine slipped past the plan downgrade — INCONCLUSIVE.
-          const sandbox = adapter.buildVerifySandbox?.(artifact.serverVersionNum, sandboxPassword);
+          // Third arg is the sandbox/origin database. Postgres ignores it (its -Fc dump is
+          // db-name-agnostic); mysql/mongo need the artifact's origin db, which Task 7 resolves and
+          // threads here. Until then postgres is the only engine that reaches this path.
+          const sandbox = adapter.buildVerifySandbox?.(artifact.serverVersionNum, sandboxPassword, "verify");
           if (sandbox === undefined) return "INCONCLUSIVE";
 
           // The decrypted CLEARTEXT dump MUST stage on the scratch volume (exactly as restore
