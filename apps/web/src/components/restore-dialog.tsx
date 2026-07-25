@@ -177,8 +177,11 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   const t = useT();
   const [open, setOpen] = useState(false);
   if (!canRestore(role)) return null;
-  // v1 restore is PostgreSQL-only; the server refuses the rest. Show the trigger disabled with the
-  // reason rather than hiding it, so it is clear the artifact exists and why it can't be restored yet.
+  // Restore now works for all four engines (STREAM artifacts only; the server enforces that, not
+  // this check — see canRestoreEngine's comment). Kept as a hook: once the web Artifact type
+  // carries executionMode, canRestoreEngine starts returning false for a STAGED artifact and this
+  // shows the trigger disabled with the reason rather than hiding it, so it stays clear the
+  // artifact exists and why it can't be restored yet.
   if (!canRestoreEngine(artifact.engine)) {
     return (
       <Button

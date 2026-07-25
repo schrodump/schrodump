@@ -44,13 +44,16 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
-// v1 restore is verified end-to-end for PostgreSQL only; the server refuses the rest (their restore
-// descriptors were not adapted to the staged-file executor yet). The UI disables the trigger to match
-// — the server is still the enforcing lock. Lift this together with the server gate per engine.
-export const V1_RESTORE_ENGINES: readonly EngineKind[] = ["postgres"];
-
-export function canRestoreEngine(engine: EngineKind): boolean {
-  return V1_RESTORE_ENGINES.includes(engine);
+// Restore now works end-to-end for all four engines, but only for a STREAM artifact — the server
+// gate is executionMode-based, not engine-based (a STAGED artifact of ANY engine, postgres
+// included, is refused: its restore needs a directory pipeline v1 does not have). The web
+// `Artifact` type does not carry executionMode today (apps/server/src/routes/wiring.ts's
+// toArtifactRecord narrows the Prisma row and drops it), so there is nothing to gate on here yet
+// — every engine is allowed and the server remains the real, enforcing lock (a STAGED artifact
+// still gets refused server-side with a clear reason). Once the API exposes executionMode on
+// Artifact, gate this on `artifact.executionMode === "STREAM"` instead.
+export function canRestoreEngine(_engine: EngineKind): boolean {
+  return true;
 }
 
 // Why the server answers with a code and not a message: driver errors embed the credential they

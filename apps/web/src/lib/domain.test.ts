@@ -2,13 +2,21 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { canRestore, RESTORE_TARGETS_BY_ENGINE } from "./domain";
+import { canRestore, canRestoreEngine, ENGINE_KINDS, RESTORE_TARGETS_BY_ENGINE } from "./domain";
 
 describe("canRestore", () => {
   it("allows operator and admin but never viewer", () => {
     expect(canRestore("admin")).toBe(true);
     expect(canRestore("operator")).toBe(true);
     expect(canRestore("viewer")).toBe(false);
+  });
+});
+
+describe("canRestoreEngine", () => {
+  it("allows all four engines — STREAM restore+verify works everywhere; the server enforces STREAM-only", () => {
+    for (const engine of ENGINE_KINDS) {
+      expect(canRestoreEngine(engine)).toBe(true);
+    }
   });
 });
 
