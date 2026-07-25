@@ -89,17 +89,31 @@ export const mongodbAdapter: EngineAdapter = {
     const connection = input.connection;
     // --oplogReplay applies to a full-instance restore of an oplog-bearing archive.
     const oplogArgs = input.target === "FULL_CLUSTER" ? ["--oplogReplay"] : [];
+    const command = [
+      "mongorestore",
+      ...mongoConnArgs(connection),
+      "--config",
+      MONGO_CONFIG_PATH,
+      ...(connection.tls ? ["--tls"] : []),
+      "--drop",
+    ];
+
+    if (input.sourcePath !== undefined) {
+      command.push(`--archive=${input.sourcePath}`);
+      command.push(...oplogArgs);
+      return {
+        image: this.imageFor(input.serverVersionNum),
+        command,
+        env: mongoEnv(connection),
+        outputKind: "directory",
+      };
+    }
+
+    command.push("--archive");
+    command.push(...oplogArgs);
     return {
       image: this.imageFor(input.serverVersionNum),
-      command: [
-        "mongorestore",
-        ...mongoConnArgs(connection),
-        "--config",
-        MONGO_CONFIG_PATH,
-        ...(connection.tls ? ["--tls"] : []),
-        "--archive",
-        ...oplogArgs,
-      ],
+      command,
       env: mongoEnv(connection),
       outputKind: "stdout",
     };

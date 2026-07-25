@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { EngineDescriptorError, type DumpInput, type TargetConnection } from "../descriptor.js";
+import { EngineDescriptorError, type DumpInput, type RestoreInput, type TargetConnection } from "../descriptor.js";
 import { mongodbAdapter } from "./mongodb.js";
 
 const CONN: TargetConnection = {
@@ -22,6 +22,17 @@ function dumpInput(over: Partial<DumpInput> = {}): DumpInput {
     parallelism: 1,
     scope: { databases: [], schemas: [], collections: [] },
     facts: { isReplicaSet: false, hasMyisam: false },
+    ...over,
+  };
+}
+
+function restoreInput(over: Partial<RestoreInput> = {}): RestoreInput {
+  return {
+    connection: CONN,
+    serverVersionNum: 80004,
+    target: "DATABASE",
+    scope: { databases: [], schemas: [], collections: [] },
+    executionMode: "STREAM",
     ...over,
   };
 }
@@ -62,6 +73,66 @@ describe("mongodbAdapter.buildDump", () => {
 
   it("keeps the password in env, never in the command", () => {
     const descriptor = mongodbAdapter.buildDump(dumpInput());
+    for (const arg of descriptor.command) {
+      expect(arg).not.toContain("s3cret");
+    }
+    expect(descriptor.command).toContain("--config");
+    expect(descriptor.env.MONGODB_PASSWORD).toBe("s3cret");
+  });
+});
+
+describe("mongodbAdapter.buildRestore", () => {
+  it("STREAM reads from a mounted archive file with --drop, no --oplogReplay for DATABASE target", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        target: "DATABASE",
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
+    expect(descriptor.command).toContain("mongorestore");
+    expect(descriptor.command).toContain("--archive=/var/lib/schrodump/restore-source");
+    expect(descriptor.command).toContain("--drop");
+    expect(descriptor.command).toContain("--config");
+    expect(descriptor.command).not.toContain("--oplogReplay");
+    expect(descriptor.outputKind).toBe("directory");
+  });
+
+  it("includes --oplogReplay only for FULL_CLUSTER target", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        target: "FULL_CLUSTER",
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
+    expect(descriptor.command).toContain("--oplogReplay");
+  });
+
+  it("includes --tls when connection.tls is true", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        connection: { ...CONN, tls: true },
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
+    expect(descriptor.command).toContain("--tls");
+  });
+
+  it("omits --tls when connection.tls is false", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        connection: { ...CONN, tls: false },
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
+    expect(descriptor.command).not.toContain("--tls");
+  });
+
+  it("keeps the password in env, never in the command", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
     for (const arg of descriptor.command) {
       expect(arg).not.toContain("s3cret");
     }
