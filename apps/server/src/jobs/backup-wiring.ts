@@ -112,7 +112,19 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     if (runOutcome.status === "rejected" || runOutcome.value.exitCode !== 0) {
       await deps.driver.delete([key]).catch(() => undefined);
       if (runOutcome.status === "rejected") throw runOutcome.reason;
-      throw new Error(`dump execution failed (exit code ${runOutcome.value.exitCode})`);
+      let diagMount = "no-config-mount";
+      if (deps.configMount !== undefined) {
+        try {
+          const { statSync } = await import("node:fs");
+          const st = statSync(deps.configMount.source);
+          diagMount = `mountSrc=${deps.configMount.source} isFile=${st.isFile()} size=${st.size}`;
+        } catch (e) {
+          diagMount = `mountSrc=${deps.configMount.source} STAT_FAILED=${(e as Error).message}`;
+        }
+      }
+      throw new Error(
+        `dump execution failed (exit code ${runOutcome.value.exitCode}) [diag ${diagMount}] [stderr: ${runOutcome.value.stderr}]`,
+      );
     }
 
     if (putOutcome.status === "rejected") throw putOutcome.reason;
