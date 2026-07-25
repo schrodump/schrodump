@@ -41,33 +41,66 @@ function fakeRunner(exitCode: number): Runner {
 }
 
 // Consumes the ciphertext stream to completion (the hash listener in uploadEncrypted has already put
-// it in flowing mode) and resolves — never inspects the bytes.
-function fakeDriver(): StorageDriver {
+// it in flowing mode) and resolves — never inspects the bytes. `deletedKeys` records what the
+// run-failure cleanup path (finding #2) actually deletes; `putBehavior` lets a test simulate a
+// transient put() failure (finding #1) instead of the default happy-path put.
+function fakeDriver(options?: {
+  deletedKeys?: string[];
+  putBehavior?: "succeed" | "reject";
+}): StorageDriver {
   const unused = (): never => {
     throw new Error("not used in this test");
   };
+  const deletedKeys = options?.deletedKeys ?? [];
+  const putBehavior = options?.putBehavior ?? "succeed";
   return {
     put: (_key: string, body: Readable): Promise<PutResult> =>
       new Promise((resolve, reject) => {
+        if (putBehavior === "reject") {
+          // Drain the stream so encryptStream's writer doesn't hang, then fail as if S3 had a
+          // transient error — the object was never durably written.
+          body.resume();
+          body.on("end", () => reject(new Error("put failed: transient S3 error")));
+          body.on("error", reject);
+          return;
+        }
         body.on("error", reject);
         body.on("end", () => resolve({ etag: "e", sizeBytes: 0, checksum: null }));
       }),
     get: unused,
     head: unused,
-    delete: unused,
+    delete: (keys: string[]): Promise<void> => {
+      deletedKeys.push(...keys);
+      return Promise.resolve();
+    },
     list: unused,
     canary: unused,
   };
 }
 
-async function makeDeps(exitCode: number): Promise<{ deps: BackupWiringDeps; recipient: string }> {
+// Mimics run() rejecting outright — e.g. createContainer 404ing on a missing executor image —
+// while still ending stdout (b49c8f7), so the consumer's pipeline unblocks instead of hanging.
+function fakeRejectingRunner(reason: Error): Runner {
+  return {
+    run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+      opts.stdout?.end();
+      return Promise.reject(reason);
+    },
+    withEphemeralService: () => Promise.reject(new Error("not used in backup tests")),
+  };
+}
+
+async function makeDeps(
+  exitCode: number,
+  options?: { runner?: Runner; driver?: StorageDriver },
+): Promise<{ deps: BackupWiringDeps; recipient: string }> {
   const recipient = await identityToRecipient(await generateX25519Identity());
   const deps: BackupWiringDeps = {
     jobId: "job-1",
     organizationId: "org-1",
     engine: "postgres",
-    runner: fakeRunner(exitCode),
-    driver: fakeDriver(),
+    runner: options?.runner ?? fakeRunner(exitCode),
+    driver: options?.driver ?? fakeDriver(),
     network: "schrodump_targets",
     prefix: "backups",
     timeoutMs: 1000,
@@ -87,7 +120,8 @@ async function makeDeps(exitCode: number): Promise<{ deps: BackupWiringDeps; rec
 
 describe("createBackupPorts.executeAndUpload", () => {
   it("rejects when the dump exits non-zero (no VERIFIED artifact can result)", async () => {
-    const { deps, recipient } = await makeDeps(1);
+    const deletedKeys: string[] = [];
+    const { deps, recipient } = await makeDeps(1, { driver: fakeDriver({ deletedKeys }) });
     const ports = createBackupPorts(deps);
     await expect(
       ports.executeAndUpload({
@@ -97,6 +131,86 @@ describe("createBackupPorts.executeAndUpload", () => {
         recipients: { recipients: [recipient], keyIds: ["k"] },
       }),
     ).rejects.toThrow(/exit code 1/);
+    // b49c8f7 makes put() complete (not hang) on a failed run, which writes a 0-byte object with no
+    // Artifact row behind it; row-based retention can never reclaim it, so the orphan must be
+    // deleted here or it is permanent.
+    expect(deletedKeys).toEqual(["backups/org-1/job-1/artifact.bin"]);
+  });
+
+  // Regression for the runner fix b49c8f7: a pre-stream run() rejection (not just a non-zero exit)
+  // now lets put() complete instead of hanging forever, which means uploadEncrypted has TWO settled
+  // promises to account for. If the run's rejection were left unawaited it would surface as an
+  // unhandled rejection and crash the worker process (no global handler in apps/server) instead of
+  // just failing the job — this is finding #1.
+  it("surfaces the run's rejection (not a put error), deletes the orphan, and never leaves an unhandled rejection", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const deletedKeys: string[] = [];
+      const runReason = new Error("createContainer failed: no such image (404)");
+      const { deps, recipient } = await makeDeps(0, {
+        runner: fakeRejectingRunner(runReason),
+        driver: fakeDriver({ deletedKeys }),
+      });
+      const ports = createBackupPorts(deps);
+      await expect(
+        ports.executeAndUpload({
+          mode: "STREAM",
+          parallelism: 1,
+          probe: PROBE,
+          recipients: { recipients: [recipient], keyIds: ["k"] },
+        }),
+      ).rejects.toBe(runReason);
+      expect(deletedKeys).toEqual(["backups/org-1/job-1/artifact.bin"]);
+      // Give any stray unhandled rejection a microtask/macrotask to surface before asserting.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  // When the run fails, its error is the root cause (e.g. the 404 above) and must win even if the
+  // cleanup put() also failed for an unrelated reason (a transient S3 error) — the put error would
+  // point at the wrong layer and hide what actually broke the job.
+  it("prefers the run's error over a put failure when both fail", async () => {
+    const deletedKeys: string[] = [];
+    const { deps, recipient } = await makeDeps(1, {
+      driver: fakeDriver({ deletedKeys, putBehavior: "reject" }),
+    });
+    const ports = createBackupPorts(deps);
+    await expect(
+      ports.executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow(/exit code 1/);
+    expect(deletedKeys).toEqual(["backups/org-1/job-1/artifact.bin"]);
+  });
+
+  // The inverse of finding #1's fix: when the run succeeds, there is no run error to prefer, so a
+  // put failure must surface as-is — and there is no orphan to clean up, since put() never
+  // completed a durable write.
+  it("surfaces the put error when the run succeeds but put fails, and deletes nothing", async () => {
+    const deletedKeys: string[] = [];
+    const { deps, recipient } = await makeDeps(0, {
+      driver: fakeDriver({ deletedKeys, putBehavior: "reject" }),
+    });
+    const ports = createBackupPorts(deps);
+    await expect(
+      ports.executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow(/put failed/);
+    expect(deletedKeys).toEqual([]);
   });
 
   it("resolves with checksum/size on a clean (exit 0) dump", async () => {

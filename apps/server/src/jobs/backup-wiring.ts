@@ -75,6 +75,13 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
     });
+    // Attached synchronously, in the same tick runPromise is created — not merely "eventually
+    // awaited". encryptStream() below crosses a real threadpool boundary (WebCrypto), so if the run
+    // rejects while that's in flight, Node's unhandled-rejection tracker checks once per event-loop
+    // turn and would flag runPromise before the Promise.allSettled further down ever gets to attach
+    // a handler. This no-op keeps Node from ever seeing it as unhandled; the real outcome is still
+    // read from the same promise via Promise.allSettled below.
+    runPromise.catch(() => undefined);
     const encrypted = await encryptStream(dumpOut.pipe(createGzip()), recipients);
     const hash = createHash("sha256");
     let sizeBytes = 0;
@@ -82,20 +89,34 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       hash.update(chunk);
       sizeBytes += chunk.length;
     });
-    await deps.driver.put(key, encrypted, {
-      contentType: "application/octet-stream",
-      partSize: PART_SIZE,
-      metadata: {},
-    });
+
+    // Both settle unconditionally, so neither is ever left an unhandled rejection — a run that
+    // fails before streaming (e.g. a missing executor image 404) now ENDS dumpOut (b49c8f7), which
+    // lets put() complete instead of hanging; if put() were simply awaited and threw, runPromise
+    // would go unobserved and crash the whole worker process, not just this job.
+    const [putOutcome, runOutcome] = await Promise.allSettled([
+      deps.driver.put(key, encrypted, {
+        contentType: "application/octet-stream",
+        partSize: PART_SIZE,
+        metadata: {},
+      }),
+      runPromise,
+    ]);
+
     // A process that ran without complaint proves nothing: a non-zero exit means the dump did not
-    // produce the data. Throw BEFORE returning so runBackupJob's catch marks the job FAILED and no
-    // artifact is persisted — the alternative is an empty/failed dump uploaded, born UNOBSERVED, and
-    // auto-verified green, the exact outcome the product thesis forbids. The message carries only the
-    // exit code; the runner's stderr is sanitized but stays out of here regardless.
-    const result = await runPromise;
-    if (result.exitCode !== 0) {
-      throw new Error(`dump execution failed (exit code ${result.exitCode})`);
+    // produce the data. The run's error is the root cause (e.g. that 404) and outranks anything put()
+    // or the cleanup below reports. put() above may already have written a (possibly empty) object to
+    // `key` even though the run failed — persistArtifact is never called on this path, so no Artifact
+    // row will ever exist to let retention reclaim it. Delete it best-effort before throwing so it
+    // doesn't outlive the job as a permanent orphan; a delete failure must never mask the run's error.
+    if (runOutcome.status === "rejected" || runOutcome.value.exitCode !== 0) {
+      await deps.driver.delete([key]).catch(() => undefined);
+      if (runOutcome.status === "rejected") throw runOutcome.reason;
+      throw new Error(`dump execution failed (exit code ${runOutcome.value.exitCode})`);
     }
+
+    if (putOutcome.status === "rejected") throw putOutcome.reason;
+
     return { checksum: hash.digest("hex"), sizeBytes };
   };
 
