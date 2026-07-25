@@ -405,12 +405,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     }
 
     const producingJob = artifact.job;
+    // Org-scoped even though the id is transitively this org's already (the artifact was ownership-
+    // checked above): the worker's convention is that every raw-prisma query filters organizationId
+    // explicitly, so the filter is stated, not inferred.
     const policyLevel =
       producingJob.policyId === null
         ? null
         : ((
-            await prisma.backupPolicy.findUnique({
-              where: { id: producingJob.policyId },
+            await prisma.backupPolicy.findFirst({
+              where: { id: producingJob.policyId, organizationId: job.organizationId },
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
