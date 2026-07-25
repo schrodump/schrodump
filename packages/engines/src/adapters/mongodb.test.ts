@@ -141,6 +141,30 @@ describe("mongodbAdapter.buildRestore", () => {
   });
 });
 
+describe("mongodbAdapter.buildVerifySandbox", () => {
+  it("describes a mongo sandbox bootstrapped with a root user, forcing TCP readiness", () => {
+    const s = mongodbAdapter.buildVerifySandbox!(80000, "pw", "shop");
+    expect(s.image).toBe("mongo:8");
+    expect(s.env.MONGO_INITDB_ROOT_USERNAME).toBe("verify");
+    expect(s.env.MONGO_INITDB_ROOT_PASSWORD).toBe("pw");
+    // --host 127.0.0.1 forces mongosh to probe TCP rather than whatever mongosh would otherwise
+    // default to, the same defensive lesson as postgres's pg_isready -h 127.0.0.1 and mysql's
+    // mysqladmin ping -h 127.0.0.1 (see postgres.ts / mysql.ts buildVerifySandbox).
+    expect(s.readinessCommand).toEqual([
+      "mongosh",
+      "--host",
+      "127.0.0.1",
+      "--quiet",
+      "--eval",
+      "db.runCommand({ping:1}).ok",
+    ]);
+    expect(s.port).toBe(27017);
+    expect(s.username).toBe("verify");
+    expect(s.password).toBe("pw");
+    expect(s.database).toBe("shop");
+  });
+});
+
 describe("mongodbAdapter.buildVerifyAssertions", () => {
   it("never interpolates target-controlled values into the mongosh eval script", () => {
     const evil = 'evil"+process.exit(1)+"';

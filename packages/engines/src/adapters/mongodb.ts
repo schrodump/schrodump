@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { EngineDescriptorError, type EngineAdapter, type TargetConnection } from "../descriptor.js";
+import {
+  EngineDescriptorError,
+  type EngineAdapter,
+  type TargetConnection,
+  type VerifySandbox,
+} from "../descriptor.js";
 
 // The official mongo:<major> image ships mongodump/mongorestore (MongoDB Database Tools),
 // verified empirically: `docker run --rm mongo:8 which mongodump` -> /usr/bin/mongodump.
@@ -151,6 +156,34 @@ export const mongodbAdapter: EngineAdapter = {
         SCHRODUMP_MONGO_TLS: connection.tls ? "1" : "0",
       },
       outputKind: "stdout",
+    };
+  },
+
+  // Unlike postgres/mysql, the sandbox runs WITH auth: the official image bootstraps a root user
+  // from MONGO_INITDB_ROOT_USERNAME/PASSWORD, which mongorestore (mongoConnArgs, above) needs to
+  // authenticate. `database` is the artifact's origin db, passed through unchanged — it is NOT the
+  // authSource the root user authenticates against (that's always "admin", where
+  // MONGO_INITDB_ROOT_USERNAME is created). This adapter only DESCRIBES the sandbox; the caller
+  // (worker-wiring) is responsible for building a TargetConnection whose `database`/authSource
+  // matches "admin" for the mongo restore/verify commands, separately from the origin db this
+  // sandbox reports (used e.g. to scope the verify assertion to the restored database).
+  buildVerifySandbox(serverVersionNum, password, database): VerifySandbox {
+    const username = "verify";
+    return {
+      image: this.imageFor(serverVersionNum),
+      env: {
+        MONGO_INITDB_ROOT_USERNAME: username,
+        MONGO_INITDB_ROOT_PASSWORD: password,
+      },
+      // --host 127.0.0.1 forces mongosh to probe TCP explicitly rather than relying on mongosh's
+      // own default resolution — the same defensive posture as postgres's pg_isready -h 127.0.0.1
+      // and mysql's mysqladmin ping -h 127.0.0.1 (see postgres.ts / mysql.ts buildVerifySandbox).
+      // `ping` is unauthenticated in MongoDB, so this works before the root user is even usable.
+      readinessCommand: ["mongosh", "--host", "127.0.0.1", "--quiet", "--eval", "db.runCommand({ping:1}).ok"],
+      port: 27017,
+      username,
+      password,
+      database,
     };
   },
 };
