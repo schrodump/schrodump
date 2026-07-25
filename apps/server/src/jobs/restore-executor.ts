@@ -32,6 +32,7 @@ import { createGunzip } from "node:zlib";
 import { Decrypter } from "age-encryption";
 import { z } from "zod";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
+import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { EngineKind } from "@schrodump/core/types";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
@@ -136,6 +137,29 @@ export function planRestoreSteps(
   return steps;
 }
 
+// Node filesystem errno codes that mean the scratch volume, not the artifact, failed the write:
+// disk/quota exhaustion (ENOSPC/EDQUOT/EFBIG), an I/O or read-only/permission fault (EIO/EROFS/
+// EACCES), or an fd-table limit (EMFILE/ENFILE).
+const SCRATCH_WRITE_ERRNOS = new Set([
+  "ENOSPC",
+  "EDQUOT",
+  "EIO",
+  "EROFS",
+  "EACCES",
+  "EMFILE",
+  "ENFILE",
+  "EFBIG",
+]);
+// A staging write/open failure (our disk) vs. a decrypt/gunzip failure (the artifact). Detect a Node
+// system error either by its errno code OR by the syscall that raised it (write/open/ftruncate), so a
+// less common errno on those syscalls is still attributed to our scratch, not the backup.
+function isScratchWriteError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const sys = err as { code?: unknown; syscall?: unknown };
+  if (typeof sys.code === "string" && SCRATCH_WRITE_ERRNOS.has(sys.code)) return true;
+  return sys.syscall === "write" || sys.syscall === "open" || sys.syscall === "ftruncate";
+}
+
 // ---------------------------------------------------------------------------
 // The staged-file pipeline (Docker/S3/target — smoke-verified, not unit-tested)
 // ---------------------------------------------------------------------------
@@ -220,15 +244,50 @@ async function restoreOne(
   // reaches the decrypt/gunzip pipeline. (age-decrypt and gunzip errors carry no secret; they pass
   // through as-is — e.g. gunzip's "unexpected end of file" on a truncated stream.)
   const ciphertext = new PassThrough();
-  source.on("error", () => ciphertext.destroy(new Error("restore source stream failed")));
+  source.on("error", () =>
+    ciphertext.destroy(
+      new SchrodumpError("restore source stream failed", {
+        code: "RESTORE_SOURCE_FAILED",
+        correlationId: deps.correlationId,
+      }),
+    ),
+  );
   source.pipe(ciphertext);
 
   try {
     // Decrypt in-process (age Decrypter), then gunzip into the scratch file (0600). No container, no
     // runner stdin: the writable end is a FILE, and the ciphertext never crosses a hijacked Docker
     // attach — the two failure modes the earlier stdin pipelines had.
-    const decrypted = await decryptStream(ciphertext, deps.ageIdentity);
-    await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 }));
+    try {
+      const decrypted = await decryptStream(ciphertext, deps.ageIdentity);
+      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 }));
+    } catch (err) {
+      // A source error rewritten above already carries RESTORE_SOURCE_FAILED and surfaces here
+      // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
+      // through unchanged rather than re-wrapping it as a decrypt failure.
+      if (err instanceof SchrodumpError) throw err;
+      // A write-side failure on the scratch volume (ENOSPC/EDQUOT/EIO/EROFS/EACCES, an fd limit, ...)
+      // rejects the same pipeline, but it means OUR disk failed, not that the artifact is bad. It gets
+      // a DISTINCT code because the two are classified oppositely on the verify path: a decrypt/gunzip
+      // failure is the artifact's fault → FAILED, whereas a staging write failure is ours →
+      // INCONCLUSIVE (leave the backup UNOBSERVED). Condemning a good artifact because our scratch
+      // filled up is the exact thesis violation this split prevents.
+      if (isScratchWriteError(err)) {
+        throw new SchrodumpError("restore staging write failed", {
+          code: "RESTORE_WRITE_FAILED",
+          correlationId: deps.correlationId,
+          cause: err,
+        });
+      }
+      // Everything else here is a genuine age-decrypt or gunzip failure (e.g. zlib's "unexpected end
+      // of file" on a truncated stream); its message carries no secret but is kept out of
+      // BackupJob.reason regardless, in `cause`, so the reason stays a stable, generic string.
+      throw new SchrodumpError("restore decrypt failed", {
+        code: "RESTORE_DECRYPT_FAILED",
+        correlationId: deps.correlationId,
+        cause: err,
+      });
+    }
 
     // Flush the staged dump to disk before another process, in another container, reads it. The
     // pipeline resolves once Node closes its own write fd, which leaves the bytes in the page cache;
@@ -250,7 +309,10 @@ async function restoreOne(
       correlationId: deps.correlationId,
     });
     if (restoreResult.exitCode !== 0) {
-      throw new Error(`restore execution failed (exit code ${restoreResult.exitCode})`);
+      throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
+        code: "RESTORE_EXECUTOR_FAILED",
+        correlationId: deps.correlationId,
+      });
     }
   } finally {
     // Release the S3 read stream. On success it has already ended (fully consumed by the decrypt);

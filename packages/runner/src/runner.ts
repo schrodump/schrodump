@@ -32,8 +32,31 @@ export interface RunResult {
   readonly durationMs: number;
 }
 
+// A long-lived SERVICE container: start -> become ready -> let other executors connect -> destroy.
+// Distinct from `run()`'s one-shot shape (start -> wait for exit -> remove).
+export interface EphemeralServiceSpec {
+  readonly image: string;
+  readonly env: Record<string, string>;
+  readonly network: string;
+  readonly readinessCommand: string[]; // exec'd in the container; exit 0 = ready
+  readonly port: number; // in-container listen port
+  readonly correlationId: string;
+  readonly readinessTimeoutMs: number; // bounds readiness polling
+}
+
+export interface EphemeralServiceHandle {
+  readonly host: string;
+  readonly port: number;
+}
+
 // `engines` says WHAT to run (the descriptor); a Runner says WHERE. DockerRunner today,
 // AgentRunner (physical backup) later — same interface, no change to `engines`.
 export interface Runner {
   run(descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult>;
+  // Provisions an ephemeral service, waits for readiness, hands the caller a connectable
+  // address, then always tears the container down — even if `use` throws.
+  withEphemeralService<T>(
+    spec: EphemeralServiceSpec,
+    use: (handle: EphemeralServiceHandle) => Promise<T>,
+  ): Promise<T>;
 }

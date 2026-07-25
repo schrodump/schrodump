@@ -89,8 +89,11 @@ link de setup.
   roda o pipeline real (download → decrypt in-process → gunzip → arquivo montado → `pg_restore`). Os
   descritores `buildRestore` de mysql/mongo não foram adaptados ao executor staged-file nem passaram
   por smoke, então `runRestoreJob` recusa não-postgres com erro claro e a UI desabilita o botão
-  (backup/verify dessas engines seguem normais). O que falta: adaptar+smoke por engine, seleção de
-  sub-escopo (hoje sempre restore completo) e verify de `FULL_RESTORE`.
+  (backup/verify dessas engines seguem normais). O que falta: adaptar+smoke por engine e seleção de
+  sub-escopo (hoje sempre restore completo). Verify de `FULL_RESTORE` já roda de verdade para
+  postgres — reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) e
+  assert de contagem de tabelas (`resolveVerifyPlan`/`runFullRestore` em `jobs/worker-wiring.ts`);
+  para as outras três engines ele degrada para `CHECKSUM`, nunca bloqueia.
 - **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
   resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
 - **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.

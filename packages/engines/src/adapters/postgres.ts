@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { EngineDescriptorError, type EngineAdapter, type TargetConnection } from "../descriptor.js";
+import { EngineDescriptorError, type EngineAdapter, type TargetConnection, type VerifySandbox } from "../descriptor.js";
 
 const MIN_MAJOR = 13;
 const MAX_MAJOR = 18;
@@ -156,6 +156,28 @@ export const postgresAdapter: EngineAdapter = {
       ],
       env: connEnv(connection),
       outputKind: "stdout",
+    };
+  },
+
+  buildVerifySandbox(serverVersionNum, password): VerifySandbox {
+    const username = "verify";
+    const database = "verify";
+    return {
+      image: this.imageFor(serverVersionNum),
+      env: {
+        POSTGRES_USER: username,
+        POSTGRES_PASSWORD: password,
+        POSTGRES_DB: database,
+      },
+      // -h/-p force pg_isready to probe TCP, not the local unix socket. The postgres image's
+      // bootstrap sequence runs a temporary socket-only server for initdb/scripts before
+      // stopping it and starting the real TCP-listening server; a bare `pg_isready` would hit
+      // that temp server and report "ready" before the real server (and its TCP port) is up.
+      readinessCommand: ["pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", username, "-d", database],
+      port: 5432,
+      username,
+      password,
+      database,
     };
   },
 };

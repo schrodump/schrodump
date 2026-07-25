@@ -3,6 +3,11 @@
 
 export type VerifyLevel = "NONE" | "CHECKSUM" | "FULL_RESTORE";
 
+// What a FULL_RESTORE attempt proved. INCONCLUSIVE means our own infra (sandbox, runner,
+// network) failed to even attempt the restore — it says nothing about the artifact, so it must
+// never FAIL it. Only VERIFIED/FAILED are genuine claims about the artifact's content.
+export type VerifyProof = "VERIFIED" | "FAILED" | "INCONCLUSIVE";
+
 export interface VerifyContext {
   jobId: string;
   artifactId: string;
@@ -18,7 +23,7 @@ export interface VerifyPorts {
   // Downloads the stored object, recomputes its checksum, compares against the manifest.
   checksumMatches(): Promise<boolean>;
   // Ephemeral container of the correct major, restore, assertions, then destroy — isolated network.
-  fullRestore(): Promise<boolean>;
+  fullRestore(): Promise<VerifyProof>;
 }
 
 export interface VerifyOutcome {
@@ -47,7 +52,21 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
   }
 
   try {
-    const ok = level === "FULL_RESTORE" ? await ports.fullRestore() : await ports.checksumMatches();
+    if (level === "FULL_RESTORE") {
+      const proof = await ports.fullRestore();
+      if (proof === "INCONCLUSIVE") {
+        // Our own infra failed to run the restore — say nothing about the artifact. It stays
+        // UNOBSERVED, exactly as if verify had never run.
+        await ports.setJobState("FAILED", "verify inconclusive: the sandbox could not run — artifact unchanged");
+        return { finalState: "UNOBSERVED", effectiveLevel: level, degraded: degradedReason !== null };
+      }
+      const ok = proof === "VERIFIED";
+      await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
+      await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degradedReason ?? undefined);
+      return { finalState: ok ? "VERIFIED" : "FAILED", effectiveLevel: level, degraded: degradedReason !== null };
+    }
+
+    const ok = await ports.checksumMatches();
     await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
     await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degradedReason ?? undefined);
     return {

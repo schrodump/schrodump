@@ -35,6 +35,8 @@ function fakeRunner(exitCode: number): Runner {
       opts.stdout?.end();
       return Promise.resolve({ exitCode, stderr: "", durationMs: 1 });
     },
+    // Backup never provisions an ephemeral service; satisfy the interface without exercising it.
+    withEphemeralService: () => Promise.reject(new Error("not used in backup tests")),
   };
 }
 

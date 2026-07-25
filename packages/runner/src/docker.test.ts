@@ -10,9 +10,15 @@ import {
   sanitizeStderr,
   type ContainerSpec,
   type DockerEngine,
+  type EphemeralServiceSpec,
   type StartedContainer,
+  type StartedService,
 } from "./docker.js";
 import type { RunOptions } from "./runner.js";
+
+interface FakeEngineOptions {
+  readyAfter: number; // number of exec() calls before exec returns 0; Infinity = never ready
+}
 
 class FakeEngine implements DockerEngine {
   networkOk = true;
@@ -24,6 +30,16 @@ class FakeEngine implements DockerEngine {
   killed = false;
   removed = false;
   lastSpec: ContainerSpec | undefined;
+
+  readonly #readyAfter: number;
+  execCalls = 0;
+  serviceRemoved = false;
+  startServiceCalled = false;
+  lastServiceHost: string | undefined;
+
+  constructor(options: FakeEngineOptions = { readyAfter: 1 }) {
+    this.#readyAfter = options.readyAfter;
+  }
 
   async networkExists(): Promise<boolean> {
     return this.networkOk;
@@ -45,6 +61,22 @@ class FakeEngine implements DockerEngine {
       },
     };
   }
+
+  async startService(spec: EphemeralServiceSpec): Promise<StartedService> {
+    this.startServiceCalled = true;
+    const host = `svc-${spec.image}`;
+    this.lastServiceHost = host;
+    return {
+      host,
+      exec: async () => {
+        this.execCalls += 1;
+        return this.execCalls >= this.#readyAfter ? 0 : 1;
+      },
+      remove: async () => {
+        this.serviceRemoved = true;
+      },
+    };
+  }
 }
 
 const DESCRIPTOR: ExecutionDescriptor = {
@@ -55,8 +87,24 @@ const DESCRIPTOR: ExecutionDescriptor = {
 };
 
 function opts(over: Partial<RunOptions> = {}): RunOptions {
-  return { network: "schrodump_targets", mounts: [], timeoutMs: 5000, correlationId: "corr-1", ...over };
+  return {
+    network: "schrodump_targets",
+    mounts: [],
+    timeoutMs: 5000,
+    correlationId: "corr-1",
+    ...over,
+  };
 }
+
+const SERVICE_SPEC: EphemeralServiceSpec = {
+  image: "postgres:16-alpine",
+  env: { POSTGRES_PASSWORD: "s3cret" },
+  network: "schrodump_targets",
+  readinessCommand: ["pg_isready"],
+  port: 5432,
+  correlationId: "corr-1",
+  readinessTimeoutMs: 1000,
+};
 
 describe("DockerRunner.run", () => {
   it("reports failure via StatusCode when the container exits non-zero, despite clean stdout", async () => {
@@ -121,6 +169,52 @@ describe("DockerRunner.run", () => {
     const engine = new FakeEngine();
     await new DockerRunner(engine).run(DESCRIPTOR, opts({ network: "schrodump_targets" }));
     expect(engine.lastSpec?.network).toBe("schrodump_targets");
+  });
+});
+
+describe("DockerRunner.withEphemeralService", () => {
+  it("calls use with the address once ready, then removes the container", async () => {
+    const engine = new FakeEngine({ readyAfter: 2 });
+    const seen = await new DockerRunner(engine).withEphemeralService(
+      SERVICE_SPEC,
+      async (h) => h.host,
+    );
+    expect(seen).toBe(engine.lastServiceHost);
+    expect(engine.serviceRemoved).toBe(true);
+    expect(engine.execCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("throws RUNNER_SERVICE_NOT_READY and still removes when readiness never succeeds", async () => {
+    const engine = new FakeEngine({ readyAfter: Infinity });
+    await expect(
+      new DockerRunner(engine).withEphemeralService(
+        { ...SERVICE_SPEC, readinessTimeoutMs: 50 },
+        async () => "x",
+      ),
+    ).rejects.toMatchObject({ code: "RUNNER_SERVICE_NOT_READY" });
+    expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("removes the container even when use throws", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    await expect(
+      new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("throws RUNNER_NETWORK_MISSING and never starts a service when the network is missing", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    engine.networkOk = false;
+    await expect(
+      new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "x"),
+    ).rejects.toMatchObject({ code: "RUNNER_NETWORK_MISSING" });
+    // No container is created when the pre-flight fails — startService is never reached, so nothing
+    // can leak. (The internal force-remove-on-throw inside DockerodeEngine.startService is
+    // real-Docker-only; not unit-tested here.)
+    expect(engine.startServiceCalled).toBe(false);
   });
 });
 

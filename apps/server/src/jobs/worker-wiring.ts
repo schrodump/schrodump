@@ -6,20 +6,26 @@
 // scopedPrisma — every query therefore filters organizationId explicitly. Credentials are decrypted
 // only to be USED (handed to a driver/probe), never shown, logged, or returned.
 
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { EngineKind } from "@schrodump/core/types";
 import type { Manifest } from "@schrodump/core/manifest";
 import { resolveAdapter } from "@schrodump/engines/registry";
-import type { TargetConnection } from "@schrodump/engines/descriptor";
+import type { DumpScope, TargetConnection } from "@schrodump/engines/descriptor";
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
 import type { ProbeConnection, ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
 import { createDockerRunner } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
-import { resolveRecipients, type EncryptionKeyRecord } from "../crypto/artifact.js";
+import {
+  resolveDecryptionKeyId,
+  resolveRecipients,
+  type EncryptionKeyRecord,
+} from "../crypto/artifact.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
 import type { Env } from "../env.js";
 import { createBackupPorts } from "./backup-wiring.js";
@@ -35,8 +41,8 @@ import {
 } from "./restore-executor.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 import { runRestoreJob } from "./restore.js";
-import { createVerifyPorts } from "./verify-wiring.js";
-import { runVerifyJob, type VerifyLevel } from "./verify.js";
+import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
+import { runVerifyJob, type VerifyLevel, type VerifyProof } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
 
 // Identifies the tool that produced a manifest. No per-build version source exists yet (the server
@@ -51,6 +57,11 @@ const PROBE_CONNECT_TIMEOUT_MS = 15_000;
 // Coarse ceiling for an executor run. There is no per-job timeout knob in the v1 env; a generous
 // bound still guards against a wedged container holding the worker forever.
 const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+// Bounds readiness polling for the ephemeral verify sandbox (passed as readinessTimeoutMs). A
+// throwaway postgres container should accept connections within seconds; this is generous slack,
+// not a target. It does NOT bound the sandbox's lifetime — that's the `use` callback (restore runs
+// under DUMP_TIMEOUT_MS), with teardown in withEphemeralService's finally.
+const SANDBOX_READY_TIMEOUT_MS = 60_000;
 
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 
@@ -124,16 +135,18 @@ export interface VerifyPlan {
 }
 
 // The plan a VERIFY job runs under: the originating policy's level (CHECKSUM when there is no
-// policy), and whether that level was degraded. FULL_RESTORE is downgraded to CHECKSUM because the
-// restore executor it needs is a documented v1 gap (restore returns 501); running CHECKSUM and
-// recording the downgrade keeps a good artifact VERIFIED instead of corrupting the central
-// UNOBSERVED/VERIFIED/FAILED distinction by failing it against a verifier that does not exist.
-export function resolveVerifyPlan(policyLevel: VerifyLevel | null): VerifyPlan {
+// policy), and whether that level was degraded. FULL_RESTORE reuses the postgres-only restore
+// pipeline, so it is downgraded to CHECKSUM for every OTHER engine (mysql/mariadb/mongodb): running
+// CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting the
+// central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a verifier that does not
+// exist for that engine. Postgres keeps FULL_RESTORE (wired via runFullRestore). The sealed-
+// destination downgrade lives in the domain (runVerifyJob) and is orthogonal to this one.
+export function resolveVerifyPlan(policyLevel: VerifyLevel | null, engine: EngineKind): VerifyPlan {
   const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
-  if (requested === "FULL_RESTORE") {
+  if (requested === "FULL_RESTORE" && engine !== "postgres") {
     return {
       effectiveLevel: "CHECKSUM",
-      downgradeReason: "restore executor unavailable: FULL_RESTORE downgraded to CHECKSUM",
+      downgradeReason: "FULL_RESTORE runs for PostgreSQL only in v1: downgraded to CHECKSUM",
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };
@@ -382,17 +395,29 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       include: { destination: true, job: true },
     });
 
+    // SECURITY: the VERIFY job must reference an artifact in its OWN organization. This runs on raw
+    // prisma (system process), so the check is explicit and happens BEFORE any decrypt — mirroring
+    // runRestore's guard below. A job pointing at another org's artifact is failed, never verified;
+    // the artifact itself is left untouched (it is not this org's artifact to judge).
+    if (!artifactBelongsToOrg(artifact.organizationId, job.organizationId)) {
+      await failJob(job.id, "verify artifact does not belong to this organization");
+      return;
+    }
+
     const producingJob = artifact.job;
+    // Org-scoped even though the id is transitively this org's already (the artifact was ownership-
+    // checked above): the worker's convention is that every raw-prisma query filters organizationId
+    // explicitly, so the filter is stated, not inferred.
     const policyLevel =
       producingJob.policyId === null
         ? null
         : ((
-            await prisma.backupPolicy.findUnique({
-              where: { id: producingJob.policyId },
+            await prisma.backupPolicy.findFirst({
+              where: { id: producingJob.policyId, organizationId: job.organizationId },
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
-    const plan = resolveVerifyPlan(policyLevel);
+    const plan = resolveVerifyPlan(policyLevel, artifact.engine);
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -406,14 +431,157 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       return;
     }
 
+    // Gathered the same way the RESTORE dispatch does: the engine adapter drives buildVerifySandbox /
+    // buildRestore / buildVerifyAssertions for the FULL_RESTORE path below (unused on CHECKSUM).
+    const engine = artifact.engine;
+    const adapter = resolveAdapter(engine);
+
     const ports = createVerifyPorts({
       driver: destination.driver,
       bucketKey: artifact.bucketKey,
       // The checksum recorded at upload IS the manifest's checksum of the stored object.
       manifestChecksum: artifact.checksum,
-      // FULL_RESTORE is downgraded to CHECKSUM in the plan above, so this is unreachable; it stays
-      // honest about the v1 gap rather than pretending to verify.
-      runFullRestore: () => Promise.reject(new Error("FULL_RESTORE verify is not wired in v1")),
+      // FULL_RESTORE (postgres only — the plan downgrades every other engine to CHECKSUM). Restore
+      // the artifact into a THROWAWAY postgres container on the isolated executor network, assert the
+      // schema landed, then destroy it. The catch is TOTAL: every throw path is mapped by
+      // classifyVerifyError to FAILED (the artifact is bad) or INCONCLUSIVE (our infra failed) — a raw
+      // throw must NEVER escape to runVerifyJob's catch, which would mark a possibly-good artifact
+      // FAILED and violate the leave-it-UNOBSERVED-on-infra-failure thesis.
+      runFullRestore: async (): Promise<VerifyProof> => {
+        // ONE outer try makes the catch total: every throw — buildVerifySandbox on an out-of-range
+        // major, a prisma/decrypt error while loading the identity, a runner/S3/executor error inside
+        // withEphemeralService — is funnelled to classifyVerifyError. The three-way result is the ONLY
+        // way this port returns; it never rethrows to runVerifyJob (which would mark the artifact
+        // FAILED on our own infra failure). The pre-flight guards below `return "INCONCLUSIVE"` for the
+        // gracefully-degradable cases before any container is even started.
+        try {
+          const sandboxPassword = randomUUID();
+          // buildVerifySandbox is optional (only engines with an in-process restore implement it).
+          // Undefined means a non-postgres engine slipped past the plan downgrade — INCONCLUSIVE.
+          const sandbox = adapter.buildVerifySandbox?.(artifact.serverVersionNum, sandboxPassword);
+          if (sandbox === undefined) return "INCONCLUSIVE";
+
+          // The decrypted CLEARTEXT dump MUST stage on the scratch volume (exactly as restore
+          // requires); no scratch configured → cannot run the test → INCONCLUSIVE. (scratchManager
+          // re-binds the const so the nested reserveStaging closure sees it narrowed to non-null.)
+          if (scratch === null) return "INCONCLUSIVE";
+          const scratchManager = scratch;
+
+          // Materialize the operational age identity IN MEMORY (KEK-decrypted, never on disk), exactly
+          // as runRestore does. A missing/corrupt-row identity is graceful degradation (INCONCLUSIVE),
+          // never an artifact FAILED. Sealed artifacts are downgraded to CHECKSUM upstream by the
+          // domain (VerifyContext.sealed); this null-identity path is the defensive backstop.
+          // ALL keys (active + retired): the artifact may have been encrypted with a now-retired key.
+          const keys = await prisma.encryptionKey.findMany({
+            where: { organizationId: job.organizationId },
+          });
+          const keyId = resolveDecryptionKeyId(artifact.keyIds, keys.map(toKeyRecord));
+          if (keyId === null) return "INCONCLUSIVE";
+          const keyRow = await prisma.encryptionKey.findFirst({
+            where: { organizationId: job.organizationId, keyId },
+          });
+          if (keyRow === null || keyRow.encryptedIdentity === null) return "INCONCLUSIVE";
+          const ageIdentity = decryptCredential(
+            deps.kek,
+            parseEncryptedCredential(keyRow.encryptedIdentity),
+          );
+
+          // A -Fc dump carries object definitions, not the origin database name, so a FULL_CLUSTER
+          // restore into the sandbox's own `verify` database is correct with an empty scope — verify
+          // restores the whole dump into a fresh container, it never targets the origin.
+          const verifyScope: DumpScope = { databases: [], schemas: [], collections: [] };
+
+          return await runner.withEphemeralService(
+            {
+              image: sandbox.image,
+              env: sandbox.env,
+              network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
+              readinessCommand: sandbox.readinessCommand,
+              port: sandbox.port,
+              readinessTimeoutMs: SANDBOX_READY_TIMEOUT_MS,
+              correlationId: job.id,
+            },
+            async ({ host }): Promise<VerifyProof> => {
+              const conn: TargetConnection = {
+                host,
+                port: sandbox.port,
+                username: sandbox.username,
+                // TLS off: a localhost-equivalent link on an isolated network to a container that
+                // lives seconds; the password is a per-verify throwaway.
+                password: sandboxPassword,
+                database: sandbox.database,
+                tls: false,
+              };
+
+              // globals first (roles/tablespaces), then the per-database artifact. runRestorePipeline
+              // resolves true or THROWS a typed SchrodumpError (mapped by the outer catch).
+              await runRestorePipeline({
+                driver: destination.driver,
+                runner,
+                bucketKey: artifact.bucketKey,
+                globalsKey: globalsKeyFor(engine, artifact.serverVersionNum, artifact.bucketKey),
+                ageIdentity,
+                network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
+                timeoutMs: DUMP_TIMEOUT_MS,
+                correlationId: job.id,
+                buildRestoreDescriptor: (sourcePath) =>
+                  adapter.buildRestore({
+                    connection: conn,
+                    serverVersionNum: artifact.serverVersionNum,
+                    target: "FULL_CLUSTER",
+                    scope: verifyScope,
+                    sourcePath,
+                  }),
+                buildGlobalsRestoreDescriptor: (sourcePath) =>
+                  adapter.buildGlobalsRestore === undefined
+                    ? null
+                    : adapter.buildGlobalsRestore({
+                        connection: conn,
+                        serverVersionNum: artifact.serverVersionNum,
+                        target: "FULL_CLUSTER",
+                        scope: verifyScope,
+                        sourcePath,
+                      }),
+                reserveStaging: async () => {
+                  const reservation = await scratchManager.reserve(job.id, DUMP_SCRATCH_BYTES);
+                  return { dir: reservation.path, cleanup: () => reservation.release() };
+                },
+              });
+
+              // Restore landed. Assert a usable schema: count the restored user tables. Collect the
+              // executor's stdout through a PassThrough (as backup-wiring collects a run's stream);
+              // run() resolves only after stdout is fully piped, so every chunk has arrived here.
+              const assertOut = new PassThrough();
+              const chunks: Buffer[] = [];
+              assertOut.on("data", (chunk: Buffer) => chunks.push(chunk));
+              const assertRun = await runner.run(
+                adapter.buildVerifyAssertions({
+                  connection: conn,
+                  serverVersionNum: artifact.serverVersionNum,
+                  scope: verifyScope,
+                }),
+                {
+                  network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
+                  mounts: [],
+                  stdout: assertOut,
+                  timeoutMs: DUMP_TIMEOUT_MS,
+                  correlationId: job.id,
+                },
+              );
+              const count = Number.parseInt(Buffer.concat(chunks).toString("utf8").trim(), 10);
+              // VERIFIED iff the assertion exited clean AND found at least one user table; anything
+              // else is a restore that produced no usable schema → FAILED (a claim about the artifact).
+              return assertRun.exitCode === 0 && Number.isFinite(count) && count >= 1
+                ? "VERIFIED"
+                : "FAILED";
+            },
+          );
+        } catch (err) {
+          // TOTAL catch: typed restore/runner codes → FAILED (artifact) vs INCONCLUSIVE (our infra);
+          // any unrecognized throw defaults to INCONCLUSIVE (never condemn a backup on a surprise).
+          return classifyVerifyError(err);
+        }
+      },
       // Surface the downgrade: verify.ts marks a passing CHECKSUM as ("SUCCEEDED", undefined); when
       // we degraded FULL_RESTORE, rewrite that one terminal call so BackupJob.reason records why.
       setJobState: (state, reason) => {
