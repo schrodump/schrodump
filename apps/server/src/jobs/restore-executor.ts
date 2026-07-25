@@ -18,9 +18,11 @@
 //
 // Security: this is the first artifact-decryption path and the first write into a live target. The
 // operational age identity stays IN MEMORY (KEK-decrypted upstream) and is handed to the Decrypter;
-// it is never written to disk. The decrypted dump file is CLEARTEXT on the scratch volume: 0600,
-// inside the 0700 reserved dir, and always removed in `finally` (success or throw). The identity and
-// the decrypted target credential never reach a log, the response, or BackupJob.reason.
+// it is never written to disk. The decrypted dump file is CLEARTEXT on the scratch volume: it lives
+// inside the 0700 reserved dir (which is what keeps it confidential on the host) and is always removed
+// in `finally` (success or throw); the file itself is 0644 so the mongo executor, which runs as an
+// unprivileged uid, can read it — see the createWriteStream note below. The identity and the decrypted
+// target credential never reach a log, the response, or BackupJob.reason.
 
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
@@ -280,7 +282,16 @@ async function restoreOne(
     // attach — the two failure modes the earlier stdin pipelines had.
     try {
       const decrypted = await decryptStream(ciphertext, deps.ageIdentity);
-      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o600 }));
+      // 0644, not 0600: the restore executor bind-mounts this file and reads it as a container uid
+      // that does not own it. The mongo image runs mongorestore as the unprivileged `mongodb` user
+      // (its entrypoint globs `mongo*` and gosu-drops), so an owner-only dump is `permission denied`
+      // inside that container (`Failed: open <path>: permission denied`), failing the restore/verify;
+      // postgres/mysql run their client as root and would not care. The enclosing 0700 reservation
+      // dir is what keeps this cleartext dump confidential on the host — only its owner can traverse
+      // to the file — so world-read on the file is inert on the host while letting every engine's
+      // throwaway executor read it. (Never reproduces on Docker Desktop, whose VM file-sharing masks
+      // the mount's ownership; it is a native-Linux executor failure, caught by CI.)
+      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o644 }));
     } catch (err) {
       // A source error rewritten above already carries RESTORE_SOURCE_FAILED and surfaces here
       // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
@@ -330,8 +341,6 @@ async function restoreOne(
       correlationId: deps.correlationId,
     });
     if (restoreResult.exitCode !== 0) {
-      // eslint-disable-next-line no-console
-      console.error(`[REPRO] restore executor exit=${restoreResult.exitCode} key=${step.key} stderr=${JSON.stringify(restoreResult.stderr)}`);
       throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
         code: "RESTORE_EXECUTOR_FAILED",
         correlationId: deps.correlationId,
