@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
@@ -22,6 +22,7 @@ interface FakeEngineOptions {
 
 class FakeEngine implements DockerEngine {
   networkOk = true;
+  startFails = false;
   statusCode = 0;
   neverExits = false;
   stdoutChunks: Buffer[] = [];
@@ -46,8 +47,11 @@ class FakeEngine implements DockerEngine {
   }
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
-    this.started = true;
     this.lastSpec = spec;
+    // Mirrors dockerode's createContainer rejecting on an absent image ("No such image"): the
+    // container never comes up and nothing is ever written to opts.stdout.
+    if (this.startFails) throw new Error("No such image: postgres:16-alpine");
+    this.started = true;
     return {
       stdout: Readable.from(this.stdoutChunks),
       stderr: Readable.from(this.stderrChunks),
@@ -140,6 +144,27 @@ describe("DockerRunner.run", () => {
     await expect(new DockerRunner(engine).run(DESCRIPTOR, opts())).rejects.toBeInstanceOf(
       SchrodumpError,
     );
+    expect(engine.started).toBe(false);
+  });
+
+  it("ends the stdout sink and rejects when the container fails to start, so a consumer never deadlocks", async () => {
+    // Regression: a missing executor image makes start() reject BEFORE stdout is wired to the sink.
+    // backup-wiring's upload pipes FROM this sink and only resolves when it closes, then awaits the
+    // run() result LAST — so if run() never ends the sink, the upload (and the worker) hang until the
+    // job timeout instead of failing fast. run() must end the sink AND reject.
+    const engine = new FakeEngine();
+    engine.startFails = true;
+    const sink = new PassThrough();
+    const drained = new Promise<void>((resolve) => {
+      sink.on("data", () => undefined);
+      sink.on("end", () => resolve());
+    });
+    await expect(
+      new DockerRunner(engine).run(DESCRIPTOR, opts({ stdout: sink })),
+    ).rejects.toBeInstanceOf(SchrodumpError);
+    // Resolves only because run() ended the sink; without the fix this awaits forever and the test
+    // times out — the exact shape of the real hang.
+    await drained;
     expect(engine.started).toBe(false);
   });
 

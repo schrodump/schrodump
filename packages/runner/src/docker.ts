@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { PassThrough, type Readable } from "node:stream";
+import { PassThrough, type Readable, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Docker from "dockerode";
 import { SchrodumpError } from "@schrodump/core/errors";
@@ -66,6 +66,11 @@ export class DockerRunner implements Runner {
 
     // Fail clearly on a missing network — never fall back to the default network.
     if (!(await this.#engine.networkExists(opts.network))) {
+      // End the caller's stdout sink first: a consumer piping FROM it (backup-wiring's upload reads
+      // container stdout -> gzip -> encrypt -> S3) blocks until the stream closes, and nothing will
+      // ever be written to it now. Without this the upload deadlocks and the real error below never
+      // surfaces — see endStdout's note. On the success path the stdout pipeline ends it instead.
+      endStdout(opts.stdout);
       throw new SchrodumpError(`docker network "${opts.network}" does not exist`, {
         code: "RUNNER_NETWORK_MISSING",
         correlationId: opts.correlationId,
@@ -73,14 +78,30 @@ export class DockerRunner implements Runner {
       });
     }
 
-    const container = await this.#engine.start({
-      image: descriptor.image,
-      command: descriptor.command,
-      env: descriptor.env,
-      network: opts.network,
-      mounts: opts.mounts,
-      ...(descriptor.workdir !== undefined ? { workdir: descriptor.workdir } : {}),
-    });
+    let container: StartedContainer;
+    try {
+      container = await this.#engine.start({
+        image: descriptor.image,
+        command: descriptor.command,
+        env: descriptor.env,
+        network: opts.network,
+        mounts: opts.mounts,
+        ...(descriptor.workdir !== undefined ? { workdir: descriptor.workdir } : {}),
+      });
+    } catch (err) {
+      // createContainer/attach/start failed BEFORE the container's stdout was ever wired to
+      // opts.stdout — most commonly the executor image is not present locally (dockerode does not
+      // pull, so createContainer returns 404 "No such image"). End the caller's stdout sink so a
+      // consumer piping from it unblocks (otherwise the backup upload waits forever on a dump stream
+      // that never arrives — a worker hang bounded only by the job timeout), then surface the failure.
+      endStdout(opts.stdout);
+      throw new SchrodumpError("docker run failed", {
+        code: "RUNNER_FAILED",
+        correlationId: opts.correlationId,
+        context: {},
+        cause: err,
+      });
+    }
 
     const stderr = captureStderr(container.stderr, STDERR_LIMIT_BYTES);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -182,6 +203,23 @@ export class DockerRunner implements Runner {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// End the caller's stdout sink so a consumer piping FROM it sees EOF and unblocks. Called only on
+// the paths where run() fails BEFORE the container's stdout is wired to it (missing network, a
+// createContainer that 404s on an absent image); the success/execution paths end it through their
+// own `pipeline(container.stdout, opts.stdout)`. `.end()` (clean EOF), never `.destroy(err)`: Node's
+// `.pipe()` does not forward a source error to its destination, so destroying the sink would strand
+// the consumer's own gzip/encrypt pipeline waiting on a stream that never closes — the very deadlock
+// this prevents. A clean end lets that pipeline drain; the run() rejection is what the caller then
+// observes. Guarded because a sink already torn down would throw.
+function endStdout(stdout: Writable | undefined): void {
+  if (stdout === undefined) return;
+  try {
+    stdout.end();
+  } catch {
+    // Already ended/destroyed — nothing to unblock.
+  }
 }
 
 export function createDockerRunner(docker?: Docker): DockerRunner {
