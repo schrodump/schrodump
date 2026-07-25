@@ -155,7 +155,12 @@ export const mongodbAdapter: EngineAdapter = {
 
     return {
       image: this.imageFor(input.serverVersionNum),
-      command: ["mongosh", "--quiet", "--eval", script],
+      // --nodb is REQUIRED: without it mongosh opens an implicit default connection to
+      // mongodb://127.0.0.1:27017 at startup — BEFORE running --eval — and aborts the whole session
+      // with `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017` (there is no mongod in this
+      // one-shot client container), so the script's own `new Mongo(uri)` never runs. --nodb starts
+      // mongosh with no default connection; the script makes the only connection, to the sandbox.
+      command: ["mongosh", "--nodb", "--quiet", "--eval", script],
       env: {
         ...mongoEnv(connection),
         SCHRODUMP_MONGO_USER: connection.username,

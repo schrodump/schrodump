@@ -197,4 +197,16 @@ describe("mongodbAdapter.buildVerifyAssertions", () => {
       expect(arg).not.toContain("s3cret");
     }
   });
+
+  // --nodb is mandatory: without it mongosh opens an implicit default connection to
+  // mongodb://127.0.0.1:27017 at startup and aborts (ECONNREFUSED) before the --eval script — which
+  // makes the ONLY intended connection — ever runs, silently turning every mongo verify FAILED.
+  it("runs mongosh with --nodb so the script makes the only connection", () => {
+    const descriptor = mongodbAdapter.buildVerifyAssertions({
+      connection: CONN,
+      serverVersionNum: 80004,
+      scope: { databases: ["shop"], schemas: [], collections: [] },
+    });
+    expect(descriptor.command).toEqual(["mongosh", "--nodb", "--quiet", "--eval", descriptor.command.at(-1)]);
+  });
 });
