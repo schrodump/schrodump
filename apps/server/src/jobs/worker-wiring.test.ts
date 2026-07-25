@@ -7,6 +7,7 @@ import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/
 import { loadEnv } from "../env.js";
 import {
   createJobExecutor,
+  createWorkerStore,
   originDatabaseFor,
   resolveVerifyPlan,
   sanitizeReason,
@@ -262,5 +263,57 @@ describe("runVerify org-scoping guard", () => {
     // Nothing past the guard ran: no policy lookup, no key material ever fetched/decrypted.
     expect(backupPolicyFindUnique).not.toHaveBeenCalled();
     expect(encryptionKeyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("createWorkerStore — shutdown signal guards claiming", () => {
+  // handle.stop() (shutdown.ts) only halts NEW ticks; the CURRENTLY-RUNNING tick's drainQueue
+  // while-loop keeps calling claimNextJob after abort. Without this guard the store would claim —
+  // and, against the already-aborted signal, immediately FAIL — every queued PENDING job during the
+  // grace window: terminal FAILEDs the scheduler never recreates (it is idempotent by
+  // (policyId, scheduledAt)), so those backup cycles would be silently lost. These tests exercise the
+  // REAL claimNextJob(prisma) query path through a faked prisma.$queryRaw, not a mocked module, so a
+  // regression that lets the guard fall through would actually issue the claim.
+  const claimedRow: ClaimedJob = {
+    id: "job-1",
+    organizationId: "org-1",
+    kind: "BACKUP",
+    policyId: "policy-1",
+    artifactId: null,
+    correlationId: "backup:policy-1",
+    restoreParams: null,
+  };
+
+  function fakePrisma() {
+    const queryRaw = vi.fn(async () => [claimedRow]);
+    const prisma = { $queryRaw: queryRaw };
+    return { prisma: prisma as unknown as PrismaClient, queryRaw };
+  }
+
+  it("claims normally when constructed with no signal at all (unchanged behavior outside shutdown)", async () => {
+    const { prisma, queryRaw } = fakePrisma();
+    const store = createWorkerStore(prisma);
+
+    await expect(store.claimNextJob()).resolves.toEqual(claimedRow);
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("claims normally while the shutdown signal has not tripped", async () => {
+    const { prisma, queryRaw } = fakePrisma();
+    const controller = new AbortController();
+    const store = createWorkerStore(prisma, controller.signal);
+
+    await expect(store.claimNextJob()).resolves.toEqual(claimedRow);
+    expect(queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("claims nothing once the shutdown signal has tripped, and never issues the claim query", async () => {
+    const { prisma, queryRaw } = fakePrisma();
+    const controller = new AbortController();
+    controller.abort();
+    const store = createWorkerStore(prisma, controller.signal);
+
+    await expect(store.claimNextJob()).resolves.toBeNull();
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 });

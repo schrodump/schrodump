@@ -64,6 +64,13 @@ SIGTERM
   └─ process.exit(0)
 ```
 
+> **Correction (post-implementation):** the diagram's `stop claiming new jobs` annotation on
+> `handle.stop()` and §3's "thread the signal through `drainQueue`" were the wrong mental model.
+> `handle.stop()` only halts new **ticks**; the in-flight tick's `drainQueue` while-loop keeps
+> calling `claimNextJob` after abort and would mass-FAIL every queued job. Claiming is actually
+> stopped by gating `claimNextJob` on the shutdown signal inside the worker store
+> (`worker-wiring.ts`'s `createWorkerStore`), not by threading the signal into `drainQueue` itself.
+
 ### Components and changes
 
 1. **`packages/runner` — cancellation input.**

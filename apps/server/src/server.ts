@@ -110,12 +110,12 @@ export async function main(): Promise<void> {
   if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
 
   // 2. Single-flight worker (same advisory lock keeps one replica draining).
-  const store = createWorkerStore(prisma);
   const shutdownController = new AbortController();
   // Every in-flight run adds its own "abort" listener to this shared signal; under concurrency
   // (staged parallelism, or backup+verify overlapping) that can exceed Node's default cap of 10 and
   // print a spurious MaxListenersExceededWarning. This is one process-wide controller, not a leak.
   setMaxListeners(0, shutdownController.signal);
+  const store = createWorkerStore(prisma, shutdownController.signal);
   const executor = createJobExecutor({ prisma, kek, env, signal: shutdownController.signal });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startLoop({

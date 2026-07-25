@@ -92,9 +92,14 @@ const PROBES: Record<EngineKind, EngineProbeFn> = {
   mongodb: probeMongodb,
 };
 
-export function createWorkerStore(prisma: PrismaClient): WorkerStore {
+export function createWorkerStore(prisma: PrismaClient, signal?: AbortSignal): WorkerStore {
   return {
-    claimNextJob: () => claimNextJob(prisma),
+    // Once the shutdown signal trips, claim nothing new: handle.stop() only halts NEW ticks, but the
+    // in-flight drainQueue while-loop keeps calling claimNextJob. Without this guard it would claim
+    // and (on the already-aborted signal) FAIL every queued PENDING job during the grace window —
+    // terminal FAILEDs the scheduler won't recreate. Returning null makes drainQueue go idle and exit
+    // right after the aborted in-flight job, leaving the rest PENDING for the next boot.
+    claimNextJob: () => (signal?.aborted === true ? Promise.resolve(null) : claimNextJob(prisma)),
     failJob: async (jobId, reason) => {
       await prisma.backupJob.update({
         where: { id: jobId },
