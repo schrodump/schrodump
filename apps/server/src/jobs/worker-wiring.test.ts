@@ -5,7 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
 import { loadEnv } from "../env.js";
-import { createJobExecutor, resolveVerifyPlan, sanitizeReason, toBackupProbe } from "./worker-wiring.js";
+import {
+  createJobExecutor,
+  originDatabaseFor,
+  resolveVerifyPlan,
+  sanitizeReason,
+  toBackupProbe,
+  verifyEngineWiring,
+} from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
@@ -49,6 +56,58 @@ describe("resolveVerifyPlan", () => {
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
+  });
+});
+
+describe("originDatabaseFor", () => {
+  it("returns the first scoped database for every engine when one is scoped", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      expect(originDatabaseFor(engine, ["app", "reporting"])).toBe("app");
+    }
+  });
+
+  it("falls back to the engine default the backup used when unscoped", () => {
+    expect(originDatabaseFor("postgres", [])).toBe("postgres");
+    expect(originDatabaseFor("mysql", [])).toBe("mysql");
+    expect(originDatabaseFor("mariadb", [])).toBe("mysql");
+    // Unscoped mongo yields the "admin" authSource default (a multi-db archive has no single origin
+    // db — a deferred follow-up); a SCOPED mongo target resolves the real data db, unlike
+    // probeDatabaseFor which always reports "admin" for mongo.
+    expect(originDatabaseFor("mongodb", [])).toBe("admin");
+    expect(originDatabaseFor("mongodb", ["events"])).toBe("events");
+  });
+
+  it("treats an empty-string first entry as unscoped", () => {
+    expect(originDatabaseFor("mysql", [""])).toBe("mysql");
+  });
+});
+
+describe("verifyEngineWiring", () => {
+  it("postgres/mysql/mariadb authenticate against the sandbox database with an empty assertion scope", () => {
+    // postgres: sandbox db is the fixed "verify"; mysql/mariadb: sandbox db is the origin db
+    // MYSQL_DATABASE pre-created. Either way the assertion reads connection.database, so scope is empty.
+    expect(verifyEngineWiring("postgres", "verify", "postgres")).toEqual({
+      connectionDatabase: "verify",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+    expect(verifyEngineWiring("mysql", "app", "app")).toEqual({
+      connectionDatabase: "app",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+    expect(verifyEngineWiring("mariadb", "app", "app")).toEqual({
+      connectionDatabase: "app",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+  });
+
+  it("mongo authenticates against admin (NEVER the origin db) and carries the origin db in the assertion scope", () => {
+    // CRITICAL: the root `verify` user lives in admin, so the connection's database MUST be the
+    // admin authSource. Putting the origin db there would authenticate against a non-existent user
+    // db and fail with the right password. The origin db reaches the assertion through scope instead.
+    const wiring = verifyEngineWiring("mongodb", "events", "events");
+    expect(wiring.connectionDatabase).toBe("admin");
+    expect(wiring.connectionDatabase).not.toBe("events");
+    expect(wiring.assertionScope).toEqual({ databases: ["events"], schemas: [], collections: [] });
   });
 });
 

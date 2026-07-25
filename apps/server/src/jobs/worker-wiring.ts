@@ -175,6 +175,54 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
   return engine === "postgres" ? "postgres" : "mysql";
 }
 
+// The artifact's ORIGIN database — the db mysql/mongo restore INTO (mysqldump's `USE <origin>` / the
+// mongodump archive's embedded db names), resolved from the producing target's scope exactly as the
+// backup path chose its dump db: the first scoped database, else the engine default a single-db dump
+// used. UNLIKE probeDatabaseFor, mongo does NOT collapse to "admin" when scoped — that helper reports
+// the authSource, whereas THIS is the real data db the verify assertion must inspect. Only the unscoped
+// mongo fallback is "admin" (a full-instance archive has no single origin db — the multi-db case is a
+// deferred follow-up), so a scoped mongo target resolves its actual db here.
+export function originDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
+  const first = scopedDatabases[0];
+  if (first !== undefined && first.length > 0) return first;
+  if (engine === "postgres") return "postgres";
+  if (engine === "mongodb") return "admin";
+  return "mysql";
+}
+
+// How the verify sandbox connection and the assertion scope differ per engine. They COINCIDE for
+// postgres/mysql (the connection authenticates against, and the assertion inspects, the same db) but
+// DIVERGE for mongo: the bootstrap root user `verify` lives in `admin`, so the connection MUST
+// authenticate against the admin authSource, while the restored data lands in the origin db. The
+// origin db therefore reaches mongo's assertion through `scope.databases[0]` (which buildVerifyAssertions
+// reads to pick which db to count collections in), never through the connection's `database` — putting
+// it there would authenticate against a non-existent user db and fail even with the right password.
+export interface VerifyEngineWiring {
+  // The sandbox connection's `database`: the admin authSource for mongo, the fixed "verify" db for
+  // postgres, the origin db (pre-created by MYSQL_DATABASE) for mysql/mariadb.
+  readonly connectionDatabase: string;
+  // The scope handed to buildVerifyAssertions. Only mongo needs a populated scope (the origin db);
+  // mysql counts connection.database and postgres counts the connected verify db, so both read empty.
+  readonly assertionScope: DumpScope;
+}
+
+export function verifyEngineWiring(
+  engine: EngineKind,
+  sandboxDatabase: string,
+  originDatabase: string,
+): VerifyEngineWiring {
+  if (engine === "mongodb") {
+    return {
+      connectionDatabase: "admin",
+      assertionScope: { databases: [originDatabase], schemas: [], collections: [] },
+    };
+  }
+  return {
+    connectionDatabase: sandboxDatabase,
+    assertionScope: { databases: [], schemas: [], collections: [] },
+  };
+}
+
 function toKeyRecord(row: {
   keyId: string;
   type: "operational" | "escrow";
@@ -447,7 +495,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
     const artifact = await prisma.artifact.findUniqueOrThrow({
       where: { id: job.artifactId },
-      include: { destination: true, job: true },
+      // The producing job's policy → target carries the origin scope FULL_RESTORE needs to resolve
+      // the origin db for the mysql/mongo verify sandbox (postgres ignores it). A policy-less
+      // producer (self-backup) leaves policy/target null → an unscoped origin, handled below.
+      include: {
+        destination: true,
+        job: { include: { policy: { include: { target: true } } } },
+      },
     });
 
     // SECURITY: the VERIFY job must reference an artifact in its OWN organization. This runs on raw
@@ -496,9 +550,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       bucketKey: artifact.bucketKey,
       // The checksum recorded at upload IS the manifest's checksum of the stored object.
       manifestChecksum: artifact.checksum,
-      // FULL_RESTORE (postgres only — the plan downgrades every other engine to CHECKSUM). Restore
-      // the artifact into a THROWAWAY postgres container on the isolated executor network, assert the
-      // schema landed, then destroy it. The catch is TOTAL: every throw path is mapped by
+      // FULL_RESTORE (any STREAM artifact — the plan downgrades only STAGED to CHECKSUM). Restore the
+      // artifact into a THROWAWAY container of its own engine/major on the isolated executor network,
+      // assert the schema landed, then destroy it. The catch is TOTAL: every throw path is mapped by
       // classifyVerifyError to FAILED (the artifact is bad) or INCONCLUSIVE (our infra failed) — a raw
       // throw must NEVER escape to runVerifyJob's catch, which would mark a possibly-good artifact
       // FAILED and violate the leave-it-UNOBSERVED-on-infra-failure thesis.
@@ -511,13 +565,30 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         // gracefully-degradable cases before any container is even started.
         try {
           const sandboxPassword = randomUUID();
+          // The origin db the artifact restores INTO, resolved from the producing target's scope the
+          // same way the backup chose its dump db (originDatabaseFor). A policy-less producer or a
+          // malformed stored scope degrades to an unscoped origin (engine default) rather than
+          // throwing — this is verify, not restore: never condemn a good artifact over a scope parse.
+          const originScope = ScopeSchema.safeParse(artifact.job.policy?.target?.scope);
+          const scopedDatabases = originScope.success ? originScope.data.databases : [];
+          const originDatabase = originDatabaseFor(engine, scopedDatabases);
+
           // buildVerifySandbox is optional (only engines with an in-process restore implement it).
-          // Undefined means a non-postgres engine slipped past the plan downgrade — INCONCLUSIVE.
-          // Third arg is the sandbox/origin database. Postgres ignores it (its -Fc dump is
-          // db-name-agnostic); mysql/mongo need the artifact's origin db, which Task 7 resolves and
-          // threads here. Until then postgres is the only engine that reaches this path.
-          const sandbox = adapter.buildVerifySandbox?.(artifact.serverVersionNum, sandboxPassword, "verify");
+          // Undefined means an engine that slipped past the plan downgrade — INCONCLUSIVE. Third arg
+          // is the origin db: postgres ignores it (its -Fc dump is db-name-agnostic, fixed "verify"
+          // sandbox db); mysql pre-creates it via MYSQL_DATABASE; mongo reports it back for the
+          // assertion scope (its restore lands in the archive's own db names).
+          const sandbox = adapter.buildVerifySandbox?.(
+            artifact.serverVersionNum,
+            sandboxPassword,
+            originDatabase,
+          );
           if (sandbox === undefined) return "INCONCLUSIVE";
+
+          // Per-engine split: which db the sandbox connection authenticates against vs. which db the
+          // assertion inspects. Coincide for postgres/mysql; diverge for mongo (auth against admin,
+          // count collections in the origin db). See verifyEngineWiring.
+          const wiring = verifyEngineWiring(engine, sandbox.database, originDatabase);
 
           // The decrypted CLEARTEXT dump MUST stage on the scratch volume (exactly as restore
           // requires); no scratch configured → cannot run the test → INCONCLUSIVE. (scratchManager
@@ -544,10 +615,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             parseEncryptedCredential(keyRow.encryptedIdentity),
           );
 
-          // A -Fc dump carries object definitions, not the origin database name, so a FULL_CLUSTER
-          // restore into the sandbox's own `verify` database is correct with an empty scope — verify
-          // restores the whole dump into a fresh container, it never targets the origin.
-          const verifyScope: DumpScope = { databases: [], schemas: [], collections: [] };
+          // The RESTORE descriptors take an empty scope: verify restores the WHOLE artifact into a
+          // fresh sandbox, never a sub-scope. Each engine's restore already knows where the data
+          // lands — postgres -Fc is db-name-agnostic (fixed "verify" db), mysqldump embeds
+          // `USE <origin>`, and the mongodump archive carries its own db names — so no scope is
+          // needed here. The ASSERTION scope (wiring.assertionScope) is separate: mongo alone needs
+          // the origin db there to know which restored db to count collections in.
+          const restoreScope: DumpScope = { databases: [], schemas: [], collections: [] };
 
           return await runner.withEphemeralService(
             {
@@ -567,7 +641,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 // TLS off: a localhost-equivalent link on an isolated network to a container that
                 // lives seconds; the password is a per-verify throwaway.
                 password: sandboxPassword,
-                database: sandbox.database,
+                // Per-engine (verifyEngineWiring): postgres → fixed "verify" db; mysql → the origin
+                // db MYSQL_DATABASE pre-created; mongo → the "admin" authSource the root `verify`
+                // user lives in (NOT the origin db — that would break authentication).
+                database: wiring.connectionDatabase,
                 tls: false,
               };
 
@@ -587,7 +664,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                     connection: conn,
                     serverVersionNum: artifact.serverVersionNum,
                     target: "FULL_CLUSTER",
-                    scope: verifyScope,
+                    scope: restoreScope,
                     executionMode: artifact.executionMode,
                     sourcePath,
                   }),
@@ -598,7 +675,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                         connection: conn,
                         serverVersionNum: artifact.serverVersionNum,
                         target: "FULL_CLUSTER",
-                        scope: verifyScope,
+                        scope: restoreScope,
                         executionMode: artifact.executionMode,
                         sourcePath,
                       }),
@@ -606,10 +683,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   const reservation = await scratchManager.reserve(job.id, DUMP_SCRATCH_BYTES);
                   return { dir: reservation.path, cleanup: () => reservation.release() };
                 },
-                // Mongo's mongorestore needs the `--config` password file mounted here too; the
-                // sandbox uses the throwaway root password. Unreachable until buildVerifySandbox exists
-                // for mongo (Task 7) — mongo FULL_RESTORE returns INCONCLUSIVE before this call today —
-                // but wired so the sandbox restore is correct the moment it lands.
+                // Mongo's mongorestore reads its password from the mounted `--config` file (off argv),
+                // so it needs the same materialize-into-staging mount the real restore path uses; here
+                // the credential is the sandbox's throwaway root password (conn.password), and the
+                // config authenticates the `verify` root user against admin. runRestorePipeline
+                // materializes it INSIDE its try and sweeps it before releasing the dir, so a
+                // materialization throw still releases the reservation (never a leaked semaphore slot).
+                // Other engines carry the password in env → no mount.
                 ...(engine === "mongodb"
                   ? {
                       provideExtraMounts: async (dir: string) => {
@@ -630,7 +710,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 adapter.buildVerifyAssertions({
                   connection: conn,
                   serverVersionNum: artifact.serverVersionNum,
-                  scope: verifyScope,
+                  // mongo counts collections in scope.databases[0] (the origin db); mysql counts
+                  // connection.database; postgres counts the connected verify db. verifyEngineWiring
+                  // populates the origin db for mongo and leaves it empty for the others.
+                  scope: wiring.assertionScope,
                 }),
                 {
                   network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
