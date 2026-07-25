@@ -24,10 +24,12 @@ export async function probeMysql(conn: ProbeConnection): Promise<ProbeResult> {
     // user regardless of grants (verified against both root and a database-scoped user), unlike
     // `mysql`/`sys` which only appear for a user actually granted on them. Left in, they flow
     // straight into buildDump's `--databases` list (worker-wiring passes probe.scope through
-    // unfiltered) and mysqldump hard-refuses with "Dumping 'information_schema' DB content is not
-    // supported" — an unconditional failure on every real instance, not a privilege issue to work
-    // around. Excluding them here mirrors probePostgres's own `datistemplate = false` filter: the
-    // probe reports backup CANDIDATES, and a database mysqldump refuses outright is never one.
+    // unfiltered). `information_schema` is the unconditional failure: mysqldump hard-refuses it
+    // ("Dumping 'information_schema' DB content is not supported") on every real instance, and a
+    // single unrefusable database anywhere in `--databases` aborts the whole dump. `performance_schema`
+    // is a runtime catalog with no user data (mysqldump does not hard-refuse it, but it is never a
+    // backup candidate); excluding both mirrors probePostgres's own `datistemplate = false` filter:
+    // the probe reports backup CANDIDATES, and a catalog schema is never one.
     const SYSTEM_SCHEMAS = "('information_schema', 'performance_schema')";
     const [sizeRows] = await connection.query<RowDataPacket[]>(
       "SELECT table_schema AS name, SUM(data_length + index_length) AS bytes " +

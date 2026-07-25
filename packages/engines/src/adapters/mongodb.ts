@@ -100,9 +100,11 @@ export const mongodbAdapter: EngineAdapter = {
     // design). Guessing "yes" is a hard crash of the WHOLE restore for the guaranteed-common case
     // (buildDump refuses a scoped dump on a replica set, so any scoped mongo artifact — the only
     // kind FULL_RESTORE verify's sandbox ever restores, since resolveVerifyPlan downgrades
-    // unscoped mongo to CHECKSUM — is provably never oplog-bearing); guessing "no" only means an
-    // actual replica-set-sourced FULL_CLUSTER restore skips replaying that supplementary oplog
-    // window, a data-consistency nuance, not a failure. Tracked in docs/roadmap.md.
+    // unscoped mongo to CHECKSUM — is provably never oplog-bearing); guessing "no" means an actual
+    // replica-set-sourced FULL_CLUSTER restore is restored WITHOUT oplog replay — each collection
+    // ends at a slightly different effective timestamp (a cross-collection point-in-time consistency
+    // loss; each collection stays internally consistent), not a crash. Reachable only on the real
+    // restore path, never in verify (which only restores scoped, non-oplog archives). See roadmap.md.
     const command = [
       "mongorestore",
       ...mongoConnArgs(connection),
