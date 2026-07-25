@@ -36,6 +36,10 @@ export interface BackupWiringDeps {
   // the password via env (PGPASSWORD/MYSQL_PWD) and runs with no mount. Materialized + cleaned up by
   // the composer (worker-wiring), which holds the decrypted password.
   configMount?: RunMount;
+  // The shutdown signal, bound once at createJobExecutor construction and forwarded into every
+  // container-creating run so the runner can force-remove the container on abort. Undefined outside
+  // a shutdown (or in tests) — the runner behaves exactly as before.
+  readonly signal?: AbortSignal;
   setState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
   probe(): Promise<ProbeResult>;
   reserveScratch(estimatedBytes: number): Promise<Reservation>;
@@ -74,6 +78,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       stdout: dumpOut,
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     // Attached synchronously, in the same tick runPromise is created — not merely "eventually
     // awaited". encryptStream() below crosses a real threadpool boundary (WebCrypto), so if the run

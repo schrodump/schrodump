@@ -263,4 +263,31 @@ describe("createBackupPorts.executeAndUpload", () => {
     await run(undefined);
     expect(capture[0]?.mounts).toEqual([]);
   });
+
+  // Task 3: the shutdown AbortSignal is a construction-time dependency (bound once at
+  // createJobExecutor) that must ride along on every container-creating run, so the runner can
+  // force-remove the container on abort. Undefined when nothing was passed — behavior unchanged.
+  it("forwards the shutdown signal into the dump run options", async () => {
+    const capture: RunOptions[] = [];
+    const capturingRunner: Runner = {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push(opts);
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+    const controller = new AbortController();
+    const { deps, recipient } = await makeDeps(0);
+    const ports = createBackupPorts({ ...deps, runner: capturingRunner, signal: controller.signal });
+
+    await ports.executeAndUpload({
+      mode: "STREAM",
+      parallelism: 1,
+      probe: PROBE,
+      recipients: { recipients: [recipient], keyIds: ["k"] },
+    });
+
+    expect(capture[0]?.signal).toBe(controller.signal);
+  });
 });

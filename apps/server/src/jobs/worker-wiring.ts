@@ -275,6 +275,11 @@ export interface JobExecutorDeps {
   prisma: PrismaClient;
   kek: Buffer;
   env: Env;
+  // The shutdown signal (Task 4 constructs the real AbortController and passes it here). A
+  // construction-time dependency, bound once and forwarded into every container-creating call this
+  // executor makes — directly and through the backup/restore ports — never threaded through the
+  // worker brain (drainQueue/runWorkerOnce). Undefined outside a shutdown: unchanged behavior.
+  signal?: AbortSignal;
 }
 
 export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
@@ -415,6 +420,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       timeoutMs: DUMP_TIMEOUT_MS,
       // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
       ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
       setState: (state, reason) => setJobState(job.id, state, reason),
       probe: () => Promise.resolve(backupProbe),
       reserveScratch: async (estimatedBytes) => {
@@ -699,6 +705,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
                 timeoutMs: DUMP_TIMEOUT_MS,
                 correlationId: job.id,
+                ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
                 buildRestoreDescriptor: (sourcePath) =>
                   adapter.buildRestore({
                     connection: conn,
@@ -761,6 +768,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   stdout: assertOut,
                   timeoutMs: DUMP_TIMEOUT_MS,
                   correlationId: job.id,
+                  ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
                 },
               );
               const count = Number.parseInt(Buffer.concat(chunks).toString("utf8").trim(), 10);
@@ -770,6 +778,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 ? "VERIFIED"
                 : "FAILED";
             },
+            deps.signal !== undefined ? { signal: deps.signal } : undefined,
           );
         } catch (err) {
           // TOTAL catch: typed restore/runner codes → FAILED (artifact) vs INCONCLUSIVE (our infra);
@@ -970,6 +979,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
           timeoutMs: DUMP_TIMEOUT_MS,
           correlationId: job.id,
+          ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
           buildRestoreDescriptor: (sourcePath) =>
             adapter.buildRestore({
               connection,
