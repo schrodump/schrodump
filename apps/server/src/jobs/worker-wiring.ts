@@ -297,12 +297,23 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         return { ok: false, artifactId: null, verifyLevel: "NONE" };
       }
       const reservation = await scratch.reserve(job.id, DUMP_SCRATCH_BYTES);
-      const configFile = await writeMongoConfig(reservation.path, password);
-      mongoConfigMount = configFile.mount;
-      releaseMongoConfig = async () => {
-        await configFile.cleanup();
-        await reservation.release();
-      };
+      // Assigned IMMEDIATELY once the reservation exists, so a throw from writeMongoConfig below
+      // (ENOSPC/EIO on the writeFile/chmod) still releases the semaphore slot via the catch — a
+      // leaked reservation wedges every future staged operation (a small SCHRODUMP_MAX_CONCURRENT_
+      // STAGED, 1 in practice, makes this permanent) until process restart. gc() reclaims the
+      // directory by age but never touches the semaphore, so it cannot recover a leaked slot.
+      releaseMongoConfig = () => reservation.release();
+      try {
+        const configFile = await writeMongoConfig(reservation.path, password);
+        mongoConfigMount = configFile.mount;
+        releaseMongoConfig = async () => {
+          await configFile.cleanup();
+          await reservation.release();
+        };
+      } catch (err) {
+        await releaseMongoConfig();
+        throw err;
+      }
     }
 
     const startedAt = Date.now();

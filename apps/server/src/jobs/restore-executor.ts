@@ -206,10 +206,16 @@ export interface RestorePipelineDeps {
 // dump is always removed in finally; cleanup releases the reserved scratch dir.
 export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boolean> {
   const staging = await deps.reserveStaging();
-  // Materialize any credential mount (mongo's `--config`) into the reserved dir before the executors
-  // run; empty for engines that pass the password via env.
-  const extra = deps.provideExtraMounts ? await deps.provideExtraMounts(staging.dir) : null;
+  // extra is materialized INSIDE the try (not between reserveStaging and the try) so a throw from
+  // provideExtraMounts (e.g. ENOSPC/EIO writing mongo's `--config` file) still runs the finally
+  // below — releasing the staging reservation instead of leaking its semaphore slot. staging.cleanup()
+  // removes the whole reserved dir recursively, so a partial config file left by a half-completed
+  // provideExtraMounts is swept by the finally too, not left for age-based gc.
+  let extra: { mounts: RunMount[]; cleanup: () => Promise<void> } | null = null;
   try {
+    // Materialize any credential mount (mongo's `--config`) into the reserved dir before the
+    // executors run; empty for engines that pass the password via env.
+    extra = deps.provideExtraMounts ? await deps.provideExtraMounts(staging.dir) : null;
     const steps = planRestoreSteps(
       deps.bucketKey,
       deps.buildRestoreDescriptor,
@@ -223,7 +229,7 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
   } finally {
     // Remove the credential file before the dir is swept (narrows the cleartext window), then
     // release() recursively removes the reserved dir, sweeping any decrypted dump a per-step cleanup
-    // missed after a hard failure.
+    // missed after a hard failure. extra stays null when provideExtraMounts itself threw.
     if (extra !== null) await extra.cleanup();
     await staging.cleanup();
   }
