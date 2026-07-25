@@ -16,6 +16,14 @@ import {
 } from "./docker.js";
 import type { RunOptions } from "./runner.js";
 
+// Drains the microtask queue (all pending promise continuations), without waiting on any real
+// timer. Used by the abort tests to let DockerRunner get past its own awaits (networkExists,
+// start/startService) and register its "abort" listener before the test fires the signal —
+// aborting earlier would fire the event before anything is listening, and it would be missed.
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 interface FakeEngineOptions {
   readyAfter: number; // number of exec() calls before exec returns 0; Infinity = never ready
 }
@@ -195,6 +203,33 @@ describe("DockerRunner.run", () => {
     await new DockerRunner(engine).run(DESCRIPTOR, opts({ network: "schrodump_targets" }));
     expect(engine.lastSpec?.network).toBe("schrodump_targets");
   });
+
+  it("force-kills the container and rejects with RUNNER_ABORTED when the signal aborts mid-run", async () => {
+    const engine = new FakeEngine();
+    engine.neverExits = true; // container.wait() never resolves — only the abort can end the race
+    const controller = new AbortController();
+    const p = new DockerRunner(engine).run(DESCRIPTOR, opts({ signal: controller.signal }));
+    // Let the runner get past networkExists()/start() and register the abort listener before we
+    // fire it — otherwise abort() (a synchronous event, not a polled flag) fires before anything
+    // is listening and is missed, same as with any other EventTarget.
+    await flushMicrotasks();
+    controller.abort(new Error("shutdown"));
+    await expect(p).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.killed).toBe(true);
+    expect(engine.removed).toBe(true); // finally still reaps
+  });
+
+  it("never starts a container and still ends the stdout sink when the signal is already aborted", async () => {
+    const engine = new FakeEngine();
+    const controller = new AbortController();
+    controller.abort(new Error("shutdown"));
+    const sink = new PassThrough();
+    await expect(
+      new DockerRunner(engine).run(DESCRIPTOR, opts({ stdout: sink, signal: controller.signal })),
+    ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.started).toBe(false);
+    expect(sink.writableEnded).toBe(true); // endStdout unblocked any downstream consumer
+  });
 });
 
 describe("DockerRunner.withEphemeralService", () => {
@@ -240,6 +275,20 @@ describe("DockerRunner.withEphemeralService", () => {
     // can leak. (The internal force-remove-on-throw inside DockerodeEngine.startService is
     // real-Docker-only; not unit-tested here.)
     expect(engine.startServiceCalled).toBe(false);
+  });
+
+  it("tears the service down when the signal aborts during readiness polling", async () => {
+    const engine = new FakeEngine({ readyAfter: Infinity }); // never becomes ready on its own
+    const controller = new AbortController();
+    const p = new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "unused", {
+      signal: controller.signal,
+    });
+    // Flush past startService() so the service is already up (and thus in the finally's
+    // cleanup path) before we abort — mirrors the run() test's reasoning above.
+    await flushMicrotasks();
+    controller.abort(new Error("shutdown"));
+    await expect(p).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.serviceRemoved).toBe(true);
   });
 });
 

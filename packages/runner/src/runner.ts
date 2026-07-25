@@ -22,6 +22,9 @@ export interface RunOptions {
   readonly stdout?: Writable;
   readonly timeoutMs: number;
   readonly correlationId: string;
+  // When aborted, the runner force-removes the container and rejects with RUNNER_ABORTED. Used by
+  // the server's SIGTERM handler to cancel an in-flight job so no cleartext dump outlives shutdown.
+  readonly signal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -58,5 +61,6 @@ export interface Runner {
   withEphemeralService<T>(
     spec: EphemeralServiceSpec,
     use: (handle: EphemeralServiceHandle) => Promise<T>,
+    opts?: { readonly signal?: AbortSignal },
   ): Promise<T>;
 }
