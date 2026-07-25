@@ -54,10 +54,13 @@ describe("RestoreButton", () => {
     expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
   });
 
-  it("disables the trigger for a non-postgres engine (server refuses restore in v1)", () => {
-    renderWith(<RestoreButton artifact={{ ...artifact, engine: "mongodb" }} role="operator" />);
-    expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
-  });
+  it.each(["postgres", "mysql", "mariadb", "mongodb"] as const)(
+    "enables the trigger for %s (STREAM restore works for all four engines; the server enforces STREAM-only)",
+    (engine) => {
+      renderWith(<RestoreButton artifact={{ ...artifact, engine }} role="operator" />);
+      expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
+    },
+  );
 });
 
 describe("RestoreDialog", () => {

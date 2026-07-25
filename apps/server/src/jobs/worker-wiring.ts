@@ -19,7 +19,7 @@ import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
 import type { ProbeConnection, ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
-import { createDockerRunner } from "@schrodump/runner/runner";
+import { createDockerRunner, type RunMount } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
 import {
   resolveDecryptionKeyId,
@@ -27,11 +27,13 @@ import {
   type EncryptionKeyRecord,
 } from "../crypto/artifact.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { writeMongoConfig } from "../crypto/mongo-config.js";
 import type { Env } from "../env.js";
 import { createBackupPorts } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
+import type { ExecutionMode } from "./execution-mode.js";
 import {
   artifactBelongsToOrg,
   globalsKeyFor,
@@ -73,6 +75,12 @@ const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 const DUMP_SCRATCH_BYTES = 4096;
 const RESTORE_SCRATCH_REQUIRED_REASON =
   "restore requires a configured scratch path for the decrypted dump";
+// Mongo delivers the dump/restore password through a bind-mounted `--config` file (off argv). A
+// RunMount.source must be a Docker-daemon path, so that file has to live on the shared scratch
+// volume — mongo backup therefore requires scratch, and says so plainly instead of failing deep in
+// the executor. The reservation is tiny (the file is a single `password:` line).
+const MONGO_CONFIG_SCRATCH_REQUIRED_REASON =
+  "mongodb backup requires a configured scratch path for the --config credential file";
 
 type EngineProbeFn = (conn: ProbeConnection) => Promise<EngineProbeResult>;
 
@@ -135,18 +143,58 @@ export interface VerifyPlan {
 }
 
 // The plan a VERIFY job runs under: the originating policy's level (CHECKSUM when there is no
-// policy), and whether that level was degraded. FULL_RESTORE reuses the postgres-only restore
-// pipeline, so it is downgraded to CHECKSUM for every OTHER engine (mysql/mariadb/mongodb): running
-// CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting the
-// central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a verifier that does not
-// exist for that engine. Postgres keeps FULL_RESTORE (wired via runFullRestore). The sealed-
-// destination downgrade lives in the domain (runVerifyJob) and is orthogonal to this one.
-export function resolveVerifyPlan(policyLevel: VerifyLevel | null, engine: EngineKind): VerifyPlan {
+// policy), and whether that level was degraded. FULL_RESTORE reuses the STREAM-only restore
+// pipeline (restore.ts's gate), so it is downgraded to CHECKSUM for a STAGED artifact of ANY engine:
+// running CHECKSUM and recording the downgrade keeps a good artifact VERIFIED instead of corrupting
+// the central UNOBSERVED/VERIFIED/FAILED distinction by failing it against a restore pipeline that
+// cannot run for that artifact yet. STREAM keeps FULL_RESTORE (wired via runFullRestore) EXCEPT for
+// an UNSCOPED non-postgres artifact (see below). The sealed-destination downgrade lives in the
+// domain (runVerifyJob) and is orthogonal to this one.
+//
+// Why an UNSCOPED non-postgres artifact downgrades too — a different reason than STAGED. For these
+// engines an unscoped artifact is a MULTI-DATABASE archive, but the verify sandbox restores it and
+// then counts objects in the SINGLE origin db originDatabaseFor resolves — which, unscoped, collapses
+// to a SYSTEM db that never holds the restored app data, so the assertion's count is unrelated to
+// whether the data actually landed:
+//   - mysql/mariadb: an unscoped mysqldump embeds `USE <db>` per user database; originDatabaseFor
+//     collapses to the "mysql" SYSTEM db, whose ~30 always-present system tables make the table
+//     count >= 1 REGARDLESS of whether any user data restored → a FALSE VERIFIED.
+//   - mongodb: mongodump --archive on a replica set is a full-instance archive (mongodb.ts's buildDump
+//     REFUSES a scoped dump on a replica set — MONGODB_OPLOG_REQUIRES_FULL_DUMP — so every replica set
+//     is forced unscoped); originDatabaseFor collapses to "admin", which holds only system collections
+//     and the bootstrapped `verify` root user. An empty admin would FAIL a good backup; a populated
+//     admin.system.users would VERIFY one that never proved the app data landed.
+// Both blur VERIFIED/FAILED, so both downgrade to CHECKSUM — the same honest deferral as STAGED: a
+// good unscoped artifact stays VERIFIED via CHECKSUM instead of getting a wrong verdict. A SCOPED
+// target (a non-empty database in scope) has a real origin db and keeps FULL_RESTORE.
+//
+// POSTGRES is exempt: its -Fc dump is db-name-agnostic and restores into the fixed "verify" sandbox
+// db, where the assertion counts ALL non-system schemas — so it needs no scope and cannot hit this
+// system-db collapse.
+export function resolveVerifyPlan(
+  policyLevel: VerifyLevel | null,
+  engine: EngineKind,
+  executionMode: ExecutionMode,
+  scopedDatabases: string[],
+): VerifyPlan {
   const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
-  if (requested === "FULL_RESTORE" && engine !== "postgres") {
+  if (requested === "FULL_RESTORE" && executionMode === "STAGED") {
     return {
       effectiveLevel: "CHECKSUM",
-      downgradeReason: "FULL_RESTORE runs for PostgreSQL only in v1: downgraded to CHECKSUM",
+      downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
+    };
+  }
+  // An empty-string db name is not a real scope entry: the route rejects it (targets.ts .min(1)).
+  // "Scoped" is judged EXACTLY as originDatabaseFor resolves the origin db — the FIRST entry, non-
+  // empty — so the two can never disagree over what a legacy/malformed [""] (or [""].concat(...))
+  // stored scope means. Were this to read [""] as scoped while originDatabaseFor collapses to the
+  // system db, we would keep FULL_RESTORE and mint the exact false VERIFIED above.
+  const firstScoped = scopedDatabases[0];
+  const isScoped = firstScoped !== undefined && firstScoped.length > 0;
+  if (requested === "FULL_RESTORE" && engine !== "postgres" && !isScoped) {
+    return {
+      effectiveLevel: "CHECKSUM",
+      downgradeReason: `unscoped ${engine} artifacts cannot be FULL_RESTORE-verified in v1 (multi-database archive): downgraded to CHECKSUM`,
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };
@@ -159,6 +207,54 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
   const first = scopedDatabases[0];
   if (first !== undefined && first.length > 0) return first;
   return engine === "postgres" ? "postgres" : "mysql";
+}
+
+// The artifact's ORIGIN database — the db mysql/mongo restore INTO (mysqldump's `USE <origin>` / the
+// mongodump archive's embedded db names), resolved from the producing target's scope exactly as the
+// backup path chose its dump db: the first scoped database, else the engine default a single-db dump
+// used. UNLIKE probeDatabaseFor, mongo does NOT collapse to "admin" when scoped — that helper reports
+// the authSource, whereas THIS is the real data db the verify assertion must inspect. Only the unscoped
+// mongo fallback is "admin" (a full-instance archive has no single origin db — the multi-db case is a
+// deferred follow-up), so a scoped mongo target resolves its actual db here.
+export function originDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
+  const first = scopedDatabases[0];
+  if (first !== undefined && first.length > 0) return first;
+  if (engine === "postgres") return "postgres";
+  if (engine === "mongodb") return "admin";
+  return "mysql";
+}
+
+// How the verify sandbox connection and the assertion scope differ per engine. They COINCIDE for
+// postgres/mysql (the connection authenticates against, and the assertion inspects, the same db) but
+// DIVERGE for mongo: the bootstrap root user `verify` lives in `admin`, so the connection MUST
+// authenticate against the admin authSource, while the restored data lands in the origin db. The
+// origin db therefore reaches mongo's assertion through `scope.databases[0]` (which buildVerifyAssertions
+// reads to pick which db to count collections in), never through the connection's `database` — putting
+// it there would authenticate against a non-existent user db and fail even with the right password.
+export interface VerifyEngineWiring {
+  // The sandbox connection's `database`: the admin authSource for mongo, the fixed "verify" db for
+  // postgres, the origin db (pre-created by MYSQL_DATABASE) for mysql/mariadb.
+  readonly connectionDatabase: string;
+  // The scope handed to buildVerifyAssertions. Only mongo needs a populated scope (the origin db);
+  // mysql counts connection.database and postgres counts the connected verify db, so both read empty.
+  readonly assertionScope: DumpScope;
+}
+
+export function verifyEngineWiring(
+  engine: EngineKind,
+  sandboxDatabase: string,
+  originDatabase: string,
+): VerifyEngineWiring {
+  if (engine === "mongodb") {
+    return {
+      connectionDatabase: "admin",
+      assertionScope: { databases: [originDatabase], schemas: [], collections: [] },
+    };
+  }
+  return {
+    connectionDatabase: sandboxDatabase,
+    assertionScope: { databases: [], schemas: [], collections: [] },
+  };
 }
 
 function toKeyRecord(row: {
@@ -270,6 +366,38 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       tls: target.tls,
     };
 
+    // Mongo's password reaches mongodump ONLY through a bind-mounted `--config` file (never argv);
+    // every other engine passes it via env and mounts nothing. That file is a cleartext credential,
+    // so it lives on the scratch volume (0700 reserved dir, 0644 file, gc-swept, deploy-encrypted) and
+    // is removed in the finally around runBackupJob. Mongo is STREAM-only (stagedCapable:false), so
+    // runBackupJob never takes a STAGED reservation on this job id — no collision with this one.
+    let mongoConfigMount: RunMount | undefined;
+    let releaseMongoConfig: (() => Promise<void>) | null = null;
+    if (engine === "mongodb") {
+      if (scratch === null) {
+        await failJob(job.id, MONGO_CONFIG_SCRATCH_REQUIRED_REASON);
+        return { ok: false, artifactId: null, verifyLevel: "NONE" };
+      }
+      const reservation = await scratch.reserve(job.id, DUMP_SCRATCH_BYTES);
+      // Assigned IMMEDIATELY once the reservation exists, so a throw from writeMongoConfig below
+      // (ENOSPC/EIO on the writeFile/chmod) still releases the semaphore slot via the catch — a
+      // leaked reservation wedges every future staged operation (a small SCHRODUMP_MAX_CONCURRENT_
+      // STAGED, 1 in practice, makes this permanent) until process restart. gc() reclaims the
+      // directory by age but never touches the semaphore, so it cannot recover a leaked slot.
+      releaseMongoConfig = () => reservation.release();
+      try {
+        const configFile = await writeMongoConfig(reservation.path, password);
+        mongoConfigMount = configFile.mount;
+        releaseMongoConfig = async () => {
+          await configFile.cleanup();
+          await reservation.release();
+        };
+      } catch (err) {
+        await releaseMongoConfig();
+        throw err;
+      }
+    }
+
     const startedAt = Date.now();
     const stagingPathFor = (): string | undefined =>
       deps.env.SCHRODUMP_SCRATCH_PATH !== undefined
@@ -285,6 +413,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
       prefix: destination.prefix,
       timeoutMs: DUMP_TIMEOUT_MS,
+      // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
+      ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
       setState: (state, reason) => setJobState(job.id, state, reason),
       probe: () => Promise.resolve(backupProbe),
       reserveScratch: async (estimatedBytes) => {
@@ -341,7 +471,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         createdAt: new Date(startedAt).toISOString(),
         durationMs: Date.now() - startedAt,
       }),
-      persistArtifact: async ({ probe, recipients, upload }): Promise<string> => {
+      persistArtifact: async ({ probe, mode, recipients, upload }): Promise<string> => {
         const artifact = await prisma.artifact.create({
           data: {
             organizationId: job.organizationId,
@@ -351,6 +481,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             bucketKey: upload.bucketKey,
             manifestKey: upload.manifestKey,
             engine,
+            executionMode: mode,
             serverVersionNum: probe.serverVersionNum,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
@@ -366,20 +497,26 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       },
     });
 
-    const outcome = await runBackupJob(
-      {
-        jobId: job.id,
-        organizationId: job.organizationId,
-        requestedParallelism: policy.parallelism,
-        // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
-        // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
-        stagedThresholdBytes: deps.env.SCHRODUMP_SCRATCH_MAX_BYTES,
-        scratchConfigured: scratch !== null,
-      },
-      ports,
-    );
+    try {
+      const outcome = await runBackupJob(
+        {
+          jobId: job.id,
+          organizationId: job.organizationId,
+          requestedParallelism: policy.parallelism,
+          // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
+          // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
+          stagedThresholdBytes: deps.env.SCHRODUMP_SCRATCH_MAX_BYTES,
+          scratchConfigured: scratch !== null,
+        },
+        ports,
+      );
 
-    return { ok: outcome.ok, artifactId: outcome.artifactId, verifyLevel: policy.verifyLevel };
+      return { ok: outcome.ok, artifactId: outcome.artifactId, verifyLevel: policy.verifyLevel };
+    } finally {
+      // Remove the mongo `--config` credential file (and release its reservation) whether the dump
+      // succeeded or threw; a no-op for the other engines.
+      if (releaseMongoConfig !== null) await releaseMongoConfig();
+    }
   };
 
   const runVerify = async (job: ClaimedJob): Promise<void> => {
@@ -392,7 +529,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
     const artifact = await prisma.artifact.findUniqueOrThrow({
       where: { id: job.artifactId },
-      include: { destination: true, job: true },
+      // The producing job's policy → target carries the origin scope FULL_RESTORE needs to resolve
+      // the origin db for the mysql/mongo verify sandbox (postgres ignores it). A policy-less
+      // producer (self-backup) leaves policy/target null → an unscoped origin, handled below.
+      include: {
+        destination: true,
+        job: { include: { policy: { include: { target: true } } } },
+      },
     });
 
     // SECURITY: the VERIFY job must reference an artifact in its OWN organization. This runs on raw
@@ -417,7 +560,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               select: { verifyLevel: true },
             })
           )?.verifyLevel ?? null);
-    const plan = resolveVerifyPlan(policyLevel, artifact.engine);
+    // The origin scope the producing target was scoped to, parsed up front (rather than only inside
+    // runFullRestore) so resolveVerifyPlan can see it: an UNSCOPED mongo artifact needs its own
+    // downgrade (see resolveVerifyPlan) distinct from the STAGED one. A policy-less producer or a
+    // malformed stored scope degrades to unscoped (never throws) — this is verify, not restore.
+    const originScope = ScopeSchema.safeParse(producingJob.policy?.target?.scope);
+    const scopedDatabases = originScope.success ? originScope.data.databases : [];
+    const plan = resolveVerifyPlan(policyLevel, artifact.engine, artifact.executionMode, scopedDatabases);
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -441,9 +590,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       bucketKey: artifact.bucketKey,
       // The checksum recorded at upload IS the manifest's checksum of the stored object.
       manifestChecksum: artifact.checksum,
-      // FULL_RESTORE (postgres only — the plan downgrades every other engine to CHECKSUM). Restore
-      // the artifact into a THROWAWAY postgres container on the isolated executor network, assert the
-      // schema landed, then destroy it. The catch is TOTAL: every throw path is mapped by
+      // FULL_RESTORE (any STREAM artifact — the plan downgrades only STAGED to CHECKSUM). Restore the
+      // artifact into a THROWAWAY container of its own engine/major on the isolated executor network,
+      // assert the schema landed, then destroy it. The catch is TOTAL: every throw path is mapped by
       // classifyVerifyError to FAILED (the artifact is bad) or INCONCLUSIVE (our infra failed) — a raw
       // throw must NEVER escape to runVerifyJob's catch, which would mark a possibly-good artifact
       // FAILED and violate the leave-it-UNOBSERVED-on-infra-failure thesis.
@@ -456,10 +605,30 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         // gracefully-degradable cases before any container is even started.
         try {
           const sandboxPassword = randomUUID();
+          // The origin db the artifact restores INTO, resolved from the producing target's scope the
+          // same way the backup chose its dump db (originDatabaseFor). scopedDatabases was already
+          // parsed above (outside this closure) so resolveVerifyPlan could see it too; reused here
+          // rather than re-parsed. A policy-less producer or a malformed stored scope degrades to an
+          // unscoped origin (engine default) rather than throwing — this is verify, not restore: never
+          // condemn a good artifact over a scope parse.
+          const originDatabase = originDatabaseFor(engine, scopedDatabases);
+
           // buildVerifySandbox is optional (only engines with an in-process restore implement it).
-          // Undefined means a non-postgres engine slipped past the plan downgrade — INCONCLUSIVE.
-          const sandbox = adapter.buildVerifySandbox?.(artifact.serverVersionNum, sandboxPassword);
+          // Undefined means an engine that slipped past the plan downgrade — INCONCLUSIVE. Third arg
+          // is the origin db: postgres ignores it (its -Fc dump is db-name-agnostic, fixed "verify"
+          // sandbox db); mysql pre-creates it via MYSQL_DATABASE; mongo reports it back for the
+          // assertion scope (its restore lands in the archive's own db names).
+          const sandbox = adapter.buildVerifySandbox?.(
+            artifact.serverVersionNum,
+            sandboxPassword,
+            originDatabase,
+          );
           if (sandbox === undefined) return "INCONCLUSIVE";
+
+          // Per-engine split: which db the sandbox connection authenticates against vs. which db the
+          // assertion inspects. Coincide for postgres/mysql; diverge for mongo (auth against admin,
+          // count collections in the origin db). See verifyEngineWiring.
+          const wiring = verifyEngineWiring(engine, sandbox.database, originDatabase);
 
           // The decrypted CLEARTEXT dump MUST stage on the scratch volume (exactly as restore
           // requires); no scratch configured → cannot run the test → INCONCLUSIVE. (scratchManager
@@ -486,10 +655,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             parseEncryptedCredential(keyRow.encryptedIdentity),
           );
 
-          // A -Fc dump carries object definitions, not the origin database name, so a FULL_CLUSTER
-          // restore into the sandbox's own `verify` database is correct with an empty scope — verify
-          // restores the whole dump into a fresh container, it never targets the origin.
-          const verifyScope: DumpScope = { databases: [], schemas: [], collections: [] };
+          // The RESTORE descriptors take an empty scope: verify restores the WHOLE artifact into a
+          // fresh sandbox, never a sub-scope. Each engine's restore already knows where the data
+          // lands — postgres -Fc is db-name-agnostic (fixed "verify" db), mysqldump embeds
+          // `USE <origin>`, and the mongodump archive carries its own db names — so no scope is
+          // needed here. The ASSERTION scope (wiring.assertionScope) is separate: mongo alone needs
+          // the origin db there to know which restored db to count collections in.
+          const restoreScope: DumpScope = { databases: [], schemas: [], collections: [] };
 
           return await runner.withEphemeralService(
             {
@@ -509,7 +681,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 // TLS off: a localhost-equivalent link on an isolated network to a container that
                 // lives seconds; the password is a per-verify throwaway.
                 password: sandboxPassword,
-                database: sandbox.database,
+                // Per-engine (verifyEngineWiring): postgres → fixed "verify" db; mysql → the origin
+                // db MYSQL_DATABASE pre-created; mongo → the "admin" authSource the root `verify`
+                // user lives in (NOT the origin db — that would break authentication).
+                database: wiring.connectionDatabase,
                 tls: false,
               };
 
@@ -529,7 +704,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                     connection: conn,
                     serverVersionNum: artifact.serverVersionNum,
                     target: "FULL_CLUSTER",
-                    scope: verifyScope,
+                    scope: restoreScope,
+                    executionMode: artifact.executionMode,
                     sourcePath,
                   }),
                 buildGlobalsRestoreDescriptor: (sourcePath) =>
@@ -539,13 +715,29 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                         connection: conn,
                         serverVersionNum: artifact.serverVersionNum,
                         target: "FULL_CLUSTER",
-                        scope: verifyScope,
+                        scope: restoreScope,
+                        executionMode: artifact.executionMode,
                         sourcePath,
                       }),
                 reserveStaging: async () => {
                   const reservation = await scratchManager.reserve(job.id, DUMP_SCRATCH_BYTES);
                   return { dir: reservation.path, cleanup: () => reservation.release() };
                 },
+                // Mongo's mongorestore reads its password from the mounted `--config` file (off argv),
+                // so it needs the same materialize-into-staging mount the real restore path uses; here
+                // the credential is the sandbox's throwaway root password (conn.password), and the
+                // config authenticates the `verify` root user against admin. runRestorePipeline
+                // materializes it INSIDE its try and sweeps it before releasing the dir, so a
+                // materialization throw still releases the reservation (never a leaked semaphore slot).
+                // Other engines carry the password in env → no mount.
+                ...(engine === "mongodb"
+                  ? {
+                      provideExtraMounts: async (dir: string) => {
+                        const configFile = await writeMongoConfig(dir, conn.password);
+                        return { mounts: [configFile.mount], cleanup: configFile.cleanup };
+                      },
+                    }
+                  : {}),
               });
 
               // Restore landed. Assert a usable schema: count the restored user tables. Collect the
@@ -558,7 +750,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 adapter.buildVerifyAssertions({
                   connection: conn,
                   serverVersionNum: artifact.serverVersionNum,
-                  scope: verifyScope,
+                  // mongo counts collections in scope.databases[0] (the origin db); mysql counts
+                  // connection.database; postgres counts the connected verify db. verifyEngineWiring
+                  // populates the origin db for mongo and leaves it empty for the others.
+                  scope: wiring.assertionScope,
                 }),
                 {
                   network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
@@ -685,6 +880,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         Promise.resolve({
           manifestKeyIds: artifact.keyIds,
           engine,
+          executionMode: artifact.executionMode,
           serverVersionNum: artifact.serverVersionNum,
           destinationName: artifact.destination.name,
         }),
@@ -780,6 +976,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               serverVersionNum: artifact.serverVersionNum,
               target: params.target,
               scope,
+              executionMode: artifact.executionMode,
               sourcePath,
             }),
           buildGlobalsRestoreDescriptor: (sourcePath) =>
@@ -790,8 +987,20 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   serverVersionNum: artifact.serverVersionNum,
                   target: params.target,
                   scope,
+                  executionMode: artifact.executionMode,
                   sourcePath,
                 }),
+          // Mongo restore reads its password from the mounted `--config` file (off argv); the pipeline
+          // materializes it into the reserved staging dir (same swept volume as the dump) and removes
+          // it before releasing that dir. Other engines carry the password in env → no mount.
+          ...(engine === "mongodb"
+            ? {
+                provideExtraMounts: async (dir: string) => {
+                  const configFile = await writeMongoConfig(dir, connection.password);
+                  return { mounts: [configFile.mount], cleanup: configFile.cleanup };
+                },
+              }
+            : {}),
           reserveStaging: async () => {
             // I1: reserve the per-job scratch DIRECTORY (ScratchManager.gc() reclaims it if a hard
             // kill skips the finally cleanup; a bare root file would be skipped by gc). It holds the

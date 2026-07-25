@@ -31,15 +31,23 @@ export async function probeMongodb(conn: ProbeConnection): Promise<ProbeResult> 
     const setName: unknown = hello["setName"];
     const isReplicaSet = typeof setName === "string" && setName.length > 0;
 
-    const collections = await client.db(conn.database).listCollections().toArray();
-
+    // Collections are deliberately NOT enumerated here. `conn.database` is the authSource ("admin"
+    // for mongo — see probe/types + worker-wiring's probeDatabaseFor), NOT a data db: a
+    // least-privilege backup credential (readWrite on its ONE scoped db, created in admin) is not
+    // authorized to `listCollections` on admin and the driver throws Unauthorized (code 13). It is
+    // also the wrong db to list — the backup dumps whole databases (scope.databases), and
+    // worker-wiring feeds probe.scope straight into buildDump, where a non-empty scope.collections
+    // becomes a `--collection` filter (and >1 is refused as MONGODB_SCOPE_TOO_BROAD). Report no
+    // collection-level scope, exactly as the mysql/postgres probes do, so a whole-db dump stays a
+    // whole-db dump. Collection-level discovery, if it is ever needed, must run against a data db
+    // the credential can actually read, never the authSource.
     return {
       serverVersionNum,
       databases,
       scope: {
         databases: databases.map((database) => database.name),
         schemas: [],
-        collections: collections.map((collection) => collection.name),
+        collections: [],
       },
       facts: { isReplicaSet, hasMyisam: false },
     };

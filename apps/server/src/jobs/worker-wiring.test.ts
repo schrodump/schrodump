@@ -5,44 +5,154 @@ import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
 import { loadEnv } from "../env.js";
-import { createJobExecutor, resolveVerifyPlan, sanitizeReason, toBackupProbe } from "./worker-wiring.js";
+import {
+  createJobExecutor,
+  originDatabaseFor,
+  resolveVerifyPlan,
+  sanitizeReason,
+  toBackupProbe,
+  verifyEngineWiring,
+} from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
 
 describe("resolveVerifyPlan", () => {
-  it("keeps FULL_RESTORE for postgres with no downgrade", () => {
-    expect(resolveVerifyPlan("FULL_RESTORE", "postgres")).toEqual({
+  it("keeps FULL_RESTORE for an UNSCOPED postgres STREAM artifact (its -Fc dump needs no scope)", () => {
+    // Postgres is the ONLY engine exempt from the unscoped downgrade: its db-name-agnostic -Fc dump
+    // restores into the fixed "verify" sandbox db and the assertion counts all non-system schemas
+    // there, so it never hits the system-db collapse the other engines do.
+    expect(resolveVerifyPlan("FULL_RESTORE", "postgres", "STREAM", [])).toEqual({
       effectiveLevel: "FULL_RESTORE",
       downgradeReason: null,
     });
   });
 
-  it("downgrades FULL_RESTORE to CHECKSUM for non-postgres engines with a PostgreSQL-only reason", () => {
-    for (const engine of ["mysql", "mariadb", "mongodb"] as const) {
-      const plan = resolveVerifyPlan("FULL_RESTORE", engine);
-      expect(plan.effectiveLevel).toBe("CHECKSUM");
-      expect(plan.downgradeReason).toMatch(/PostgreSQL only/i);
+  it("keeps FULL_RESTORE for STREAM with no downgrade, for any engine when scoped", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      expect(resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", ["app"])).toEqual({
+        effectiveLevel: "FULL_RESTORE",
+        downgradeReason: null,
+      });
     }
   });
 
-  it("keeps CHECKSUM unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("CHECKSUM", "mysql")).toEqual({
+  it("downgrades FULL_RESTORE to CHECKSUM for a STAGED artifact, for any engine including postgres", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STAGED", []);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(plan.downgradeReason).toMatch(/STAGED artifacts cannot be FULL_RESTORE-verified/i);
+    }
+  });
+
+  it("downgrades an UNSCOPED mysql/mariadb FULL_RESTORE (STREAM) to CHECKSUM — guards the system-db false VERIFIED", () => {
+    // C1: originDatabaseFor collapses an unscoped mysql/mariadb origin to the "mysql" SYSTEM db,
+    // whose ~30 always-present system tables make the verify table count >= 1 REGARDLESS of whether
+    // any user data landed. Downgrade to CHECKSUM rather than mint a false VERIFIED.
+    for (const engine of ["mysql", "mariadb"] as const) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STREAM", []);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(plan.downgradeReason).toMatch(
+        new RegExp(`unscoped ${engine} artifacts cannot be FULL_RESTORE-verified`, "i"),
+      );
+    }
+  });
+
+  it("downgrades an UNSCOPED mongo FULL_RESTORE (STREAM) to CHECKSUM (full-instance archive)", () => {
+    const plan = resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", []);
+    expect(plan.effectiveLevel).toBe("CHECKSUM");
+    expect(plan.downgradeReason).toMatch(/unscoped mongodb artifacts cannot be FULL_RESTORE-verified/i);
+  });
+
+  it("treats a scope whose first entry is empty as unscoped — consistent with originDatabaseFor (M3)", () => {
+    // An empty-string db name is not a real scope entry (targets.ts .min(1) rejects it at the border).
+    // resolveVerifyPlan and originDatabaseFor must never disagree: both key off the first NON-EMPTY
+    // entry, so [""] and ["", "app"] are unscoped (downgrade → no false VERIFIED), while ["app"] is
+    // scoped (keeps FULL_RESTORE). originDatabaseFor("mysql", [""]) === "mysql" pins the same rule.
+    for (const scope of [[""], ["", "app"]]) {
+      const plan = resolveVerifyPlan("FULL_RESTORE", "mysql", "STREAM", scope);
+      expect(plan.effectiveLevel).toBe("CHECKSUM");
+      expect(originDatabaseFor("mysql", scope)).toBe("mysql");
+    }
+    expect(resolveVerifyPlan("FULL_RESTORE", "mysql", "STREAM", ["app"])).toEqual({
+      effectiveLevel: "FULL_RESTORE",
+      downgradeReason: null,
+    });
+  });
+
+  it("keeps CHECKSUM unchanged with no downgrade reason regardless of executionMode", () => {
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STREAM", [])).toEqual({
+      effectiveLevel: "CHECKSUM",
+      downgradeReason: null,
+    });
+    expect(resolveVerifyPlan("CHECKSUM", "mysql", "STAGED", [])).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
   });
 
   it("keeps NONE unchanged with no downgrade reason", () => {
-    expect(resolveVerifyPlan("NONE", "postgres")).toEqual({
+    expect(resolveVerifyPlan("NONE", "postgres", "STREAM", [])).toEqual({
       effectiveLevel: "NONE",
       downgradeReason: null,
     });
   });
 
   it("defaults a missing policy level to CHECKSUM without a downgrade", () => {
-    expect(resolveVerifyPlan(null, "postgres")).toEqual({
+    expect(resolveVerifyPlan(null, "postgres", "STREAM", [])).toEqual({
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
+  });
+});
+
+describe("originDatabaseFor", () => {
+  it("returns the first scoped database for every engine when one is scoped", () => {
+    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
+      expect(originDatabaseFor(engine, ["app", "reporting"])).toBe("app");
+    }
+  });
+
+  it("falls back to the engine default the backup used when unscoped", () => {
+    expect(originDatabaseFor("postgres", [])).toBe("postgres");
+    expect(originDatabaseFor("mysql", [])).toBe("mysql");
+    expect(originDatabaseFor("mariadb", [])).toBe("mysql");
+    // Unscoped mongo yields the "admin" authSource default (a multi-db archive has no single origin
+    // db — a deferred follow-up); a SCOPED mongo target resolves the real data db, unlike
+    // probeDatabaseFor which always reports "admin" for mongo.
+    expect(originDatabaseFor("mongodb", [])).toBe("admin");
+    expect(originDatabaseFor("mongodb", ["events"])).toBe("events");
+  });
+
+  it("treats an empty-string first entry as unscoped", () => {
+    expect(originDatabaseFor("mysql", [""])).toBe("mysql");
+  });
+});
+
+describe("verifyEngineWiring", () => {
+  it("postgres/mysql/mariadb authenticate against the sandbox database with an empty assertion scope", () => {
+    // postgres: sandbox db is the fixed "verify"; mysql/mariadb: sandbox db is the origin db
+    // MYSQL_DATABASE pre-created. Either way the assertion reads connection.database, so scope is empty.
+    expect(verifyEngineWiring("postgres", "verify", "postgres")).toEqual({
+      connectionDatabase: "verify",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+    expect(verifyEngineWiring("mysql", "app", "app")).toEqual({
+      connectionDatabase: "app",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+    expect(verifyEngineWiring("mariadb", "app", "app")).toEqual({
+      connectionDatabase: "app",
+      assertionScope: { databases: [], schemas: [], collections: [] },
+    });
+  });
+
+  it("mongo authenticates against admin (NEVER the origin db) and carries the origin db in the assertion scope", () => {
+    // CRITICAL: the root `verify` user lives in admin, so the connection's database MUST be the
+    // admin authSource. Putting the origin db there would authenticate against a non-existent user
+    // db and fail with the right password. The origin db reaches the assertion through scope instead.
+    const wiring = verifyEngineWiring("mongodb", "events", "events");
+    expect(wiring.connectionDatabase).toBe("admin");
+    expect(wiring.connectionDatabase).not.toBe("events");
+    expect(wiring.assertionScope).toEqual({ databases: ["events"], schemas: [], collections: [] });
   });
 });
 

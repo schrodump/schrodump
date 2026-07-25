@@ -47,6 +47,10 @@ function commandsFor(kind: EngineKind): string[][] {
     serverVersionNum: VERSION[kind],
     target: "DATABASE",
     scope: EMPTY_SCOPE,
+    executionMode: "STREAM",
+    // Restore always stages the decrypted artifact to a mounted file now (no stdin path);
+    // mysql/mariadb's STREAM buildRestore requires it (postgres/mongodb ignore or accept it).
+    sourcePath: "/var/lib/schrodump/restore-source",
   };
   const verify: VerifyInput = {
     connection: CONN,

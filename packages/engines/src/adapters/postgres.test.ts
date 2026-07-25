@@ -132,6 +132,7 @@ describe("postgresAdapter.buildGlobalsRestore", () => {
     serverVersionNum: 160002,
     target: "FULL_CLUSTER",
     scope: { databases: ["app"], schemas: [], collections: [] },
+    executionMode: "STREAM",
   };
 
   it("emits psql -f - reading the globals SQL on stdin, WITHOUT ON_ERROR_STOP", () => {
@@ -167,6 +168,7 @@ describe("postgresAdapter.buildRestore", () => {
     serverVersionNum: 160002,
     target: "DATABASE",
     scope: { databases: ["app"], schemas: [], collections: [] },
+    executionMode: "STREAM",
   };
 
   it("runs pg_restore --clean --if-exists --exit-on-error, reading the mounted dump as a file", () => {
@@ -187,8 +189,10 @@ describe("postgresAdapter.buildRestore", () => {
 });
 
 describe("postgresAdapter.buildVerifySandbox", () => {
-  it("describes a postgres sandbox of the artifact's major with bootstrap creds and readiness", () => {
-    const s = postgresAdapter.buildVerifySandbox!(160002, "secret-123");
+  it("describes a postgres sandbox of the artifact's major with bootstrap creds and readiness, ignoring the origin database", () => {
+    // A -Fc dump is db-name-agnostic (pg_restore -d can target any database), so postgres always
+    // uses its fixed "verify" sandbox db regardless of what the artifact's origin database was.
+    const s = postgresAdapter.buildVerifySandbox!(160002, "secret-123", "shop");
     expect(s.image).toBe("postgres:16-alpine");
     expect(s.env.POSTGRES_USER).toBe("verify");
     expect(s.env.POSTGRES_PASSWORD).toBe("secret-123");

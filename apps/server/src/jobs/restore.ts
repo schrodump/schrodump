@@ -18,6 +18,7 @@ export interface RestoreRequest {
 export interface ArtifactForRestore {
   manifestKeyIds: string[];
   engine: string;
+  executionMode: "STREAM" | "STAGED";
   supportedRestoreTargets: RestoreTarget[];
   destinationName: string;
 }
@@ -53,14 +54,13 @@ export async function runRestoreJob(
   try {
     const artifact = await ports.loadArtifact();
 
-    // 0. v1 restore is verified end-to-end for PostgreSQL only. The MySQL/MariaDB and MongoDB restore
-    //    descriptors were never adapted to the staged-file executor (which mounts the decrypted dump
-    //    as a file) nor smoke-tested, so running them would be a broken restore — and for MongoDB one
-    //    that could exit 0 on no data (a failed restore reporting ok, which the thesis forbids). Refuse
-    //    loudly. Follow-up: adapt buildRestore + smoke per engine, then lift this gate; the capability
-    //    matrix already carries their scopes.
-    if (artifact.engine !== "postgres") {
-      return await fail(ports, `restore is not available for ${artifact.engine} in v1 (PostgreSQL only)`);
+    // 0. The staged-file executor mounts the decrypted dump as a SINGLE FILE, which only fits a
+    //    STREAM (single-stream) artifact — a STAGED (directory) artifact, of ANY engine including
+    //    postgres, needs a separate untar-to-directory pipeline that does not exist in v1. Refuse
+    //    loudly rather than let it reach the single-file pipeline and fail confusingly. Follow-up:
+    //    a staged-directory restore pipeline, tracked separately.
+    if (artifact.executionMode !== "STREAM") {
+      return await fail(ports, "STAGED restore is not available in v1 (STREAM artifacts only)");
     }
 
     // 1. Validate the target against the capability matrix — a single-table restore of an artifact

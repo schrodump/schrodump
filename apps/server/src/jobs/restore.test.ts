@@ -22,6 +22,7 @@ const REQ: RestoreRequest = {
 const ARTIFACT: ArtifactForRestore = {
   manifestKeyIds: ["retired-op", "escrow"],
   engine: "postgres",
+  executionMode: "STREAM",
   supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
   destinationName: "prod-s3",
 };
@@ -82,18 +83,40 @@ describe("runRestoreJob", () => {
     expect(h.restoredWithKey).toEqual([]);
   });
 
-  it("refuses a non-postgres artifact in v1, before any audit or execution", async () => {
-    // v1 restore is verified for PostgreSQL only; other engines' descriptors were not adapted to the
-    // staged-file executor. The gate must fire before the audit and before runRestore.
+  it("passes the STREAM gate for a non-postgres engine, reaching the target-matrix check", async () => {
+    // The gate is executionMode, not engine: a STREAM mysql/mongodb artifact is no longer refused up
+    // front. It still has to clear the target-matrix check like any other artifact.
     const h = makeHarness({
       loadArtifact: () =>
-        Promise.resolve({ ...ARTIFACT, engine: "mongodb", supportedRestoreTargets: ["DATABASE"] }),
+        Promise.resolve({
+          ...ARTIFACT,
+          engine: "mongodb",
+          executionMode: "STREAM",
+          supportedRestoreTargets: ["DATABASE"],
+        }),
     });
-    const outcome = await runRestoreJob(REQ, h.ports);
+    const outcome = await runRestoreJob({ ...REQ, target: "COLLECTION" }, h.ports);
     expect(outcome.ok).toBe(false);
-    expect(outcome.error).toMatch(/not available for mongodb/i);
+    expect(outcome.error).toMatch(/not supported/i);
     expect(h.restoredWithKey).toEqual([]);
     expect(h.audits).toEqual([]);
+  });
+
+  it("refuses a STAGED artifact of any engine, before any audit or execution", async () => {
+    // The staged-file restore mounts a single file; it cannot handle a STAGED (directory) artifact,
+    // postgres included — this closes a latent gap where a postgres -Fd artifact used to reach the
+    // single-file pipeline and fail confusingly. The gate must fire before the audit and before
+    // runRestore.
+    for (const engine of ["postgres", "mysql", "mongodb"] as const) {
+      const h = makeHarness({
+        loadArtifact: () => Promise.resolve({ ...ARTIFACT, engine, executionMode: "STAGED" }),
+      });
+      const outcome = await runRestoreJob(REQ, h.ports);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toMatch(/STAGED restore is not available/i);
+      expect(h.restoredWithKey).toEqual([]);
+      expect(h.audits).toEqual([]);
+    }
   });
 
   it("refuses to restore over existing data without explicit confirmation", async () => {

@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { createGzip } from "node:zlib";
+import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
-import { describe, expect, it } from "vitest";
+import type { RunMount, RunOptions, RunResult, Runner } from "@schrodump/runner/runner";
+import type { StorageDriver } from "@schrodump/storage/driver";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   artifactBelongsToOrg,
   globalsKeyFor,
   planRestoreSteps,
   restoreParamsOf,
   restoreScopeOf,
+  runRestorePipeline,
 } from "./restore-executor.js";
 
 describe("restoreParamsOf", () => {
@@ -102,5 +111,153 @@ describe("planRestoreSteps", () => {
     );
     expect(steps.map((s) => s.key)).toEqual(["k/artifact.bin"]);
     expect(steps[0]?.buildDescriptor("/stage/x").command).toEqual(["restore", "/stage/x"]);
+  });
+});
+
+// Mirrors backup-wiring.test.ts's capturing-runner pattern: no Docker/S3, only the crypto/stream
+// pipeline is real (a real gzip+age-encrypted ciphertext, decrypted+gunzipped onto a real mkdtemp'd
+// staging dir), so runRestorePipeline's mount-threading and reservation lifecycle run for real.
+describe("runRestorePipeline — extra-mount threading and reservation lifecycle", () => {
+  let stagingDir: string;
+  let stagingCleanupCalls: number;
+
+  beforeEach(async () => {
+    stagingDir = await mkdtemp(join(tmpdir(), "schrodump-restore-pipeline-"));
+    stagingCleanupCalls = 0;
+  });
+
+  afterEach(async () => {
+    await rm(stagingDir, { recursive: true, force: true });
+  });
+
+  const reserveStaging = (): Promise<{ dir: string; cleanup: () => Promise<void> }> =>
+    Promise.resolve({
+      dir: stagingDir,
+      cleanup: async () => {
+        stagingCleanupCalls++;
+        await rm(stagingDir, { recursive: true, force: true });
+      },
+    });
+
+  const restoreDescriptor = (sourcePath: string): ExecutionDescriptor => ({
+    image: "restore",
+    command: ["restore", sourcePath],
+    env: {},
+    outputKind: "directory",
+  });
+
+  // gzip -> age-encrypt a plaintext, mirroring backup-wiring's encryptStream — the inverse of what
+  // restoreOne does on the way in (decrypt -> gunzip), so the real pipeline has real bytes to consume.
+  async function encryptedGzip(plaintext: string, recipient: string): Promise<Readable> {
+    const gzipped = Readable.from([plaintext]).pipe(createGzip());
+    const encrypter = new Encrypter();
+    encrypter.addRecipient(recipient);
+    const source = Readable.toWeb(gzipped) as ReadableStream<Uint8Array>;
+    return Readable.fromWeb(await encrypter.encrypt(source));
+  }
+
+  function fakeDriver(get: () => Promise<Readable>): StorageDriver {
+    const unused = (): never => {
+      throw new Error("not used in this test");
+    };
+    return { put: unused, get: () => get(), head: unused, delete: unused, list: unused, canary: unused };
+  }
+
+  function capturingRunner(capture: RunOptions[]): Runner {
+    return {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push(opts);
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used in this test")),
+    };
+  }
+
+  it("mounts [dumpMount, configMount] when provideExtraMounts returns a mount (mongo)", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+    const configMount: RunMount = {
+      source: "/scratch/job-1/mongo-config.yaml",
+      target: "/etc/schrodump/mongodb.yaml",
+      readOnly: true,
+    };
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+      provideExtraMounts: () => Promise.resolve({ mounts: [configMount], cleanup: () => Promise.resolve() }),
+    });
+
+    expect(ok).toBe(true);
+    const mounts = capture[0]?.mounts ?? [];
+    expect(mounts).toHaveLength(2);
+    expect(mounts[0]?.readOnly).toBe(true);
+    expect(mounts[0]?.source.startsWith(stagingDir)).toBe(true);
+    expect(mounts[1]).toEqual(configMount);
+  });
+
+  it("mounts only [dumpMount] when there is no provideExtraMounts (non-mongo)", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    });
+
+    expect(ok).toBe(true);
+    expect(capture[0]?.mounts).toHaveLength(1);
+  });
+
+  // Locks Finding 1: a throw from provideExtraMounts (ENOSPC/EIO writing mongo's `--config` file)
+  // must still release the staging reservation — before the fix, the await sat OUTSIDE the try whose
+  // finally does staging.cleanup(), so the throw skipped cleanup entirely and leaked the scratch
+  // semaphore slot (wedging every future staged op under a small SCHRODUMP_MAX_CONCURRENT_STAGED).
+  it("releases the staging reservation when provideExtraMounts throws", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+
+    await expect(
+      runRestorePipeline({
+        driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+        runner: capturingRunner(capture),
+        bucketKey: "artifact.bin",
+        globalsKey: null,
+        ageIdentity: identity,
+        network: "schrodump_targets",
+        timeoutMs: 1000,
+        correlationId: "job-1",
+        buildRestoreDescriptor: restoreDescriptor,
+        buildGlobalsRestoreDescriptor: () => null,
+        reserveStaging,
+        provideExtraMounts: () => Promise.reject(new Error("ENOSPC materializing the config file")),
+      }),
+    ).rejects.toThrow(/ENOSPC/);
+
+    // The finally still ran: the reservation was released (its semaphore slot freed) even though
+    // provideExtraMounts threw before any restore executor ran.
+    expect(stagingCleanupCalls).toBe(1);
+    expect(capture).toHaveLength(0);
   });
 });

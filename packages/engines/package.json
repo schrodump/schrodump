@@ -14,6 +14,11 @@
       "types": "./dist/registry.d.ts",
       "import": "./dist/registry.js"
     },
+    "./adapters/mongodb": {
+      "@schrodump/source": "./src/adapters/mongodb.ts",
+      "types": "./dist/adapters/mongodb.d.ts",
+      "import": "./dist/adapters/mongodb.js"
+    },
     "./probe/types": {
       "@schrodump/source": "./src/probe/types.ts",
       "types": "./dist/probe/types.d.ts",

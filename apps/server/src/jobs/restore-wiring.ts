@@ -13,6 +13,7 @@ export interface RestoreWiringDeps {
   loadArtifactRow(): Promise<{
     manifestKeyIds: string[];
     engine: EngineKind;
+    executionMode: "STREAM" | "STAGED";
     serverVersionNum: number;
     destinationName: string;
   }>;
@@ -37,6 +38,7 @@ export function createRestorePorts(deps: RestoreWiringDeps): RestorePorts {
       return {
         manifestKeyIds: row.manifestKeyIds,
         engine: row.engine,
+        executionMode: row.executionMode,
         supportedRestoreTargets: [...caps.supportedRestoreTargets],
         destinationName: row.destinationName,
       };
