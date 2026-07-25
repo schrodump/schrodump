@@ -193,7 +193,17 @@ describe("postgresAdapter.buildVerifySandbox", () => {
     expect(s.env.POSTGRES_USER).toBe("verify");
     expect(s.env.POSTGRES_PASSWORD).toBe("secret-123");
     expect(s.env.POSTGRES_DB).toBe("verify");
-    expect(s.readinessCommand).toEqual(["pg_isready", "-U", "verify", "-d", "verify"]);
+    expect(s.readinessCommand).toEqual([
+      "pg_isready",
+      "-h",
+      "127.0.0.1",
+      "-p",
+      "5432",
+      "-U",
+      "verify",
+      "-d",
+      "verify",
+    ]);
     expect(s.port).toBe(5432);
     expect(s.username).toBe("verify");
     expect(s.database).toBe("verify");

@@ -169,7 +169,11 @@ export const postgresAdapter: EngineAdapter = {
         POSTGRES_PASSWORD: password,
         POSTGRES_DB: database,
       },
-      readinessCommand: ["pg_isready", "-U", username, "-d", database],
+      // -h/-p force pg_isready to probe TCP, not the local unix socket. The postgres image's
+      // bootstrap sequence runs a temporary socket-only server for initdb/scripts before
+      // stopping it and starting the real TCP-listening server; a bare `pg_isready` would hit
+      // that temp server and report "ready" before the real server (and its TCP port) is up.
+      readinessCommand: ["pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", username, "-d", database],
       port: 5432,
       username,
       password,
