@@ -146,6 +146,14 @@ export class DockerRunner implements Runner {
           void container.kill().catch(() => undefined);
           reject(abortedError(opts.correlationId));
         };
+        // The entry check above can be stale: abort may have fired during networkExists()/start()
+        // (the async gap before this listener exists). abort() dispatches synchronously to
+        // listeners present at that instant, so a gap-window abort is lost to a listener added now
+        // — catch it here instead of leaving run() to hang until timeoutMs.
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
         signal.addEventListener("abort", onAbort, { once: true });
       });
 

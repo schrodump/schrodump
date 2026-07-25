@@ -39,6 +39,9 @@ class FakeEngine implements DockerEngine {
   killed = false;
   removed = false;
   lastSpec: ContainerSpec | undefined;
+  // Lets a test hold start() pending — e.g. to abort mid createContainer/attach/start, the async
+  // gap between run()'s entry check and its abort-listener registration — then release it deterministically.
+  startGate: Promise<void> | undefined;
 
   readonly #readyAfter: number;
   execCalls = 0;
@@ -56,6 +59,7 @@ class FakeEngine implements DockerEngine {
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
     this.lastSpec = spec;
+    if (this.startGate !== undefined) await this.startGate;
     // Mirrors dockerode's createContainer rejecting on an absent image ("No such image"): the
     // container never comes up and nothing is ever written to opts.stdout.
     if (this.startFails) throw new Error("No such image: postgres:16-alpine");
@@ -229,6 +233,33 @@ describe("DockerRunner.run", () => {
     ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
     expect(engine.started).toBe(false);
     expect(sink.writableEnded).toBe(true); // endStdout unblocked any downstream consumer
+  });
+
+  it("rejects with RUNNER_ABORTED, not a timeout, when the signal aborts while the container is still being created", async () => {
+    // Repro for the lost-abort race: run()'s only synchronous "already aborted" check runs at entry,
+    // before networkExists()/start() are awaited. AbortController#abort() dispatches its event
+    // synchronously to whatever listeners exist at that instant — none do yet during this gap — so an
+    // abort landing here must be caught some other way (a re-check right before addEventListener), or
+    // it is lost forever and run() only ever ends via the timeoutMs backstop.
+    const engine = new FakeEngine();
+    engine.neverExits = true; // container.wait() never resolves — only the abort can end the race
+    let releaseStart = (): void => undefined;
+    engine.startGate = new Promise((resolve) => {
+      releaseStart = resolve;
+    });
+    const controller = new AbortController();
+    const p = new DockerRunner(engine).run(
+      DESCRIPTOR,
+      opts({ timeoutMs: 30, signal: controller.signal }),
+    );
+    // engine.start() is now pending on the gate: run() has not reached signal.addEventListener yet.
+    // Abort now (the event has nowhere to land), then release start() — mirrors the real gap between
+    // engine.start() returning and the abort listener being registered.
+    controller.abort(new Error("shutdown"));
+    releaseStart();
+    await expect(p).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.killed).toBe(true);
+    expect(engine.removed).toBe(true); // finally still reaps
   });
 });
 
