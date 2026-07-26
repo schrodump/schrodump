@@ -64,6 +64,11 @@ export class DockerRunner implements Runner {
   async run(descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> {
     const startedAt = Date.now();
 
+    if (opts.signal?.aborted === true) {
+      endStdout(opts.stdout);
+      throw abortedError(opts.correlationId);
+    }
+
     // Fail clearly on a missing network — never fall back to the default network.
     if (!(await this.#engine.networkExists(opts.network))) {
       // End the caller's stdout sink first: a consumer piping FROM it (backup-wiring's upload reads
@@ -105,6 +110,7 @@ export class DockerRunner implements Runner {
 
     const stderr = captureStderr(container.stderr, STDERR_LIMIT_BYTES);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
 
     try {
       const stdoutDone =
@@ -132,7 +138,26 @@ export class DockerRunner implements Runner {
         }, opts.timeoutMs);
       });
 
-      const exitCode = await Promise.race([execution, timeout]);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const signal = opts.signal;
+        if (signal === undefined) return; // never settles → never wins the race
+        onAbort = () => {
+          // Same teardown the timeout uses: kill now; the finally below force-removes.
+          void container.kill().catch(() => undefined);
+          reject(abortedError(opts.correlationId));
+        };
+        // The entry check above can be stale: abort may have fired during networkExists()/start()
+        // (the async gap before this listener exists). abort() dispatches synchronously to
+        // listeners present at that instant, so a gap-window abort is lost to a listener added now
+        // — catch it here instead of leaving run() to hang until timeoutMs.
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+      const exitCode = await Promise.race([execution, timeout, aborted]);
 
       return {
         exitCode,
@@ -149,6 +174,7 @@ export class DockerRunner implements Runner {
       });
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      if (onAbort !== undefined) opts.signal?.removeEventListener("abort", onAbort);
       // Manual removal (never AutoRemove) so exit code and stderr are read first.
       await container.remove().catch(() => undefined);
     }
@@ -157,6 +183,7 @@ export class DockerRunner implements Runner {
   async withEphemeralService<T>(
     spec: EphemeralServiceSpec,
     use: (handle: EphemeralServiceHandle) => Promise<T>,
+    opts?: { readonly signal?: AbortSignal },
   ): Promise<T> {
     // Pre-flight the network exactly as run() does, and BEFORE startService — a missing network makes
     // container.start() throw AFTER createContainer already succeeded, orphaning the container we'd
@@ -169,10 +196,14 @@ export class DockerRunner implements Runner {
       });
     }
 
+    if (opts?.signal?.aborted === true) {
+      throw abortedError(spec.correlationId);
+    }
+
     const svc = await this.#engine.startService(spec);
 
     try {
-      await this.#waitUntilReady(svc, spec);
+      await this.#waitUntilReady(svc, spec, opts?.signal);
       return await use({ host: svc.host, port: spec.port });
     } finally {
       // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw
@@ -181,9 +212,14 @@ export class DockerRunner implements Runner {
     }
   }
 
-  async #waitUntilReady(svc: StartedService, spec: EphemeralServiceSpec): Promise<void> {
+  async #waitUntilReady(
+    svc: StartedService,
+    spec: EphemeralServiceSpec,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const deadline = Date.now() + spec.readinessTimeoutMs;
     for (;;) {
+      if (signal?.aborted === true) throw abortedError(spec.correlationId);
       const exitCode = await svc.exec(spec.readinessCommand);
       if (exitCode === 0) return;
       const remainingMs = deadline - Date.now();
@@ -203,6 +239,14 @@ export class DockerRunner implements Runner {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortedError(correlationId: string): SchrodumpError {
+  return new SchrodumpError("run aborted by shutdown", {
+    code: "RUNNER_ABORTED",
+    correlationId,
+    context: {},
+  });
 }
 
 // End the caller's stdout sink so a consumer piping FROM it sees EOF and unblocks. Called only on

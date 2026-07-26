@@ -32,4 +32,30 @@ describe("startLoop", () => {
     expect(sawOverlap).toBe(false);
     expect(tick.mock.calls.length).toBeGreaterThan(1);
   });
+
+  it("whenIdle() resolves only after an in-flight tick settles", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const tick = vi.fn(() => new Promise<void>((r) => (release = r)));
+      const loop = startLoop({ tick, intervalMs: 1 });
+      await vi.advanceTimersByTimeAsync(1); // let one tick start
+      let resolved = false;
+      const idle = loop.whenIdle().then(() => (resolved = true));
+      await Promise.resolve();
+      expect(resolved).toBe(false); // tick still running
+      release();
+      await idle;
+      expect(resolved).toBe(true);
+      loop.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("whenIdle() resolves immediately when no tick is running", async () => {
+    const loop = startLoop({ tick: vi.fn(async () => {}), intervalMs: 10_000 });
+    await expect(loop.whenIdle()).resolves.toBeUndefined();
+    loop.stop();
+  });
 });

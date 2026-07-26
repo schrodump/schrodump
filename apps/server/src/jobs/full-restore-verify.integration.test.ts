@@ -211,6 +211,7 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
       SCHRODUMP_EXECUTOR_NETWORK: EXECUTOR_NETWORK,
       WORKER_POLL_MS: 2000,
       SCHRODUMP_SCHEDULER_TICK_MS: 30000,
+      SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
     };
   }, 300_000);
 

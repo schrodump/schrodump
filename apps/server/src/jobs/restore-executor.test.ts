@@ -260,4 +260,32 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     expect(stagingCleanupCalls).toBe(1);
     expect(capture).toHaveLength(0);
   });
+
+  // Task 3: the shutdown AbortSignal is a construction-time dependency (bound once at
+  // createJobExecutor) that must ride along on every container-creating run, so the runner can
+  // force-remove the container on abort. Undefined when nothing was passed — behavior unchanged.
+  it("forwards the shutdown signal into the restore executor's run options", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+    const controller = new AbortController();
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+      signal: controller.signal,
+    });
+
+    expect(ok).toBe(true);
+    expect(capture[0]?.signal).toBe(controller.signal);
+  });
 });

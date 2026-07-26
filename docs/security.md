@@ -65,11 +65,13 @@ Your responsibilities:
 
 Schrodump sweeps abandoned scratch directories at boot and periodically.
 
-> **Known limitation.** A container killed mid-job does **not** release its scratch directory:
-> neither the server nor the runner installs a `SIGTERM` handler today, so the process exits
-> immediately and the directory survives until the next sweep. The dump in it is in clear for that
-> window. Signal delivery itself works — `docker stop` reaches the process and shuts it down
-> cleanly — but the cleanup on the way out does not exist yet.
+> **`docker stop` / `SIGTERM`.** The server installs a shutdown handler: it stops claiming new work,
+> aborts the in-flight run (the runner force-kills that job's container), waits for the drain to
+> settle under `SCHRODUMP_SHUTDOWN_GRACE_MS` (default 8s, `compose.yaml` gives it a 15s
+> `stop_grace_period` to finish inside), then exits — releasing the scratch directory in the normal
+> path, the same as any other job failure. **Known limitation.** A `SIGKILL` — or a drain that
+> outlasts the grace budget — still bypasses this: the process exits immediately and the directory
+> survives, in clear, until the next sweep.
 
 ## The KEK belongs somewhere else
 

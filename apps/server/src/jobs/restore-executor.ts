@@ -199,6 +199,10 @@ export interface RestorePipelineDeps {
   // reservation (avoiding a self-deadlock on the staged-concurrency semaphore) — and removed before
   // the staging dir is released. Absent for engines that pass the password via env.
   provideExtraMounts?: (stagingDir: string) => Promise<{ mounts: RunMount[]; cleanup: () => Promise<void> }>;
+  // The shutdown signal, bound once at createJobExecutor construction and forwarded into every
+  // container-creating run so the runner can force-remove the container on abort. Undefined outside
+  // a shutdown (or in tests) — the runner behaves exactly as before.
+  readonly signal?: AbortSignal;
 }
 
 // Downloads each encrypted object, decrypts it in-process (age Decrypter, identity held in memory,
@@ -342,6 +346,7 @@ async function restoreOne(
       mounts: [dumpMount, ...extraMounts],
       timeoutMs: deps.timeoutMs,
       correlationId: deps.correlationId,
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     if (restoreResult.exitCode !== 0) {
       throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {

@@ -2,12 +2,14 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
+import { setMaxListeners } from "node:events";
 import { buildApp } from "./app.js";
 import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
 import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
 import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
 import { startLoop, installShutdown } from "./jobs/loop.js";
+import { runGracefulShutdown } from "./jobs/shutdown.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
 import { dispatchDueJobs, recoverOrphanedJobs } from "./scheduler/scheduler.js";
@@ -108,8 +110,13 @@ export async function main(): Promise<void> {
   if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
 
   // 2. Single-flight worker (same advisory lock keeps one replica draining).
-  const store = createWorkerStore(prisma);
-  const executor = createJobExecutor({ prisma, kek, env });
+  const shutdownController = new AbortController();
+  // Every in-flight run adds its own "abort" listener to this shared signal; under concurrency
+  // (staged parallelism, or backup+verify overlapping) that can exceed Node's default cap of 10 and
+  // print a spurious MaxListenersExceededWarning. This is one process-wide controller, not a leak.
+  setMaxListeners(0, shutdownController.signal);
+  const store = createWorkerStore(prisma, shutdownController.signal);
+  const executor = createJobExecutor({ prisma, kek, env, signal: shutdownController.signal });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startLoop({
     intervalMs: env.WORKER_POLL_MS,
@@ -138,14 +145,18 @@ export async function main(): Promise<void> {
       }),
   });
 
-  // 4. Graceful shutdown: stop both loops before exit (scratch of an in-flight job is released by
-  //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
-  //    Also drop the dedicated advisory-lock connection so its session lock is released promptly.
+  // 4. Graceful shutdown: stop both loops, abort the in-flight run, await the drain under a grace
+  //    budget, then drop the dedicated advisory-lock connection so its session lock is released
+  //    promptly. See runGracefulShutdown for the ordering rationale.
   installShutdown({
-    onSignal: async () => {
-      handle.stop();
-      schedulerHandle.stop();
-      await advisoryLockPrisma.$disconnect();
-    },
+    onSignal: () =>
+      runGracefulShutdown({
+        handle,
+        scheduler: schedulerHandle,
+        controller: shutdownController,
+        disconnect: () => advisoryLockPrisma.$disconnect(),
+        graceMs: env.SCHRODUMP_SHUTDOWN_GRACE_MS,
+        log: logger,
+      }),
   });
 }
