@@ -15,6 +15,7 @@ const row = {
   bucketKey: "org/backup.age",
   manifestKey: "org/backup.manifest.json",
   engine: "postgres",
+  executionMode: "STAGED",
   serverVersionNum: 160002,
   sizeRawBytes: 9_000_000_000n,
   sizeCompressedBytes: 1_500_000_000n,
@@ -41,5 +42,13 @@ describe("toArtifactRecord", () => {
     const record = toArtifactRecord(row);
     expect("organizationId" in record).toBe(false);
     expect("updatedAt" in record).toBe(false);
+  });
+
+  // The restore gate is executionMode-based (runRestoreJob refuses STAGED). Dropping the column
+  // here is what left the web's canRestoreEngine unable to gate, so the UI offered a restore the
+  // server would refuse. The field must survive the mapping.
+  it("carries executionMode so the UI can gate restore the same way the server does", () => {
+    expect(toArtifactRecord(row).executionMode).toBe("STAGED");
+    expect(toArtifactRecord({ ...row, executionMode: "STREAM" }).executionMode).toBe("STREAM");
   });
 });

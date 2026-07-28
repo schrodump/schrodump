@@ -14,7 +14,7 @@ export type ArtifactState = (typeof ARTIFACT_STATES)[number];
 export const VERIFY_LEVELS = ["NONE", "CHECKSUM", "FULL_RESTORE"] as const;
 export type VerifyLevel = (typeof VERIFY_LEVELS)[number];
 
-export const JOB_KINDS = ["BACKUP", "RESTORE", "VERIFY"] as const;
+export const JOB_KINDS = ["BACKUP", "RESTORE", "VERIFY", "RETENTION"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export const JOB_STATES = ["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const;
@@ -44,16 +44,17 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
-// Restore now works end-to-end for all four engines, but only for a STREAM artifact — the server
-// gate is executionMode-based, not engine-based (a STAGED artifact of ANY engine, postgres
-// included, is refused: its restore needs a directory pipeline v1 does not have). The web
-// `Artifact` type does not carry executionMode today (apps/server/src/routes/wiring.ts's
-// toArtifactRecord narrows the Prisma row and drops it), so there is nothing to gate on here yet
-// — every engine is allowed and the server remains the real, enforcing lock (a STAGED artifact
-// still gets refused server-side with a clear reason). Once the API exposes executionMode on
-// Artifact, gate this on `artifact.executionMode === "STREAM"` instead.
-export function canRestoreEngine(_engine: EngineKind): boolean {
-  return true;
+// Restore works end-to-end for all four engines, but only for a STREAM artifact. The gate is
+// execution-mode-based, not engine-based: a STAGED artifact of ANY engine — mydumper's directory
+// output, or postgres `-Fd` — needs a directory restore pipeline (untar-to-directory,
+// `myloader` / `pg_restore -Fd`) that v1 does not have, so runRestoreJob refuses it.
+//
+// This mirrors that gate; it does not replace it. The server stays the enforcing lock.
+export function canRestoreArtifact(artifact: {
+  engine: EngineKind;
+  executionMode: ExecutionMode;
+}): boolean {
+  return artifact.executionMode === "STREAM";
 }
 
 // Why the server answers with a code and not a message: driver errors embed the credential they

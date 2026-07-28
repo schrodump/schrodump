@@ -54,6 +54,7 @@ export const ptBR: Record<MessageKey, string> = {
   "job.kind.BACKUP": "Backup",
   "job.kind.RESTORE": "Restore",
   "job.kind.VERIFY": "Verify",
+  "job.kind.RETENTION": "Retenção",
   "job.state.PENDING": "Pendente",
   "job.state.RUNNING": "Executando",
   "job.state.SUCCEEDED": "Concluído",
@@ -185,7 +186,8 @@ export const ptBR: Record<MessageKey, string> = {
   "restore.mismatch": "O nome não confere com o banco de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore enfileirado",
-  "restore.engineUnavailable": "Restore para {engine} não está disponível nesta versão",
+  "restore.stagedUnavailable":
+    "Este artefato foi escrito em modo staged (diretório), que não pode ser restaurado nesta versão",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Banco",
   "restoreTarget.SCHEMA": "Schema",

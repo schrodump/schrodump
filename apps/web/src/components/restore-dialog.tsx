@@ -15,7 +15,7 @@ import {
   RESTORE_TARGETS,
   RESTORE_TARGETS_BY_ENGINE,
   canRestore,
-  canRestoreEngine,
+  canRestoreArtifact,
   type RestoreTarget,
   type Role,
 } from "@/lib/domain";
@@ -177,19 +177,13 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   const t = useT();
   const [open, setOpen] = useState(false);
   if (!canRestore(role)) return null;
-  // Restore now works for all four engines (STREAM artifacts only; the server enforces that, not
-  // this check — see canRestoreEngine's comment). Kept as a hook: once the web Artifact type
-  // carries executionMode, canRestoreEngine starts returning false for a STAGED artifact and this
-  // shows the trigger disabled with the reason rather than hiding it, so it stays clear the
-  // artifact exists and why it can't be restored yet.
-  if (!canRestoreEngine(artifact.engine)) {
+  // A STAGED artifact has no restore pipeline in v1, for any engine. Show the trigger disabled
+  // with the reason rather than hiding it: the artifact exists, and why it cannot be restored yet
+  // is the useful part. The server refuses it too — this only stops us enqueuing a job that is
+  // certain to fail.
+  if (!canRestoreArtifact(artifact)) {
     return (
-      <Button
-        size="sm"
-        variant="outline"
-        disabled
-        title={t("restore.engineUnavailable", { engine: t(`engine.${artifact.engine}`) })}
-      >
+      <Button size="sm" variant="outline" disabled title={t("restore.stagedUnavailable")}>
         {t("artifacts.restore")}
       </Button>
     );

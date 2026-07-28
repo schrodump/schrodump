@@ -16,6 +16,11 @@ export interface ArtifactRecord {
   bucketKey: string;
   manifestKey: string;
   engine: string;
+  // Exposed because the restore gate is execution-mode-based, not engine-based: runRestoreJob
+  // refuses a STAGED artifact (mydumper directory, postgres -Fd) of ANY engine. The UI needs the
+  // same fact to stop offering a restore the server will refuse. Narrower than the other enum
+  // fields on purpose — this one is a control, not a label.
+  executionMode: "STREAM" | "STAGED";
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

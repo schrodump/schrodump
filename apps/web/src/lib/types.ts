@@ -22,6 +22,7 @@ export interface Artifact {
   bucketKey: string;
   manifestKey: string;
   engine: EngineKind;
+  executionMode: ExecutionMode;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

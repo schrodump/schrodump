@@ -148,6 +148,7 @@ export function toArtifactRecord(row: {
   bucketKey: string;
   manifestKey: string;
   engine: string;
+  executionMode: string;
   serverVersionNum: number;
   sizeRawBytes: bigint;
   sizeCompressedBytes: bigint;
@@ -166,6 +167,9 @@ export function toArtifactRecord(row: {
     bucketKey: row.bucketKey,
     manifestKey: row.manifestKey,
     engine: row.engine,
+    // Anything the DB does not spell STAGED is treated as STREAM — the same default the column
+    // carries. A widened mode would have to opt into the gate explicitly, not inherit a pass.
+    executionMode: row.executionMode === "STAGED" ? "STAGED" : "STREAM",
     serverVersionNum: row.serverVersionNum,
     sizeRawBytes: Number(row.sizeRawBytes),
     sizeCompressedBytes: Number(row.sizeCompressedBytes),

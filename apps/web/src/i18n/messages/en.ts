@@ -52,6 +52,7 @@ export const en = {
   "job.kind.BACKUP": "Backup",
   "job.kind.RESTORE": "Restore",
   "job.kind.VERIFY": "Verify",
+  "job.kind.RETENTION": "Retention",
   "job.state.PENDING": "Pending",
   "job.state.RUNNING": "Running",
   "job.state.SUCCEEDED": "Succeeded",
@@ -183,7 +184,8 @@ export const en = {
   "restore.mismatch": "The name does not match the target database.",
   "restore.submit": "Start restore",
   "restore.enqueued": "Restore enqueued",
-  "restore.engineUnavailable": "Restore for {engine} is not available in this version",
+  "restore.stagedUnavailable":
+    "This artifact was written in staged (directory) mode, which cannot be restored in this version",
   "restoreTarget.FULL_CLUSTER": "Full cluster",
   "restoreTarget.DATABASE": "Database",
   "restoreTarget.SCHEMA": "Schema",

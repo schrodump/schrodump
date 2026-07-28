@@ -18,6 +18,7 @@ const service: JobsService = {
         bucketKey: "org/backup.age",
         manifestKey: "org/backup.manifest.json",
         engine: "postgres",
+        executionMode: "STREAM",
         serverVersionNum: 160002,
         sizeRawBytes: 9_000_000_000,
         sizeCompressedBytes: 1_500_000_000,

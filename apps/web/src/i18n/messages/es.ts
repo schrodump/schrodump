@@ -54,6 +54,7 @@ export const es: Record<MessageKey, string> = {
   "job.kind.BACKUP": "Backup",
   "job.kind.RESTORE": "Restore",
   "job.kind.VERIFY": "Verify",
+  "job.kind.RETENTION": "Retención",
   "job.state.PENDING": "Pendiente",
   "job.state.RUNNING": "Ejecutando",
   "job.state.SUCCEEDED": "Completado",
@@ -185,7 +186,8 @@ export const es: Record<MessageKey, string> = {
   "restore.mismatch": "El nombre no coincide con la base de datos de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore encolado",
-  "restore.engineUnavailable": "El restore para {engine} no está disponible en esta versión",
+  "restore.stagedUnavailable":
+    "Este artefacto fue escrito en modo staged (directorio), que no puede restaurarse en esta versión",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Base de datos",
   "restoreTarget.SCHEMA": "Schema",
