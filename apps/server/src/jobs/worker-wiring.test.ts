@@ -12,9 +12,35 @@ import {
   resolveVerifyPlan,
   sanitizeReason,
   toBackupProbe,
+  toRetentionPolicy,
   verifyEngineWiring,
 } from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
+
+describe("toRetentionPolicy", () => {
+  // Prisma hands back minAgeBeforeDeleteMs as BigInt; core's RetentionPolicy is all numbers, and
+  // BigInt arithmetic against a number throws. Narrowing here is what keeps resolveRetention pure.
+  it("narrows the BigInt minAge to a number so the pure resolver can do arithmetic on it", () => {
+    const policy = toRetentionPolicy({
+      keepLast: 7,
+      keepDaily: 0,
+      keepWeekly: 4,
+      keepMonthly: 6,
+      keepYearly: 1,
+      minAgeBeforeDeleteMs: 86_400_000n,
+    });
+
+    expect(policy).toEqual({
+      keepLast: 7,
+      keepDaily: 0,
+      keepWeekly: 4,
+      keepMonthly: 6,
+      keepYearly: 1,
+      minAgeBeforeDelete: 86_400_000,
+    });
+    expect(typeof policy.minAgeBeforeDelete).toBe("number");
+  });
+});
 
 describe("resolveVerifyPlan", () => {
   it("keeps FULL_RESTORE for an UNSCOPED postgres STREAM artifact (its -Fc dump needs no scope)", () => {

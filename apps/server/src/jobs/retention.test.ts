@@ -41,11 +41,11 @@ function policy(over: Partial<RetentionPolicy> = {}): RetentionPolicy {
   };
 }
 
-function ports(manifests: Manifest[]): RetentionPorts & { deleted: string[] } {
+function ports(manifests: Manifest[], unreadable: string[] = []): RetentionPorts & { deleted: string[] } {
   const deleted: string[] = [];
   return {
     deleted,
-    loadManifests: () => Promise.resolve(manifests),
+    loadManifests: () => Promise.resolve({ manifests, unreadable }),
     deleteArtifact: (jobId) => {
       deleted.push(jobId);
       return Promise.resolve();
@@ -79,5 +79,43 @@ describe("runRetention", () => {
     expect(result.aborted).toBe(true);
     expect(result.reason).toMatch(/full|depend/i);
     expect(p.deleted).toEqual([]); // nothing deleted — the full is preserved
+  });
+
+  // The landmine this guard exists for: every keep* counter defaults to 0, so a policy created
+  // without retention params resolves to "delete everything". Before this check, wiring retention
+  // up would have destroyed every backup of every default policy on its first run.
+  it("refuses to run at all under an unconfigured (all-zero) policy", async () => {
+    const manifests = [
+      manifest("a", "2020-01-01T00:00:00Z"),
+      manifest("b", "2026-07-22T00:00:00Z"),
+    ];
+    const p = ports(manifests);
+    const result = await runRetention(policy(), p, NOW);
+
+    expect(result.aborted).toBe(true);
+    expect(result.reason).toMatch(/not configured/i);
+    expect(p.deleted).toEqual([]);
+    expect(result.kept).toEqual([]);
+  });
+
+  it("still refuses when only minAgeBeforeDelete is set — a floor is not a retention intent", async () => {
+    const p = ports([manifest("ancient", "2020-01-01T00:00:00Z")]);
+    const result = await runRetention(policy({ minAgeBeforeDelete: 1000 }), p, NOW);
+
+    expect(result.aborted).toBe(true);
+    expect(p.deleted).toEqual([]);
+  });
+
+  // An artifact whose manifest cannot be read is invisible to resolveRetention: it lands in
+  // neither keep nor delete. Silently skipping it means the delete-set was computed against an
+  // incomplete picture — and a dependency recorded only in the unreadable manifest cannot be
+  // honoured. Same philosophy as the orphan check: incomplete picture, delete nothing.
+  it("aborts when a manifest cannot be read rather than pruning against a partial view", async () => {
+    const p = ports([manifest("readable", "2026-07-22T00:00:00Z")], ["unreadable-job"]);
+    const result = await runRetention(policy({ keepLast: 1 }), p, NOW);
+
+    expect(result.aborted).toBe(true);
+    expect(result.reason).toMatch(/manifest/i);
+    expect(p.deleted).toEqual([]);
   });
 });

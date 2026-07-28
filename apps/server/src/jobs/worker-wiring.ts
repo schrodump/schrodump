@@ -13,6 +13,7 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import type { EngineKind } from "@schrodump/core/types";
 import type { Manifest } from "@schrodump/core/manifest";
+import { retentionIsConfigured, type RetentionPolicy } from "@schrodump/core/retention";
 import { resolveAdapter } from "@schrodump/engines/registry";
 import type { DumpScope, TargetConnection } from "@schrodump/engines/descriptor";
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
@@ -41,6 +42,8 @@ import {
   restoreScopeOf,
   runRestorePipeline,
 } from "./restore-executor.js";
+import { createRetentionPorts } from "./retention-wiring.js";
+import { runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 import { runRestoreJob } from "./restore.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
@@ -119,6 +122,19 @@ export function createWorkerStore(prisma: PrismaClient, signal?: AbortSignal): W
       });
       return job.id;
     },
+    enqueueRetention: async (organizationId, policyId) => {
+      const job = await prisma.backupJob.create({
+        data: {
+          organizationId,
+          kind: "RETENTION",
+          state: "PENDING",
+          correlationId: `retention:${policyId}`,
+          policyId,
+        },
+        select: { id: true },
+      });
+      return job.id;
+    },
   };
 }
 
@@ -127,6 +143,26 @@ export function createWorkerStore(prisma: PrismaClient, signal?: AbortSignal): W
 export function sanitizeReason(err: unknown): string {
   if (err instanceof Error) return `job failed: ${err.name}`;
   return "job failed: unknown error";
+}
+
+// Pure adapter from a BackupPolicy row to core's RetentionPolicy. minAgeBeforeDeleteMs arrives as
+// BigInt from Prisma; core is pure number arithmetic, and mixing the two throws at runtime.
+export function toRetentionPolicy(row: {
+  keepLast: number;
+  keepDaily: number;
+  keepWeekly: number;
+  keepMonthly: number;
+  keepYearly: number;
+  minAgeBeforeDeleteMs: bigint;
+}): RetentionPolicy {
+  return {
+    keepLast: row.keepLast,
+    keepDaily: row.keepDaily,
+    keepWeekly: row.keepWeekly,
+    keepMonthly: row.keepMonthly,
+    keepYearly: row.keepYearly,
+    minAgeBeforeDelete: Number(row.minAgeBeforeDeleteMs),
+  };
 }
 
 // Pure adapter from the RICH engine probe to backup.ts's ProbeResult. estimatedBytes is the sum of
@@ -325,12 +361,23 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     // this is the structural guard for a corrupt row, mirroring the verify orphan below).
     if (job.policyId === null) {
       await failJob(job.id, "backup job has no associated policy");
-      return { ok: false, artifactId: null, verifyLevel: "NONE" };
+      return { ok: false, artifactId: null, verifyLevel: "NONE", retentionConfigured: false };
     }
 
     const policy = await prisma.backupPolicy.findUniqueOrThrow({
       where: { id: job.policyId },
-      select: { targetId: true, destinationId: true, verifyLevel: true, parallelism: true },
+      select: {
+        targetId: true,
+        destinationId: true,
+        verifyLevel: true,
+        parallelism: true,
+        keepLast: true,
+        keepDaily: true,
+        keepWeekly: true,
+        keepMonthly: true,
+        keepYearly: true,
+        minAgeBeforeDeleteMs: true,
+      },
     });
     const target = await prisma.databaseTarget.findUniqueOrThrow({
       where: { id: policy.targetId },
@@ -339,7 +386,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     const destination = await driverForDestination(prisma, deps.kek, job.organizationId, policy.destinationId);
     if (destination === null) {
       await failJob(job.id, "backup destination unavailable");
-      return { ok: false, artifactId: null, verifyLevel: "NONE" };
+      return { ok: false, artifactId: null, verifyLevel: "NONE", retentionConfigured: false };
     }
 
     const engine = target.engine;
@@ -386,7 +433,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     if (engine === "mongodb") {
       if (scratch === null) {
         await failJob(job.id, MONGO_CONFIG_SCRATCH_REQUIRED_REASON);
-        return { ok: false, artifactId: null, verifyLevel: "NONE" };
+        return { ok: false, artifactId: null, verifyLevel: "NONE", retentionConfigured: false };
       }
       const reservation = await scratch.reserve(job.id, DUMP_SCRATCH_BYTES);
       // Assigned IMMEDIATELY once the reservation exists, so a throw from writeMongoConfig below
@@ -522,7 +569,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         ports,
       );
 
-      return { ok: outcome.ok, artifactId: outcome.artifactId, verifyLevel: policy.verifyLevel };
+      return {
+        ok: outcome.ok,
+        artifactId: outcome.artifactId,
+        verifyLevel: policy.verifyLevel,
+        retentionConfigured: retentionIsConfigured(toRetentionPolicy(policy)),
+      };
     } finally {
       // Remove the mongo `--config` credential file (and release its reservation) whether the dump
       // succeeded or threw; a no-op for the other engines.
@@ -1042,5 +1094,89 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     );
   };
 
-  return { runBackup, runVerify, runRestore };
+  // Applies one policy's GFS retention. Reached only by chaining off a SUCCEEDED backup of that
+  // same policy — pruning old copies is safe exactly when a new one just landed, never when the
+  // backup failed. Every refusal (unconfigured policy, unreadable manifest, would-be orphan) comes
+  // back from runRetentionCycle as `aborted` and FAILS the job with the reason, because a
+  // retention cycle that declined to run is a fact the operator must be able to read afterwards.
+  const runRetention = async (job: ClaimedJob): Promise<void> => {
+    const policyId = job.policyId;
+    if (policyId === null) {
+      await failJob(job.id, "retention job has no associated policy");
+      return;
+    }
+
+    // No setJobState("RUNNING") here: claimNextJob already flipped this row to RUNNING and stamped
+    // startedAt in the same atomic UPDATE. Re-setting it would only overwrite that timestamp.
+    //
+    // System process: raw prisma, so organizationId is filtered explicitly on every query below.
+    const policy = await prisma.backupPolicy.findFirst({
+      where: { id: policyId, organizationId: job.organizationId },
+      select: {
+        destinationId: true,
+        keepLast: true,
+        keepDaily: true,
+        keepWeekly: true,
+        keepMonthly: true,
+        keepYearly: true,
+        minAgeBeforeDeleteMs: true,
+      },
+    });
+    if (policy === null) {
+      await failJob(job.id, "retention policy unavailable");
+      return;
+    }
+
+    const destination = await driverForDestination(
+      prisma,
+      deps.kek,
+      job.organizationId,
+      policy.destinationId,
+    );
+    if (destination === null) {
+      await failJob(job.id, "retention destination unavailable");
+      return;
+    }
+
+    const result = await runRetentionCycle(
+      toRetentionPolicy(policy),
+      createRetentionPorts({
+        driver: destination.driver,
+        prefix: destination.prefix,
+        organizationId: job.organizationId,
+        // Artifacts produced by THIS policy's backups, on THIS policy's destination. The
+        // destination filter matters: the driver above is bound to one bucket/prefix, so an
+        // artifact stored elsewhere must never be handed to it for deletion.
+        artifactJobIds: async () =>
+          (
+            await prisma.artifact.findMany({
+              where: {
+                organizationId: job.organizationId,
+                destinationId: policy.destinationId,
+                job: { policyId },
+              },
+              select: { jobId: true },
+            })
+          ).map((artifact) => artifact.jobId),
+        deleteArtifactRow: async (artifactJobId) => {
+          await prisma.artifact.deleteMany({
+            where: { organizationId: job.organizationId, jobId: artifactJobId },
+          });
+        },
+      }),
+      new Date(),
+    );
+
+    if (result.aborted) {
+      await failJob(job.id, `retention aborted: ${result.reason ?? "unknown reason"}`);
+      return;
+    }
+    await setJobState(
+      job.id,
+      "SUCCEEDED",
+      `retention kept ${result.kept.length}, deleted ${result.deleted.length}`,
+    );
+  };
+
+  return { runBackup, runVerify, runRestore, runRetention };
 }

@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from "vitest";
 import { type Manifest } from "./manifest.js";
-import { RetentionOrphanError, resolveRetention, type RetentionPolicy } from "./retention.js";
+import {
+  RetentionOrphanError,
+  resolveRetention,
+  retentionIsConfigured,
+  type RetentionPolicy,
+} from "./retention.js";
 
 const NOW = new Date("2026-07-23T12:00:00Z");
 
@@ -65,6 +70,9 @@ describe("resolveRetention", () => {
     expect(new Set(result.keep)).toEqual(new Set(["d3", "d2"]));
   });
 
+  // resolveRetention is a resolver, not a guard: asked to keep nothing, it answers "delete
+  // everything". That answer is only safe because no caller may act on it without first passing
+  // retentionIsConfigured — see below.
   it("marks everything for deletion under an empty policy", () => {
     const ms = [mf("a", "2026-07-20T00:00:00Z"), mf("b", "2026-07-21T00:00:00Z")];
     const result = resolveRetention(ms, policy(), NOW);
@@ -94,5 +102,32 @@ describe("resolveRetention", () => {
     expect(() => resolveRetention([full, inc], policy({ keepLast: 1 }), NOW)).toThrow(
       RetentionOrphanError,
     );
+  });
+});
+
+// Every keep* counter defaults to 0, in the Zod schema and in the Prisma column. So "the operator
+// never expressed a retention intent" and "the operator asked to keep nothing" arrive at
+// resolveRetention as the same input — and it answers the second one: delete everything.
+//
+// The two are not the same, and the difference is every backup the policy has. This is the same
+// distinction the whole project is built on: silence is not a verdict. An unconfigured policy is
+// unconfigured, never an instruction to delete.
+describe("retentionIsConfigured", () => {
+  it("is false for the all-zero policy every default produces", () => {
+    expect(retentionIsConfigured(policy())).toBe(false);
+  });
+
+  it("is true as soon as any one counter asks to keep something", () => {
+    expect(retentionIsConfigured(policy({ keepLast: 1 }))).toBe(true);
+    expect(retentionIsConfigured(policy({ keepDaily: 1 }))).toBe(true);
+    expect(retentionIsConfigured(policy({ keepWeekly: 1 }))).toBe(true);
+    expect(retentionIsConfigured(policy({ keepMonthly: 1 }))).toBe(true);
+    expect(retentionIsConfigured(policy({ keepYearly: 1 }))).toBe(true);
+  });
+
+  // minAgeBeforeDelete is a floor on deletion, not a request to retain a count. On its own it
+  // still resolves to "delete everything older than the floor" — which is deletion, not intent.
+  it("is false when only minAgeBeforeDelete is set — a floor is not a retention intent", () => {
+    expect(retentionIsConfigured(policy({ minAgeBeforeDelete: 86_400_000 }))).toBe(false);
   });
 });

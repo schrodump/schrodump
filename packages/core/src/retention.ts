@@ -32,6 +32,24 @@ export class RetentionOrphanError extends Error {
   }
 }
 
+// Whether this policy expresses any intent to retain. Every keep* counter defaults to 0 — in the
+// API schema and in the database column — so a policy created without retention arrives here
+// indistinguishable from one that asked to keep nothing, and resolveRetention answers the latter:
+// delete everything.
+//
+// They are not the same thing, and the difference is every backup the policy holds. resolveRetention
+// stays a pure resolver; this is the guard every caller must pass before acting on its answer.
+// minAgeBeforeDelete does not count — it is a floor on deletion, not a request to retain.
+export function retentionIsConfigured(policy: RetentionPolicy): boolean {
+  return (
+    policy.keepLast > 0 ||
+    policy.keepDaily > 0 ||
+    policy.keepWeekly > 0 ||
+    policy.keepMonthly > 0 ||
+    policy.keepYearly > 0
+  );
+}
+
 export function resolveRetention(
   manifests: Manifest[],
   policy: RetentionPolicy,

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-// The worker brain: claim one job, dispatch by kind, chain backup -> verify. Deliberately free of
-// I/O so it is unit-tested with fakes; the real store/executor are assembled in worker-wiring.ts.
+// The worker brain: claim one job, dispatch by kind, chain backup -> verify + retention.
+// Deliberately free of I/O so it is unit-tested with fakes; the real store/executor are assembled
+// in worker-wiring.ts.
 
 import type { VerifyLevel } from "./verify.js";
 
 export interface ClaimedJob {
   id: string;
   organizationId: string;
-  kind: "BACKUP" | "VERIFY" | "RESTORE";
+  kind: "BACKUP" | "VERIFY" | "RESTORE" | "RETENTION";
   policyId: string | null;
   artifactId: string | null;
   correlationId: string;
@@ -24,6 +25,11 @@ export interface BackupResult {
   ok: boolean;
   artifactId: string | null;
   verifyLevel: VerifyLevel;
+  // Whether the originating policy asks to retain anything at all (any keep* counter > 0). Read
+  // from the policy by the executor, for the same reason verifyLevel is: the worker decides
+  // chaining and must not query. False means no RETENTION job is created — a policy that keeps
+  // everything forever should not accumulate a job per backup saying it did nothing.
+  retentionConfigured: boolean;
 }
 
 export interface JobExecutor {
@@ -34,12 +40,17 @@ export interface JobExecutor {
   runVerify(job: ClaimedJob): Promise<void>;
   // Runs restore (which sets the RESTORE job's terminal state via its own ports).
   runRestore(job: ClaimedJob): Promise<void>;
+  // Runs the policy's retention cycle (which sets the RETENTION job's terminal state via its own
+  // ports). Deleting a backup is an outcome an operator must be able to read afterwards, which is
+  // why it is a job with a row and a state, not a side effect of some loop.
+  runRetention(job: ClaimedJob): Promise<void>;
 }
 
 export interface WorkerStore {
   claimNextJob(): Promise<ClaimedJob | null>;
   failJob(jobId: string, reason: string): Promise<void>;
   enqueueVerify(organizationId: string, artifactId: string): Promise<string>;
+  enqueueRetention(organizationId: string, policyId: string): Promise<string>;
 }
 
 export interface WorkerLogger {
@@ -69,6 +80,8 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
       await deps.executor.runVerify(job);
     } else if (job.kind === "RESTORE") {
       await deps.executor.runRestore(job);
+    } else if (job.kind === "RETENTION") {
+      await deps.executor.runRetention(job);
     } else {
       await deps.store.failJob(job.id, `unsupported job kind: ${job.kind}`);
     }
@@ -79,8 +92,8 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
     return "ran";
   }
 
-  // Chaining runs AFTER the job is already terminal (SUCCEEDED). A failure to enqueue the follow-up
-  // verify must NOT retroactively FAIL a backup that actually succeeded — it is only logged.
+  // Chaining runs AFTER the job is already terminal (SUCCEEDED). A failure to enqueue a follow-up
+  // must NOT retroactively FAIL a backup that actually succeeded — it is only logged.
   if (backup !== null && backup.ok && backup.artifactId !== null && backup.verifyLevel !== "NONE") {
     try {
       await deps.store.enqueueVerify(job.organizationId, backup.artifactId);
@@ -88,6 +101,21 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
     } catch (err) {
       const reason = deps.sanitizeReason(err);
       deps.log.error({ jobId: job.id, reason }, "backup ok but verify enqueue failed");
+    }
+  }
+
+  // Retention is chained to backup SUCCESS on purpose, and that choice is the safety property:
+  // the set of artifacts only grows when a backup lands, so that is the only moment pruning can be
+  // needed — and a backup that FAILED must never cost you an older copy. A policy that stops
+  // backing up stops deleting. `policyId` is null for a manual or self-backup, which has no
+  // retention policy to apply.
+  if (backup !== null && backup.ok && backup.retentionConfigured && job.policyId !== null) {
+    try {
+      await deps.store.enqueueRetention(job.organizationId, job.policyId);
+      deps.log.info({ jobId: job.id, policyId: job.policyId }, "backup ok — retention enqueued");
+    } catch (err) {
+      const reason = deps.sanitizeReason(err);
+      deps.log.error({ jobId: job.id, reason }, "backup ok but retention enqueue failed");
     }
   }
   return "ran";

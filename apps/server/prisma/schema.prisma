@@ -56,6 +56,9 @@ enum JobKind {
   BACKUP
   RESTORE
   VERIFY
+  // Applies a policy's GFS retention. A job, not a background sweep: deleting a backup is an
+  // outcome the operator has to be able to read afterwards — including when it refused to run.
+  RETENTION
 }
 
 enum JobState {

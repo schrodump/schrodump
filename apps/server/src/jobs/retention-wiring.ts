@@ -23,11 +23,26 @@ export function createRetentionPorts(deps: RetentionWiringDeps): RetentionPorts 
   return {
     loadManifests: async () => {
       const manifests: Manifest[] = [];
+      // A sidecar that will not read is reported, never skipped. Dropping it here would hide an
+      // artifact from resolveRetention entirely — it would fall out of both keep and delete, and
+      // any dependency recorded only in that manifest would go unhonoured. runRetention aborts on
+      // a non-empty list rather than pruning against a view it knows is partial.
+      const unreadable: string[] = [];
       for (const jobId of await deps.artifactJobIds()) {
-        const result = await readManifest(deps.driver, deps.prefix, deps.organizationId, jobId);
-        if (result.ok) manifests.push(result.manifest);
+        // readManifest reports a PARSE failure through its result, but a FETCH failure — the
+        // sidecar missing from the bucket, which is the likelier case here — comes back as a
+        // thrown NoSuchKey from the driver. Both mean the same thing to retention: this artifact's
+        // manifest cannot be read. Catching keeps one unreadable sidecar from crashing the cycle
+        // into a sanitized "job failed: Error" instead of the reason that names the artifacts.
+        try {
+          const result = await readManifest(deps.driver, deps.prefix, deps.organizationId, jobId);
+          if (result.ok) manifests.push(result.manifest);
+          else unreadable.push(jobId);
+        } catch {
+          unreadable.push(jobId);
+        }
       }
-      return manifests;
+      return { manifests, unreadable };
     },
     deleteArtifact: async (jobId) => {
       await deps.driver.delete([
