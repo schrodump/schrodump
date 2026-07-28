@@ -11,6 +11,17 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   e `state-counters.tsx`, e a tese na raiz.
 - **Credencial é write-only na UI.** Valor do servidor nunca chega ao front, nunca preenche
   campo. Configurado → mostra "configurado" + permite substituir. Ver `CredentialField`.
+- **Em modo de edição, campo de segredo vazio significa "manter o guardado"** — nunca `""`. É a
+  única forma de corrigir um host ou uma região quando a UI não consegue ler o segredo de volta
+  para reenviá-lo; mandar string vazia seria 400 no melhor caso e credencial sobrescrita no pior.
+  Os formulários montam o corpo do `PATCH` campo a campo (allow-list), nunca spread-menos-N: o
+  schema do servidor é `.strict()`, então campo a mais é 400, e allow-list não vaza campo novo
+  quando alguém adicionar um ao schema de criação. Coberto em `edit-forms.test.tsx`, que assere o
+  corpo da requisição que realmente sai.
+- **Campo que o servidor recusa aparece desabilitado com o motivo, nunca escondido.** `engine` do
+  alvo, `bucket`/`prefix`/`sealMode` do destino, `target`/`destination` da policy. O que um recurso
+  aponta é a primeira coisa que o operador precisa ler nele — sumir com o campo troca uma
+  explicação por um mistério.
 - **Restore tem atrito de propósito.** Escopos que a engine não suporta ficam desabilitados com o
   motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
   Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).

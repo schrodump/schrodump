@@ -21,6 +21,8 @@ export const ptBR: Record<MessageKey, string> = {
   "common.save": "Salvar",
   "common.cancel": "Cancelar",
   "common.create": "Criar",
+  "common.edit": "Editar",
+  "common.delete": "Excluir",
   "common.close": "Fechar",
   "common.retry": "Tentar de novo",
   "common.loading": "Carregando…",
@@ -135,6 +137,8 @@ export const ptBR: Record<MessageKey, string> = {
   "destinations.canary.ok": "Canary passou: put, get e delete",
   "destinations.canary.failed": "Canary falhou em: {op}",
   "destinations.empty": "Nenhum destino ainda. Adicione um para guardar backups.",
+  "destinations.locationLocked":
+    "Bucket, prefixo e modo do destino não podem ser alterados. A chave de cada artefato é guardada relativa ao bucket e ao prefixo, então repontar qualquer um deixaria o catálogo descrevendo endereços vazios. Crie um novo destino.",
 
   "policies.title": "Políticas de backup",
   "policies.add": "Adicionar política",
@@ -160,6 +164,17 @@ export const ptBR: Record<MessageKey, string> = {
   "policies.verifyOff.title": "Verify desligado nesta política",
   "policies.verifyOff.description": "Os backups desta política nunca são verificados — todo artefato fica NÃO OBSERVADO.",
   "policies.trigger": "Rodar backup agora",
+  "policies.disabled": "desativada",
+  "policies.enable": "Ativar",
+  "policies.disable": "Desativar",
+  "policies.repointLocked":
+    "O alvo e o destino não podem ser alterados. A retenção é resolvida por policy, então repontar qualquer um deles misturaria dois bancos numa mesma cadeia de retenção e deixaria de fora os artefatos já escritos. Crie uma nova policy.",
+  "policies.retentionOff.title": "Esta policy está retendo todos os backups, para sempre",
+  "policies.retentionOff.description":
+    "Todos os contadores estão em zero, o que o Schrodump lê como retenção não configurada — e não como pedido para apagar. Nada será podado. Defina os contadores a partir do prazo que você é obrigado a guardar os dados.",
+  "policies.disabledRetention.title": "A retenção não roda enquanto esta policy estiver desativada",
+  "policies.disabledRetention.description":
+    "A retenção só poda após um backup bem-sucedido desta policy, então nada está sendo apagado enquanto ela está desligada. Os artefatos vão sobreviver à janela configurada aqui até os backups voltarem.",
   "policies.empty": "Nenhuma política ainda. Adicione uma para agendar backups.",
 
   "jobs.title": "Jobs",
