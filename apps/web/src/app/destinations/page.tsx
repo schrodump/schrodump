@@ -9,7 +9,7 @@ import { DestinationForm } from "@/components/destination-form";
 import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useCanary } from "@/hooks/use-mutations";
+import { useCanary, useDeleteDestination } from "@/hooks/use-mutations";
 import { useDestinations } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import type { Destination } from "@/lib/types";
@@ -40,19 +40,49 @@ function Canary({ destinationId }: { destinationId: string }) {
 
 function DestinationRow({ destination }: { destination: Destination }) {
   const t = useT();
+  const remove = useDeleteDestination();
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <DestinationForm onDone={() => setEditing(false)} destination={destination} />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-6">
-        <div>
-          <p className="font-medium">{destination.name}</p>
-          <p className="text-sm text-muted-foreground">
-            {destination.bucket}
-            {destination.prefix ? `/${destination.prefix}` : ""} · {t(`sealMode.${destination.sealMode}`)}
-          </p>
+      <CardContent className="space-y-3 pt-6">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div>
+            <p className="font-medium">{destination.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {destination.bucket}
+              {destination.prefix ? `/${destination.prefix}` : ""} · {t(`sealMode.${destination.sealMode}`)}
+            </p>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <Canary destinationId={destination.id} />
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+              {t("common.edit")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => remove.mutate(destination.id)}
+              disabled={remove.isPending}
+            >
+              {t("common.delete")}
+            </Button>
+          </div>
         </div>
-        <div className="ml-auto">
-          <Canary destinationId={destination.id} />
-        </div>
+        {/* A destination holding artifacts cannot be deleted: that row has the only credentials the
+            system holds for the bucket, so removing it would make every backup in it unreachable.
+            The 409 says how many artifacts are in the way. */}
+        {remove.isError ? <ErrorState message={remove.error.message} /> : null}
       </CardContent>
     </Card>
   );

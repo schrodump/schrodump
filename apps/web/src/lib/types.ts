@@ -22,6 +22,7 @@ export interface Artifact {
   bucketKey: string;
   manifestKey: string;
   engine: EngineKind;
+  executionMode: ExecutionMode;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;
@@ -55,6 +56,10 @@ export interface Target {
   port: number;
   username: string;
   tls: boolean;
+  // What the target is scoped to back up. The server has always returned it (toPublicTarget); the
+  // web simply never declared it, so nothing could read it back — which is what an edit form needs
+  // to show the databases already configured instead of silently clearing them.
+  scope: { databases: string[]; schemas: string[]; collections: string[] };
   createdAt: string;
 }
 

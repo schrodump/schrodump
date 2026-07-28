@@ -19,6 +19,8 @@ export const en = {
   "common.save": "Save",
   "common.cancel": "Cancel",
   "common.create": "Create",
+  "common.edit": "Edit",
+  "common.delete": "Delete",
   "common.close": "Close",
   "common.retry": "Retry",
   "common.loading": "Loading…",
@@ -52,6 +54,7 @@ export const en = {
   "job.kind.BACKUP": "Backup",
   "job.kind.RESTORE": "Restore",
   "job.kind.VERIFY": "Verify",
+  "job.kind.RETENTION": "Retention",
   "job.state.PENDING": "Pending",
   "job.state.RUNNING": "Running",
   "job.state.SUCCEEDED": "Succeeded",
@@ -132,6 +135,8 @@ export const en = {
   "destinations.canary.ok": "Canary passed: put, get and delete",
   "destinations.canary.failed": "Canary failed on: {op}",
   "destinations.empty": "No destinations yet. Add one to store backups.",
+  "destinations.locationLocked":
+    "The bucket, prefix and seal mode cannot be changed. Every artifact's key is stored relative to the bucket and prefix, so repointing either would leave the catalogue describing addresses that hold nothing. Create a new destination instead.",
 
   "policies.title": "Backup policies",
   "policies.add": "Add policy",
@@ -157,6 +162,17 @@ export const en = {
   "policies.verifyOff.title": "Verify is off for this policy",
   "policies.verifyOff.description": "Backups from this policy are never verified — every artifact stays UNOBSERVED.",
   "policies.trigger": "Run backup now",
+  "policies.disabled": "disabled",
+  "policies.enable": "Enable",
+  "policies.disable": "Disable",
+  "policies.repointLocked":
+    "The target and destination cannot be changed. Retention is resolved per policy, so repointing either would mix two databases into one retention chain and leave the artifacts already written outside it. Create a new policy instead.",
+  "policies.retentionOff.title": "This policy is retaining every backup, forever",
+  "policies.retentionOff.description":
+    "Every keep counter is zero, which Schrodump reads as no retention configured rather than as a request to delete. Nothing will ever be pruned. Set the counters from the period you are required to keep data for.",
+  "policies.disabledRetention.title": "Retention is not running while this policy is disabled",
+  "policies.disabledRetention.description":
+    "Retention prunes only after a successful backup of this policy, so nothing is being deleted while it is off. Artifacts will outlive the window configured here until backups resume.",
   "policies.empty": "No policies yet. Add one to schedule backups.",
 
   "jobs.title": "Jobs",
@@ -183,7 +199,8 @@ export const en = {
   "restore.mismatch": "The name does not match the target database.",
   "restore.submit": "Start restore",
   "restore.enqueued": "Restore enqueued",
-  "restore.engineUnavailable": "Restore for {engine} is not available in this version",
+  "restore.stagedUnavailable":
+    "This artifact was written in staged (directory) mode, which cannot be restored in this version",
   "restoreTarget.FULL_CLUSTER": "Full cluster",
   "restoreTarget.DATABASE": "Database",
   "restoreTarget.SCHEMA": "Schema",

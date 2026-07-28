@@ -7,6 +7,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
 import { testTargetConnection, type EngineName, type TestConnectionResult } from "../probe/test-connection.js";
@@ -34,6 +35,32 @@ export function prismaDestinationStore(prisma: PrismaClient, organizationId: str
       }),
     list: () => db.storageDestination.findMany(),
     get: (id) => db.storageDestination.findFirst({ where: { id } }),
+    update: async (id, data) => {
+      const { count } = await db.storageDestination.updateMany({ where: { id }, data: definedOnly(data) });
+      if (count === 0) return null;
+      return db.storageDestination.findFirst({ where: { id } });
+    },
+    remove: async (id) => {
+      // Artifacts first, because it is the consequential one: this row holds the ONLY credentials
+      // the system has for that bucket. Deleting it does not delete the backups — it makes them
+      // unreachable, leaving a catalogue of entries nobody can restore from. Refuse, never cascade.
+      const artifacts = await db.artifact.count({ where: { destinationId: id } });
+      if (artifacts > 0) {
+        return {
+          ok: false,
+          reason: `${artifacts} artifact${artifacts === 1 ? " is" : "s are"} still stored in this destination`,
+        };
+      }
+      const policies = await db.backupPolicy.count({ where: { destinationId: id } });
+      if (policies > 0) {
+        return {
+          ok: false,
+          reason: `${policies} backup polic${policies === 1 ? "y" : "ies"} still write to this destination`,
+        };
+      }
+      await db.storageDestination.deleteMany({ where: { id } });
+      return { ok: true };
+    },
   };
 }
 
@@ -107,6 +134,40 @@ export function prismaPolicyStore(prisma: PrismaClient, organizationId: string):
       const row = await db.backupPolicy.findFirst({ where: { id } });
       return row === null ? null : toPolicyRecord(row);
     },
+    update: async (id, data) => {
+      const { minAgeBeforeDeleteMs, ...rest } = data;
+      const { count } = await db.backupPolicy.updateMany({
+        where: { id },
+        data: {
+          ...definedOnly(rest),
+          // number -> BigInt on the way in, the mirror of toPolicyRecord on the way out.
+          ...(minAgeBeforeDeleteMs !== undefined
+            ? { minAgeBeforeDeleteMs: BigInt(minAgeBeforeDeleteMs) }
+            : {}),
+        },
+      });
+      if (count === 0) return null;
+      const row = await db.backupPolicy.findFirst({ where: { id } });
+      return row === null ? null : toPolicyRecord(row);
+    },
+    remove: async (id) => {
+      // BackupJob.policy is an OPTIONAL relation, so Prisma's default here is SetNull rather than
+      // Restrict: the database would accept this delete and quietly blank policyId on every job the
+      // policy ever ran. The artifacts those jobs produced would lose their only link back to a
+      // policy — unattributable in the catalogue, and permanently invisible to retention, which
+      // selects by policyId. Nothing would appear broken, which is what makes it worth refusing.
+      const jobs = await db.backupJob.count({ where: { policyId: id } });
+      if (jobs > 0) {
+        return {
+          ok: false,
+          reason:
+            `${jobs} job${jobs === 1 ? "" : "s"} still reference this policy — ` +
+            `disable it instead of deleting it, so its history stays attributable`,
+        };
+      }
+      await db.backupPolicy.deleteMany({ where: { id } });
+      return { ok: true };
+    },
   };
 }
 
@@ -148,6 +209,7 @@ export function toArtifactRecord(row: {
   bucketKey: string;
   manifestKey: string;
   engine: string;
+  executionMode: string;
   serverVersionNum: number;
   sizeRawBytes: bigint;
   sizeCompressedBytes: bigint;
@@ -166,6 +228,9 @@ export function toArtifactRecord(row: {
     bucketKey: row.bucketKey,
     manifestKey: row.manifestKey,
     engine: row.engine,
+    // Anything the DB does not spell STAGED is treated as STREAM — the same default the column
+    // carries. A widened mode would have to opt into the gate explicitly, not inherit a pass.
+    executionMode: row.executionMode === "STAGED" ? "STAGED" : "STREAM",
     serverVersionNum: row.serverVersionNum,
     sizeRawBytes: Number(row.sizeRawBytes),
     sizeCompressedBytes: Number(row.sizeCompressedBytes),

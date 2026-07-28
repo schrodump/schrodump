@@ -19,6 +19,7 @@ const artifact: Artifact = {
   bucketKey: "org/shop/2026-01-01.dump",
   manifestKey: "org/shop/2026-01-01.manifest.json",
   engine: "postgres",
+  executionMode: "STREAM",
   serverVersionNum: 160_002,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
@@ -55,10 +56,22 @@ describe("RestoreButton", () => {
   });
 
   it.each(["postgres", "mysql", "mariadb", "mongodb"] as const)(
-    "enables the trigger for %s (STREAM restore works for all four engines; the server enforces STREAM-only)",
+    "enables the trigger for a STREAM %s artifact — restore works for all four engines",
     (engine) => {
       renderWith(<RestoreButton artifact={{ ...artifact, engine }} role="operator" />);
       expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
+    },
+  );
+
+  // The gate is execution-mode-based, so postgres is disabled here too — an engine check would
+  // have let this through and enqueued a job the server refuses.
+  it.each(["postgres", "mysql", "mariadb", "mongodb"] as const)(
+    "disables the trigger for a STAGED %s artifact instead of enqueuing a doomed job",
+    (engine) => {
+      renderWith(
+        <RestoreButton artifact={{ ...artifact, engine, executionMode: "STAGED" }} role="operator" />,
+      );
+      expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
     },
   );
 });

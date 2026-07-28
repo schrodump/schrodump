@@ -11,9 +11,24 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   e `state-counters.tsx`, e a tese na raiz.
 - **Credencial é write-only na UI.** Valor do servidor nunca chega ao front, nunca preenche
   campo. Configurado → mostra "configurado" + permite substituir. Ver `CredentialField`.
+- **Em modo de edição, campo de segredo vazio significa "manter o guardado"** — nunca `""`. É a
+  única forma de corrigir um host ou uma região quando a UI não consegue ler o segredo de volta
+  para reenviá-lo; mandar string vazia seria 400 no melhor caso e credencial sobrescrita no pior.
+  Os formulários montam o corpo do `PATCH` campo a campo (allow-list), nunca spread-menos-N: o
+  schema do servidor é `.strict()`, então campo a mais é 400, e allow-list não vaza campo novo
+  quando alguém adicionar um ao schema de criação. Coberto em `edit-forms.test.tsx`, que assere o
+  corpo da requisição que realmente sai.
+- **Campo que o servidor recusa aparece desabilitado com o motivo, nunca escondido.** `engine` do
+  alvo, `bucket`/`prefix`/`sealMode` do destino, `target`/`destination` da policy. O que um recurso
+  aponta é a primeira coisa que o operador precisa ler nele — sumir com o campo troca uma
+  explicação por um mistério.
 - **Restore tem atrito de propósito.** Escopos que a engine não suporta ficam desabilitados com o
   motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
   Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).
+  A tranca de artefato é por **`executionMode`, não por engine**: `canRestoreArtifact` desabilita o
+  botão de um artefato `STAGED` de qualquer engine (postgres `-Fd` incluso), porque o v1 não tem
+  pipeline de diretório. Desabilitar com motivo, nunca esconder — o artefato existe, e por que ele
+  ainda não restaura é a parte útil.
 - **Verify desligado numa policy é aviso persistente**, não toast.
 - **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
   chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
@@ -42,9 +57,10 @@ build (`output: "standalone"`), não lido em runtime — na imagem, a API escuta
   (`UNREACHABLE`/`TIMEOUT`/`AUTH_FAILED`/`INSUFFICIENT_PRIVILEGES`/`TLS_FAILED`/`UNKNOWN`) com
   texto em `targets.probe.reason.*`. O `driverCode` só é mostrado quando `failure === "UNKNOWN"`
   — nos outros casos é ruído.
-- **Role falha fechado.** `useCurrentRole` lê a role da sessão; como nenhum endpoint a expõe
-  ainda, retorna `viewer` por default — o que **esconde o restore de todos** no app rodando. É
-  intencional: o servidor é quem impõe `operator+`. Destrava sozinho quando o endpoint existir.
+- **Role falha fechado.** `useCurrentRole` lê a role de `GET /me` (`routes/session.ts`) — ela vive
+  no membership, não na sessão do Better-Auth. Enquanto a query carrega, e se ela falhar, o default
+  é `viewer`, que esconde o restore. O servidor impõe `operator+` de forma independente: isso é UX,
+  não é o controle.
 
 ## URL de conexão (`lib/connection-url.ts`)
 

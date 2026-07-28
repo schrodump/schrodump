@@ -13,6 +13,26 @@ export function useCreateTarget() {
   });
 }
 
+// PATCH bodies carry only the fields being changed. Omitting the secret is meaningful, not a
+// missing value: it tells the server to keep the stored credential, which is the only way to edit
+// a host or a region when the UI can never read the secret back to re-submit it.
+export function useUpdateTarget() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: unknown }) =>
+      api.patch<{ id: string }>(`/targets/${input.id}`, input.body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["targets"] }),
+  });
+}
+
+export function useDeleteTarget() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (targetId: string) => api.delete<void>(`/targets/${targetId}`),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["targets"] }),
+  });
+}
+
 export function useTestConnection() {
   return useMutation({
     mutationFn: (targetId: string) =>
@@ -30,6 +50,23 @@ export function useCreateDestination() {
   });
 }
 
+export function useUpdateDestination() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: unknown }) =>
+      api.patch<{ id: string }>(`/destinations/${input.id}`, input.body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["destinations"] }),
+  });
+}
+
+export function useDeleteDestination() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (destinationId: string) => api.delete<void>(`/destinations/${destinationId}`),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["destinations"] }),
+  });
+}
+
 export function useCanary() {
   return useMutation({
     mutationFn: (destinationId: string) =>
@@ -41,6 +78,23 @@ export function useCreatePolicy() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (body: unknown) => api.post<{ id: string }>("/policies", body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["policies"] }),
+  });
+}
+
+export function useUpdatePolicy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: unknown }) =>
+      api.patch<{ id: string }>(`/policies/${input.id}`, input.body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["policies"] }),
+  });
+}
+
+export function useDeletePolicy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (policyId: string) => api.delete<void>(`/policies/${policyId}`),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["policies"] }),
   });
 }

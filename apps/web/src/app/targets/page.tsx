@@ -9,7 +9,7 @@ import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
 import { TargetForm } from "@/components/target-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useTestConnection } from "@/hooks/use-mutations";
+import { useDeleteTarget, useTestConnection } from "@/hooks/use-mutations";
 import { useTargets } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { formatServerVersion } from "@/lib/format";
@@ -53,18 +53,48 @@ function TestConnection({ targetId }: { targetId: string }) {
 }
 
 function TargetRow({ target }: { target: Target }) {
+  const t = useT();
+  const remove = useDeleteTarget();
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <TargetForm onDone={() => setEditing(false)} target={target} />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-6">
-        <div>
-          <p className="font-medium">{target.name}</p>
-          <p className="text-sm text-muted-foreground">
-            {target.engine} · {target.host}:{target.port}
-          </p>
+      <CardContent className="space-y-3 pt-6">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <div>
+            <p className="font-medium">{target.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {target.engine} · {target.host}:{target.port}
+            </p>
+          </div>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <TestConnection targetId={target.id} />
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+              {t("common.edit")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => remove.mutate(target.id)}
+              disabled={remove.isPending}
+            >
+              {t("common.delete")}
+            </Button>
+          </div>
         </div>
-        <div className="ml-auto">
-          <TestConnection targetId={target.id} />
-        </div>
+        {/* The server refuses a delete with 409 and a reason naming what still depends on the row.
+            Showing it verbatim is the point — "in use" on its own is not actionable. */}
+        {remove.isError ? <ErrorState message={remove.error.message} /> : null}
       </CardContent>
     </Card>
   );
