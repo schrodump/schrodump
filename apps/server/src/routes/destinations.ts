@@ -45,10 +45,45 @@ export interface DestinationRecord {
   sealMode: string;
 }
 
+// Editable fields only, all optional, `.strict()` so a withheld field is a 400 rather than a silent
+// drop. `bucket` and `prefix` are absent on purpose: every artifact's bucketKey and manifestKey are
+// built from them at write time and stored relative to them, so repointing either leaves the whole
+// catalogue describing objects that are not at those addresses — the backups stay in the old
+// bucket and nothing in the system still knows where that is. Moving a destination means creating
+// a new one and rebuilding the catalogue against it.
+//
+// `sealMode` is withheld too: operational -> sealed discards the server's ability to verify, and
+// sealed -> operational cannot invent an identity it never held. That is a crypto-posture change,
+// not a field edit.
+const UpdateDestinationSchema = z
+  .object({
+    name: z.string().min(1),
+    endpoint: z.url(),
+    region: z.string().min(1),
+    accessKeyId: z.string().min(1),
+    secretAccessKey: z.string().min(1),
+    forcePathStyle: z.boolean(),
+  })
+  .partial()
+  .strict();
+
+export type UpdateDestinationData = Omit<
+  z.infer<typeof UpdateDestinationSchema>,
+  "secretAccessKey"
+> & { encryptedSecretAccessKey?: EncryptedCredential | undefined };
+
+export interface RemoveDestinationResult {
+  ok: boolean;
+  reason?: string;
+}
+
 export interface DestinationStore {
   create(data: CreateDestinationData): Promise<DestinationRecord>;
   list(): Promise<DestinationRecord[]>;
   get(id: string): Promise<DestinationRecord | null>;
+  // null when no row with that id exists in the caller's organization.
+  update(id: string, data: UpdateDestinationData): Promise<DestinationRecord | null>;
+  remove(id: string): Promise<RemoveDestinationResult>;
 }
 
 function toPublic(destination: DestinationRecord) {
@@ -113,6 +148,43 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
         if (!params.success) return reply.status(400).send({ error: "invalid id" });
         const health = await deps.canary(contextOf(request).organizationId, params.data.id);
         return reply.send(health);
+      },
+    );
+
+    app.patch(
+      "/destinations/:id",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
+        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        const parsed = UpdateDestinationSchema.safeParse(request.body);
+        if (!parsed.success) return reply.status(400).send({ error: "invalid destination update" });
+
+        const { secretAccessKey, ...rest } = parsed.data;
+        if (secretAccessKey === undefined && Object.keys(rest).length === 0) {
+          return reply.status(400).send({ error: "no fields to update" });
+        }
+
+        const updated = await deps.store(contextOf(request).organizationId).update(params.data.id, {
+          ...rest,
+          ...(secretAccessKey !== undefined
+            ? { encryptedSecretAccessKey: encryptCredential(deps.kek, secretAccessKey) }
+            : {}),
+        });
+        if (updated === null) return reply.status(404).send({ error: "not found" });
+        return reply.send(toPublic(updated));
+      },
+    );
+
+    app.delete(
+      "/destinations/:id",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
+        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        const result = await deps.store(contextOf(request).organizationId).remove(params.data.id);
+        if (!result.ok) return reply.status(409).send({ error: result.reason ?? "destination in use" });
+        return reply.status(204).send();
       },
     );
   };

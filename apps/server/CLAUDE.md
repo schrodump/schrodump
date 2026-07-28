@@ -120,10 +120,24 @@ link de setup.
   viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.
   Sem scratch configurado, backup de mongo falha alto e cedo (`MONGO_CONFIG_SCRATCH_REQUIRED_
   REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
-- **Tudo é create-only:** `/targets`, `/destinations` e `/policies` têm só `POST`/`GET` — não há
-  `PATCH` nem `DELETE` em recurso nenhum. Cron digitado errado não se conserta, chave S3 rotacionada
-  não se atualiza, policy não se desativa pela API (a coluna `enabled` existe e nenhuma rota a
-  escreve). É o maior buraco de dia-2 que sobra.
+- **Recursos são editáveis, com campos de identidade retidos.** `/targets`, `/destinations` e
+  `/policies` têm `PATCH` (operator+, schema `.strict()` e `.partial()`, patch vazio é 400). O que
+  **não** se edita, e por quê — cada um invalidaria artefato já existente:
+  `target.engine` (todo artefato registra a engine com que foi tirado), `destination.bucket`/
+  `prefix` (as chaves dos artefatos são relativas a eles; repontar deixa o catálogo inteiro
+  apontando para endereço vazio), `policy.targetId`/`destinationId` (a retenção raciocina por
+  policy — repontar mistura dois bancos numa cadeia GFS e deixa os artefatos do destino antigo
+  fora da retenção para sempre). Trocar isso é policy nova, não edição.
+- **Segredo continua write-only no `PATCH`.** Omitir `password`/`secretAccessKey` mantém o
+  armazenado — é o que torna possível editar host ou região sem reenviar um segredo que a UI nunca
+  consegue ler de volta.
+- **`DELETE` recusa com 409 e motivo quando algo depende da linha**, nunca cascateia. Destino com
+  artefato é o caso afiado: a linha guarda a única credencial que o sistema tem daquele bucket, e
+  apagá-la não apaga os backups — torna-os inalcançáveis. Policy é o caso traiçoeiro:
+  `BackupJob.policy` é relação **opcional**, então o default do Prisma é `SetNull`, não `Restrict` —
+  o banco aceitaria e zeraria `policyId` de todo job que ela rodou, deixando os artefatos
+  inatribuíveis e invisíveis para a retenção sem nada parecer quebrado. Por isso a checagem é
+  explícita, e a mensagem aponta `enabled: false` como a operação certa.
 
 ## SPDX
 

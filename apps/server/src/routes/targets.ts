@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
+import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
@@ -30,7 +31,41 @@ const CreateTargetSchema = z.object({
   scope: ScopeSchema,
 });
 
+// Editable fields only, all optional. `engine` is deliberately absent and `.strict()` turns sending
+// it into a 400 rather than a silent no-op: the engine decides a target's dump/restore descriptors
+// and capability matrix, and every artifact already taken records the engine it was taken with.
+// Repointing it would make that whole history describe something that is no longer there.
+//
+// `password` keeps the write-only contract in both directions: omit it and the stored credential is
+// untouched, which is what makes editing a host or port possible at all when the UI can never read
+// the secret back to re-submit it.
+const UpdateTargetSchema = z
+  .object({
+    name: z.string().min(1),
+    host: z.string().min(1),
+    port: z.number().int(),
+    username: z.string().min(1),
+    password: z.string().min(1),
+    tls: z.boolean(),
+    scope: ScopeSchema,
+  })
+  .partial()
+  .strict();
+
 type EngineName = z.infer<typeof EngineSchema>;
+
+// Derived from the schema rather than from CreateTargetData: Zod's `.partial()` produces
+// `k?: T | undefined`, and under exactOptionalPropertyTypes that is a different type from `k?: T`.
+export type UpdateTargetData = Omit<z.infer<typeof UpdateTargetSchema>, "password"> & {
+  encryptedCredential?: EncryptedCredential | undefined;
+};
+
+// Whether the row could be removed, or why not. A dependency is a refusal the operator can act on
+// (drop the policy first), not a 500 from the database's own restrict.
+export interface RemoveResult {
+  ok: boolean;
+  reason?: string;
+}
 
 export interface CreateTargetData {
   name: string;
@@ -62,6 +97,9 @@ export interface TargetStore {
   create(data: CreateTargetData): Promise<TargetRecord>;
   list(): Promise<TargetRecord[]>;
   get(id: string): Promise<TargetRecord | null>;
+  // null when no row with that id exists in the caller's organization.
+  update(id: string, data: UpdateTargetData): Promise<TargetRecord | null>;
+  remove(id: string): Promise<RemoveResult>;
 }
 
 interface PublicTarget {
@@ -140,6 +178,48 @@ export function targetRoutes(deps: TargetRoutesDeps) {
         return reply.send(toPublicTarget(target));
       },
     );
+
+    app.patch(
+      "/targets/:id",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
+        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        const parsed = UpdateTargetSchema.safeParse(request.body);
+        if (!parsed.success) return reply.status(400).send({ error: "invalid target update" });
+
+        const { password, ...rest } = parsed.data;
+        // An empty patch is a request that says nothing. Answering 200 would report a change that
+        // never happened, which is exactly the kind of false success this project refuses to emit.
+        if (password === undefined && Object.keys(rest).length === 0) {
+          return reply.status(400).send({ error: "no fields to update" });
+        }
+
+        const updated = await deps.store(contextOf(request).organizationId).update(params.data.id, {
+          ...rest,
+          ...(password !== undefined
+            ? { encryptedCredential: encryptCredential(deps.kek, password) }
+            : {}),
+        });
+        if (updated === null) return reply.status(404).send({ error: "not found" });
+        return reply.send(toPublicTarget(updated));
+      },
+    );
+
+    app.delete(
+      "/targets/:id",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
+        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        const result = await deps.store(contextOf(request).organizationId).remove(params.data.id);
+        // 409, not 500: "a policy still points at this" is a state the operator can resolve, and
+        // the reason has to say which. Letting the DB's restrict surface instead would report an
+        // internal error for a perfectly ordinary refusal.
+        if (!result.ok) return reply.status(409).send({ error: result.reason ?? "target in use" });
+        return reply.status(204).send();
+      },
+    );
   };
 }
 
@@ -163,5 +243,25 @@ export function prismaTargetStore(prisma: PrismaClient, organizationId: string):
       }),
     list: () => db.databaseTarget.findMany(),
     get: (id) => db.databaseTarget.findFirst({ where: { id } }),
+    update: async (id, data) => {
+      // updateMany, not update: the org-scoped client filters organizationId in the WHERE, so a
+      // miss is "not yours or not there" (0 rows) rather than a thrown P2025 on a cross-org id.
+      const { count } = await db.databaseTarget.updateMany({ where: { id }, data: definedOnly(data) });
+      if (count === 0) return null;
+      return db.databaseTarget.findFirst({ where: { id } });
+    },
+    remove: async (id) => {
+      const policies = await db.backupPolicy.count({ where: { targetId: id } });
+      // BackupPolicy.target is a required relation with no onDelete, so the database would refuse
+      // this anyway — as an opaque constraint violation. Checking first turns it into a reason.
+      if (policies > 0) {
+        return {
+          ok: false,
+          reason: `${policies} backup polic${policies === 1 ? "y" : "ies"} still reference this target`,
+        };
+      }
+      await db.databaseTarget.deleteMany({ where: { id } });
+      return { ok: true };
+    },
   };
 }
