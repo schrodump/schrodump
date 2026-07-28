@@ -14,6 +14,10 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
 - **Restore tem atrito de propósito.** Escopos que a engine não suporta ficam desabilitados com o
   motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
   Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).
+  A tranca de artefato é por **`executionMode`, não por engine**: `canRestoreArtifact` desabilita o
+  botão de um artefato `STAGED` de qualquer engine (postgres `-Fd` incluso), porque o v1 não tem
+  pipeline de diretório. Desabilitar com motivo, nunca esconder — o artefato existe, e por que ele
+  ainda não restaura é a parte útil.
 - **Verify desligado numa policy é aviso persistente**, não toast.
 - **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
   chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
@@ -42,9 +46,10 @@ build (`output: "standalone"`), não lido em runtime — na imagem, a API escuta
   (`UNREACHABLE`/`TIMEOUT`/`AUTH_FAILED`/`INSUFFICIENT_PRIVILEGES`/`TLS_FAILED`/`UNKNOWN`) com
   texto em `targets.probe.reason.*`. O `driverCode` só é mostrado quando `failure === "UNKNOWN"`
   — nos outros casos é ruído.
-- **Role falha fechado.** `useCurrentRole` lê a role da sessão; como nenhum endpoint a expõe
-  ainda, retorna `viewer` por default — o que **esconde o restore de todos** no app rodando. É
-  intencional: o servidor é quem impõe `operator+`. Destrava sozinho quando o endpoint existir.
+- **Role falha fechado.** `useCurrentRole` lê a role de `GET /me` (`routes/session.ts`) — ela vive
+  no membership, não na sessão do Better-Auth. Enquanto a query carrega, e se ela falhar, o default
+  é `viewer`, que esconde o restore. O servidor impõe `operator+` de forma independente: isso é UX,
+  não é o controle.
 
 ## URL de conexão (`lib/connection-url.ts`)
 

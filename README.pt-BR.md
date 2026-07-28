@@ -133,10 +133,10 @@ Achou uma vulnerabilidade? Veja [SECURITY.md](SECURITY.md). Por favor, não abra
 ## Status do projeto
 
 O Schrodump está em desenvolvimento ativo rumo ao **v1**. O modelo de verificação, o agendamento, o
-storage, a criptografia, a interface web e o pipeline completo de CI + release assinada estão
-implementados e testados. Alguns caminhos de execução — execução de restore, entrega de notificações
-— e backup físico/PITR estão no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que
-está e o que não está no v1.
+storage, a criptografia, a retenção GFS, a execução de restore, a interface web e o pipeline completo
+de CI + release assinada estão implementados e testados. O restore cobre artefatos single-stream das
+quatro engines; artefatos staged (diretório), entrega de notificações e backup físico/PITR estão no
+roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que não está no v1.
 
 ## Contribuindo
 

@@ -9,6 +9,10 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
   stores reais (scopedPrisma) e o `JobsService`.
 - `jobs/` — lógica de cada job (backup, verify, restore, retention, catalog-rebuild,
   self-backup) como funções + o `-wiring.ts` que as liga ao Prisma/runner/storage.
+  A retenção é um `JobKind` (`RETENTION`), não uma varredura de fundo: apagar backup é desfecho que
+  o operador precisa conseguir ler depois — inclusive quando o ciclo se recusou a rodar. Ela é
+  encadeada pelo worker após um BACKUP **SUCCEEDED** da mesma policy (`jobs/worker.ts`), nunca por
+  cron próprio; backup que falhou jamais custa uma cópia antiga.
 - `scheduler/` — avalia policies e cria jobs. É **processo de sistema**, não requisição de
   tenant: lê policies cross-organization e escreve jobs `organizationId`-scoped. Idempotente por
   `(policyId, scheduledAt)`; recuperação de órfãos marca `RUNNING → FAILED` no boot. O worker
@@ -31,6 +35,12 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
   redaction de `password`/`secret`/`secretAccessKey` (e `*.` deles); a convenção reforça.
 - `viewer` **não** dispara restore — requisito de auditoria. A rota exige `operator+`; a UI
   esconder o botão é a segunda tranca, não a única.
+- **Retenção nunca apaga por omissão.** Todo contador `keep*` tem default 0 — no Zod e na coluna —
+  então "não configurei retenção" e "quero guardar zero cópias" chegam idênticos ao
+  `resolveRetention`, que responde a segunda: apagar tudo. `retentionIsConfigured` (core) é a
+  guarda obrigatória antes de agir sobre essa resposta, e `runRetention` a aplica antes de qualquer
+  I/O. Silêncio não é instrução. Mesma regra para visão incompleta: manifesto ilegível ou órfão
+  aborta o ciclo inteiro em vez de podar contra um retrato que já se sabe parcial.
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 
@@ -66,10 +76,11 @@ link de setup.
 - `prisma generate` roda nos scripts `typecheck`/`test` (não precisa de DB).
 - Migrações reversíveis, revisadas antes de aplicar; `prisma migrate diff` limpo. Em produção,
   o entrypoint da imagem roda `prisma migrate deploy` antes de o server escutar.
-- **BigInt e JSON:** o Prisma devolve `BigInt` para colunas como `sizeRawBytes`. O Fastify não
-  serializa `BigInt` por padrão. `policies` já converte via `toPolicyRecord`; a rota
-  `GET /artifacts` devolve a linha crua e **vai estourar quando existir um artefato** — mapear
-  antes de serializar é obrigatório para qualquer rota que exponha BigInt.
+- **BigInt e JSON:** o Prisma devolve `BigInt` para colunas como `sizeRawBytes` e
+  `minAgeBeforeDeleteMs`. O Fastify não serializa `BigInt` por padrão, e aritmética de `BigInt`
+  contra `number` estoura em runtime. Mapear antes de serializar (ou antes de entregar ao `core`)
+  é obrigatório: `policies` via `toPolicyRecord`, `GET /artifacts` via `toArtifactRecord`
+  (`routes/wiring.ts`), retenção via `toRetentionPolicy` (`jobs/worker-wiring.ts`).
 
 ## Criptografia (3 domínios, não misturar)
 
@@ -90,9 +101,10 @@ link de setup.
   arquivo montado → `pg_restore`/`mysql`/`mongorestore`). A tranca é por **`executionMode`, não por
   engine** — `runRestoreJob` (`jobs/restore.ts`) recusa qualquer artefato `STAGED` (mydumper em
   diretório, ou `-Fd` do postgres) com erro claro, de qualquer engine, porque falta o pipeline de
-  diretório (untar-to-directory); a UI espelha a mesma tranca (`canRestoreEngine` em
-  `apps/web/src/lib/domain.ts` hoje libera as quatro — o campo `executionMode` não é exposto no
-  `Artifact` da API ainda, então o servidor segue sendo a tranca real). O que falta: pipeline STAGED
+  diretório (untar-to-directory); a UI espelha a mesma tranca de verdade — `toArtifactRecord` expõe
+  `executionMode` no `Artifact` da API e `canRestoreArtifact`
+  (`apps/web/src/lib/domain.ts`) desabilita o botão com o motivo, em vez de enfileirar um job que já
+  se sabe condenado. O servidor segue sendo a tranca que impõe. O que falta: pipeline STAGED
   e seleção de sub-escopo real para mysql/mongo (hoje sempre restore completo). Verify de
   `FULL_RESTORE` reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) +
   assert de contagem de tabelas/coleções (`resolveVerifyPlan`/`runFullRestore` em
@@ -108,9 +120,10 @@ link de setup.
   viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.
   Sem scratch configurado, backup de mongo falha alto e cedo (`MONGO_CONFIG_SCRATCH_REQUIRED_
   REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
-- **Não há endpoint que exponha a role do usuário corrente** — a role vem do membership
-  resolvido em `auth/auth.ts`, não da sessão. O front falha fechado em `viewer`.
-- **Alvo é imutável:** só `POST`/`GET` em `/targets`, sem editar nem excluir.
+- **Tudo é create-only:** `/targets`, `/destinations` e `/policies` têm só `POST`/`GET` — não há
+  `PATCH` nem `DELETE` em recurso nenhum. Cron digitado errado não se conserta, chave S3 rotacionada
+  não se atualiza, policy não se desativa pela API (a coluna `enabled` existe e nenhuma rota a
+  escreve). É o maior buraco de dia-2 que sobra.
 
 ## SPDX
 

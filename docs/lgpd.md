@@ -39,7 +39,7 @@ display — the interface can replace a credential, never show one.
 Retention is a grandfather-father-son policy per backup policy: keep N last, N daily, N weekly, N
 monthly, N yearly. Artefacts outside the policy are deleted.
 
-Two things to get right:
+Four things to get right:
 
 - **Set retention from your legal basis, not from disk space.** Art. 16 says data is eliminated
   when processing ends, with narrow exceptions (legal obligation, study by a research body,
@@ -47,6 +47,17 @@ Two things to get right:
   cheap" is not one of them.
 - **Retention applies to artefacts, not to what is inside them.** Schrodump deletes whole
   artefacts. It does not, and cannot, reach into an encrypted dump to remove one person's row.
+- **A policy with every keep counter at zero deletes nothing.** Zero is the default for all five,
+  so "I never configured retention" and "I want to keep nothing" would otherwise reach the
+  resolver identically — and it would answer the second. Schrodump treats the all-zero policy as
+  unconfigured and prunes nothing. **This means a policy you never set retention on is retaining
+  forever**, which is a compliance position you are taking whether or not you meant to. Check it.
+- **Retention runs chained to a successful backup of the same policy.** That is deliberate: a
+  failed backup must never cost you an older copy, so pruning only happens at the moment a new
+  artefact lands. The consequence for art. 16 is the part to write down — **a policy that stops
+  backing up also stops deleting**, so a disabled or persistently failing policy will hold
+  artefacts past the window you set. If elimination is the duty you are relying on, monitor that
+  backups are still succeeding, not just that a retention window is configured.
 
 ### Audit trail (art. 37)
 
@@ -109,6 +120,9 @@ promised to delete that the storage will not let you delete.
 ## A short checklist
 
 - [ ] Retention set from a legal basis you can state, not from available disk.
+- [ ] Retention counters actually non-zero on every policy — all-zero means retain forever.
+- [ ] Backups still succeeding on every policy you rely on for elimination; retention prunes only
+      after a successful backup, so a broken policy quietly stops deleting.
 - [ ] `SCHRODUMP_KEK` stored outside the backup host, with an offline copy.
 - [ ] Restore runbook includes re-applying pending erasure requests.
 - [ ] Erasure requests logged with dates, so step 4 is possible at all.
