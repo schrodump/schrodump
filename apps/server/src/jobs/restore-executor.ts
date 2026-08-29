@@ -182,7 +182,8 @@ export interface RestorePipelineDeps {
   // Isolated executor network; never inherited.
   network: string;
   timeoutMs: number;
-  // Shutdown cancellation, forwarded into the restore container's run().
+  // Shutdown cancellation. Carried by BOTH phases that can be in flight when a SIGTERM lands: the
+  // decrypt-to-scratch write (which creates the cleartext) and the restore container's run().
   signal?: AbortSignal;
   // Threaded into every run for log correlation and the runner's typed errors.
   correlationId: string;
@@ -227,6 +228,15 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
       deps.buildGlobalsRestoreDescriptor,
     );
     for (const step of steps) {
+      // A postgres restore is two steps (globals, then the database). Never begin the NEXT one
+      // after the shutdown has been signalled: it would stage a fresh cleartext dump the grace has
+      // no budget left to remove. The in-flight step is aborted by the signal it already carries.
+      if (deps.signal?.aborted === true) {
+        throw new SchrodumpError("restore aborted by shutdown", {
+          code: "RESTORE_ABORTED",
+          correlationId: deps.correlationId,
+        });
+      }
       await restoreOne(deps, staging.dir, step, extra?.mounts ?? []);
     }
     return true;
@@ -293,11 +303,32 @@ async function restoreOne(
       // to the file — so world-read on the file is inert on the host while letting every engine's
       // throwaway executor read it. (Never reproduces on Docker Desktop, whose VM file-sharing masks
       // the mount's ownership; it is a native-Linux executor failure, caught by CI.)
-      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o644 }));
+      // The signal rides the pipeline itself, not just the runner.run below: this write is the
+      // largest fraction of a restore's wall time and the phase most likely to be in flight when a
+      // shutdown arrives. Without it a multi-GB decrypt runs to completion after the abort, and the
+      // finally that removes this cleartext file only runs once it does — past the grace, i.e. never.
+      // `pipeline` destroys the whole chain on abort, which routes straight into that finally.
+      await pipeline(
+        decrypted,
+        createGunzip(),
+        createWriteStream(dumpPath, { mode: 0o644 }),
+        ...(deps.signal !== undefined ? ([{ signal: deps.signal }] as const) : ([] as const)),
+      );
       // createWriteStream's mode is masked by umask; enforce 0644 explicitly (mirrors writeMongoConfig)
       // so the mongo executor can read it regardless of the worker process's umask.
       await chmod(dumpPath, 0o644);
     } catch (err) {
+      // A shutdown abort tears this pipeline down with an AbortError. Classify it FIRST: it is
+      // neither the artifact's fault nor our disk's, and falling through to the generic branch
+      // below would label it RESTORE_DECRYPT_FAILED — the one code verify maps to FAILED. That
+      // would condemn an artifact the restore never finished reading, which is the exact verdict
+      // a shutdown must never emit. RESTORE_ABORTED classifies INCONCLUSIVE, as it must.
+      if (deps.signal?.aborted === true) {
+        throw new SchrodumpError("restore aborted by shutdown", {
+          code: "RESTORE_ABORTED",
+          correlationId: deps.correlationId,
+        });
+      }
       // A source error rewritten above already carries RESTORE_SOURCE_FAILED and surfaces here
       // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
       // through unchanged rather than re-wrapping it as a decrypt failure.

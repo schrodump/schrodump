@@ -20,6 +20,9 @@ describe("classifyVerifyError", () => {
 
   it("classifies a shutdown abort as INCONCLUSIVE, never FAILED — it observed nothing", () => {
     expect(classifyVerifyError(err("RUNNER_ABORTED"))).toBe("INCONCLUSIVE");
+    // The restore pipeline's own abort (a shutdown between two restore steps) is the same claim:
+    // nothing was observed, so the artifact must stay UNOBSERVED rather than be condemned.
+    expect(classifyVerifyError(err("RESTORE_ABORTED"))).toBe("INCONCLUSIVE");
   });
 
   it("classifies a decrypt failure as FAILED — the artifact itself is bad", () => {

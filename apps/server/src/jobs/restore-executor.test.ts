@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { createGzip } from "node:zlib";
 import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
@@ -120,10 +120,15 @@ describe("planRestoreSteps", () => {
 describe("runRestorePipeline — extra-mount threading and reservation lifecycle", () => {
   let stagingDir: string;
   let stagingCleanupCalls: number;
+  // What the reserved dir still held at the moment the reservation was released. The per-step
+  // finally removes the decrypted dump BEFORE this runs, so a non-empty listing here means a
+  // cleartext dump outlived the step that created it.
+  let stagingContentsAtCleanup: string[];
 
   beforeEach(async () => {
     stagingDir = await mkdtemp(join(tmpdir(), "schrodump-restore-pipeline-"));
     stagingCleanupCalls = 0;
+    stagingContentsAtCleanup = [];
   });
 
   afterEach(async () => {
@@ -135,6 +140,7 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
       dir: stagingDir,
       cleanup: async () => {
         stagingCleanupCalls++;
+        stagingContentsAtCleanup = await readdir(stagingDir);
         await rm(stagingDir, { recursive: true, force: true });
       },
     });
@@ -259,5 +265,79 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     // provideExtraMounts threw before any restore executor ran.
     expect(stagingCleanupCalls).toBe(1);
     expect(capture).toHaveLength(0);
+  });
+
+  // FIX: deps.signal used to be consulted at exactly one place — the runner.run call. Everything
+  // before it, including the decrypt -> gunzip -> scratch-file write that CREATES the cleartext, was
+  // signal-blind, so a shutdown mid-download waited out the whole write (minutes for a multi-GB
+  // artifact) before the finally that removes that file could run. The grace expires first.
+  it("aborts the decrypt-to-scratch write mid-flight and leaves no cleartext behind", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+    const controller = new AbortController();
+
+    // Real ciphertext on a source that never ends: the decrypt-to-scratch write stays in flight
+    // exactly as it does for a large artifact, giving the abort something real to interrupt.
+    // Without the signal on that pipeline nothing ever settles and this test times out.
+    const held = new PassThrough();
+    held.on("error", () => undefined);
+    (await encryptedGzip("hello", recipient)).pipe(held, { end: false });
+
+    const promise = runRestorePipeline({
+      driver: fakeDriver(() => Promise.resolve(held)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      signal: controller.signal,
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort();
+
+    // RESTORE_ABORTED, never RESTORE_DECRYPT_FAILED: a shutdown observed nothing about the
+    // artifact, so verify must classify it INCONCLUSIVE rather than condemn it.
+    await expect(promise).rejects.toMatchObject({ code: "RESTORE_ABORTED" });
+    // No restore executor ever ran, and the staged cleartext was gone before the reservation was
+    // released — the abort routed into the finally instead of waiting the write out.
+    expect(capture).toHaveLength(0);
+    expect(stagingCleanupCalls).toBe(1);
+    expect(stagingContentsAtCleanup).toEqual([]);
+  });
+
+  // Postgres restores globals and then the database. An abort between the two must not begin the
+  // second step: it would stage a fresh cleartext dump the grace has no budget left to remove.
+  it("refuses to begin a step once the shutdown signal has fired, staging nothing", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+
+    await expect(
+      runRestorePipeline({
+        driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+        runner: capturingRunner(capture),
+        bucketKey: "artifact.bin",
+        globalsKey: null,
+        ageIdentity: identity,
+        network: "schrodump_targets",
+        timeoutMs: 1000,
+        correlationId: "job-1",
+        signal: AbortSignal.abort(),
+        buildRestoreDescriptor: restoreDescriptor,
+        buildGlobalsRestoreDescriptor: () => null,
+        reserveStaging,
+      }),
+    ).rejects.toMatchObject({ code: "RESTORE_ABORTED" });
+
+    expect(capture).toHaveLength(0);
+    // The reservation was still released, and nothing was ever decrypted into it.
+    expect(stagingCleanupCalls).toBe(1);
+    expect(stagingContentsAtCleanup).toEqual([]);
   });
 });
