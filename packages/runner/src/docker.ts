@@ -64,6 +64,14 @@ export class DockerRunner implements Runner {
   async run(descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> {
     const startedAt = Date.now();
 
+    // Already shutting down: never start a container we would have to kill on the next tick. End
+    // the caller's stdout sink first, for the same reason the missing-network path does — a
+    // consumer piping FROM it would otherwise block forever on a stream nothing will ever write to.
+    if (opts.signal?.aborted === true) {
+      endStdout(opts.stdout);
+      throw abortedError(opts.correlationId);
+    }
+
     // Fail clearly on a missing network — never fall back to the default network.
     if (!(await this.#engine.networkExists(opts.network))) {
       // End the caller's stdout sink first: a consumer piping FROM it (backup-wiring's upload reads
@@ -105,6 +113,7 @@ export class DockerRunner implements Runner {
 
     const stderr = captureStderr(container.stderr, STDERR_LIMIT_BYTES);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
 
     try {
       const stdoutDone =
@@ -132,7 +141,20 @@ export class DockerRunner implements Runner {
         }, opts.timeoutMs);
       });
 
-      const exitCode = await Promise.race([execution, timeout]);
+      // Cancellation rides the timeout's exact teardown: kill the container, reject the race. The
+      // finally below force-removes it, and that rejection is what makes the executor's own finally
+      // run — releasing the scratch reservation (the cleartext dump) before the process exits.
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const signal = opts.signal;
+        if (signal === undefined) return; // never settles — inert in the race
+        onAbort = () => {
+          void container.kill().catch(() => undefined);
+          reject(abortedError(opts.correlationId));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+      const exitCode = await Promise.race([execution, timeout, aborted]);
 
       return {
         exitCode,
@@ -149,6 +171,9 @@ export class DockerRunner implements Runner {
       });
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      // Drop the listener on every exit path: opts.signal is process-wide and outlives this run,
+      // so one left behind is a leak that grows with every job the worker executes.
+      if (onAbort !== undefined) opts.signal?.removeEventListener("abort", onAbort);
       // Manual removal (never AutoRemove) so exit code and stderr are read first.
       await container.remove().catch(() => undefined);
     }
@@ -220,6 +245,17 @@ function endStdout(stdout: Writable | undefined): void {
   } catch {
     // Already ended/destroyed — nothing to unblock.
   }
+}
+
+// Cancellation error. Deliberately a RUNNER_* code: verify's classifier (verify-wiring.ts) maps
+// every RUNNER_* to INCONCLUSIVE, so a verify killed by shutdown never condemns an artifact it
+// did not actually observe.
+function abortedError(correlationId: string): SchrodumpError {
+  return new SchrodumpError("run aborted by shutdown", {
+    code: "RUNNER_ABORTED",
+    correlationId,
+    context: {},
+  });
 }
 
 export function createDockerRunner(docker?: Docker): DockerRunner {

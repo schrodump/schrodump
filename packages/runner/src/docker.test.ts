@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { PassThrough, Readable, Writable } from "node:stream";
+import { getEventListeners } from "node:events";
 import { describe, expect, it } from "vitest";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
@@ -194,6 +195,43 @@ describe("DockerRunner.run", () => {
     const engine = new FakeEngine();
     await new DockerRunner(engine).run(DESCRIPTOR, opts({ network: "schrodump_targets" }));
     expect(engine.lastSpec?.network).toBe("schrodump_targets");
+  });
+
+  it("kills the container and rejects RUNNER_ABORTED when the signal aborts mid-run", async () => {
+    const engine = new FakeEngine();
+    engine.neverExits = true; // the dump is still running when the signal arrives
+    const controller = new AbortController();
+    const promise = new DockerRunner(engine).run(DESCRIPTOR, opts({ signal: controller.signal }));
+    // Let run() get past networkExists + start and register its abort listener.
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.killed).toBe(true);
+    expect(engine.removed).toBe(true);
+  });
+
+  it("never starts a container and ends the stdout sink when the signal is already aborted", async () => {
+    const engine = new FakeEngine();
+    const sink = new PassThrough();
+    let ended = false;
+    sink.on("finish", () => {
+      ended = true;
+    });
+    await expect(
+      new DockerRunner(engine).run(DESCRIPTOR, opts({ signal: AbortSignal.abort(), stdout: sink })),
+    ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.started).toBe(false);
+    expect(ended).toBe(true);
+  });
+
+  it("removes its abort listener once the run settles, so a long-lived signal never accumulates them", async () => {
+    const engine = new FakeEngine();
+    engine.stdoutChunks = [Buffer.from("dump")];
+    const controller = new AbortController();
+    const runner = new DockerRunner(engine);
+    await runner.run(DESCRIPTOR, opts({ signal: controller.signal }));
+    await runner.run(DESCRIPTOR, opts({ signal: controller.signal }));
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 });
 

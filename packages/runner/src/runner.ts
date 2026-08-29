@@ -22,6 +22,10 @@ export interface RunOptions {
   readonly stdout?: Writable;
   readonly timeoutMs: number;
   readonly correlationId: string;
+  // Process-wide cancellation. Aborting it kills the container through the same teardown the
+  // timeout uses — the shutdown path depends on this to leave no container and no cleartext
+  // scratch behind. Optional: callers with no shutdown story (tests, one-off tools) omit it.
+  readonly signal?: AbortSignal;
 }
 
 export interface RunResult {
