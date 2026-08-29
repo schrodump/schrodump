@@ -52,10 +52,16 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 `env.ts` valida com Zod. Além de `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,
 `SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (e `BETTER_AUTH_SECRET`/`LOG_LEVEL`), agora lê
 a config de worker/executor: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
-`SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK` e `WORKER_POLL_MS`. Scratch path
+`SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
+`SCHRODUMP_SCHEDULER_TICK_MS` e `SCHRODUMP_SHUTDOWN_GRACE_MS`. Scratch path
 ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — passar string vazia é
 valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
 link de setup.
+
+> **`SCHRODUMP_SHUTDOWN_GRACE_MS`** (default 8000, deliberately under docker's ~10s stop timeout)
+> bounds how long the `SIGTERM` handler waits for the aborted job's cleanup. It is a ceiling, not
+> a wait-for-completion: when it expires the process exits anyway, and the scratch sweep plus
+> orphan recovery at the next boot are the backstop. See `docs/security.md`.
 
 > **Nota:** `DOCKER_HOST` não passa pelo `env.ts` — o runner (dockerode) o lê direto do ambiente.
 
