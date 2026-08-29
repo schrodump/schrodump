@@ -32,4 +32,39 @@ describe("startLoop", () => {
     expect(sawOverlap).toBe(false);
     expect(tick.mock.calls.length).toBeGreaterThan(1);
   });
+
+  it("whenIdle resolves only after the in-flight tick settles", async () => {
+    let release: () => void = () => undefined;
+    const tick = vi.fn(() => new Promise<number>((r) => {
+      release = () => r(0);
+    }));
+    const handle = startLoop({ tick, intervalMs: 1 });
+    await new Promise((r) => setTimeout(r, 10)); // a tick is now in flight
+    handle.stop();
+
+    let settled = false;
+    const idle = handle.whenIdle().then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(settled).toBe(false); // still waiting on the tick
+
+    release();
+    await idle;
+    expect(settled).toBe(true);
+  });
+
+  it("whenIdle resolves immediately when no tick is running", async () => {
+    const handle = startLoop({ tick: () => Promise.resolve(0), intervalMs: 10_000 });
+    handle.stop();
+    await expect(handle.whenIdle()).resolves.toBeUndefined();
+  });
+
+  it("whenIdle resolves even when the in-flight tick rejects", async () => {
+    const tick = vi.fn(() => Promise.reject(new Error("drain blew up")));
+    const handle = startLoop({ tick, intervalMs: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+    handle.stop();
+    await expect(handle.whenIdle()).resolves.toBeUndefined();
+  });
 });
