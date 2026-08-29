@@ -232,6 +232,23 @@ describe("DockerRunner.run", () => {
     await runner.run(DESCRIPTOR, opts({ signal: controller.signal }));
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
+
+  it("still cancels when the signal fires while the container is being started", async () => {
+    const engine = new FakeEngine();
+    engine.neverExits = true;
+    const controller = new AbortController();
+    // Abort in the middle of start() — after run()'s entry check, before its listener exists.
+    const started = engine.start.bind(engine);
+    engine.start = async (spec) => {
+      controller.abort();
+      return started(spec);
+    };
+    await expect(
+      new DockerRunner(engine).run(DESCRIPTOR, opts({ signal: controller.signal })),
+    ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.killed).toBe(true);
+    expect(engine.removed).toBe(true);
+  });
 });
 
 describe("DockerRunner.withEphemeralService", () => {
@@ -315,6 +332,31 @@ describe("DockerRunner.withEphemeralService", () => {
     controller.abort();
     await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
     expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("still cancels when the signal fires while the service is being started", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    const controller = new AbortController();
+    const startedService = engine.startService.bind(engine);
+    engine.startService = async (spec) => {
+      controller.abort();
+      return startedService(spec);
+    };
+    await expect(
+      new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "x", {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("removes its abort listener once the call settles, so a long-lived signal never accumulates them", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    const controller = new AbortController();
+    const runner = new DockerRunner(engine);
+    await runner.withEphemeralService(SERVICE_SPEC, async () => "x", { signal: controller.signal });
+    await runner.withEphemeralService(SERVICE_SPEC, async () => "x", { signal: controller.signal });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 });
 

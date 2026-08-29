@@ -152,6 +152,11 @@ export class DockerRunner implements Runner {
           reject(abortedError(opts.correlationId));
         };
         signal.addEventListener("abort", onAbort, { once: true });
+        // The signal can fire between the entry check and this registration — while
+        // engine.start() is talking to the daemon. addEventListener does NOT replay a past
+        // abort, so without this re-check that run would proceed uncancelled and leak exactly
+        // the container and cleartext scratch the shutdown exists to remove.
+        if (signal.aborted) onAbort();
       });
 
       const exitCode = await Promise.race([execution, timeout, aborted]);
@@ -212,6 +217,9 @@ export class DockerRunner implements Runner {
         if (signal === undefined) return; // never settles — inert in the race
         onAbort = () => reject(abortedError(spec.correlationId));
         signal.addEventListener("abort", onAbort, { once: true });
+        // Same race as run(): the signal can fire while networkExists()/startService() are in
+        // flight. A past abort is never replayed to a new listener, so re-check it here.
+        if (signal.aborted) onAbort();
       });
 
       const guarded = (async () => {
