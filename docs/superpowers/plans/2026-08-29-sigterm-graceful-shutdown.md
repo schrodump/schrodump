@@ -644,11 +644,24 @@ Append to `describe("startLoop", ...)` in `apps/server/src/jobs/loop.test.ts`:
   });
 
   it("whenIdle resolves even when the in-flight tick rejects", async () => {
-    const tick = vi.fn(() => Promise.reject(new Error("drain blew up")));
+    let fail: (err: Error) => void = () => undefined;
+    const tick = vi.fn(
+      () =>
+        new Promise<number>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
     const handle = startLoop({ tick, intervalMs: 1 });
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10)); // a tick is in flight and still pending
     handle.stop();
-    await expect(handle.whenIdle()).resolves.toBeUndefined();
+    expect(tick).toHaveBeenCalled(); // guards the test against vacuously passing on an idle loop
+
+    // Captured BEFORE the rejection: this is the in-flight promise, not the idle shortcut.
+    const idle = handle.whenIdle();
+    fail(new Error("drain blew up"));
+    // Resolves, never rejects — a tick that threw is still a tick that finished, and shutdown
+    // must not be derailed by the failure of the work it is waiting out.
+    await expect(idle).resolves.toBeUndefined();
   });
 ```
 
