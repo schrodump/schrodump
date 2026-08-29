@@ -107,10 +107,20 @@ export async function main(): Promise<void> {
   const recovered = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () => recoverOrphanedJobs(schedulerStore));
   if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
 
+  // Process-wide cancellation for the worker. Tripped by SIGTERM below; every container the
+  // executor starts carries this signal, so aborting it kills them and releases their scratch.
+  const shutdownController = new AbortController();
+
   // 2. Single-flight worker (same advisory lock keeps one replica draining).
   const store = createWorkerStore(prisma);
   const executor = createJobExecutor({ prisma, kek, env });
-  const workerDeps = { store, executor, log: logger, sanitizeReason };
+  const workerDeps = {
+    store,
+    executor,
+    log: logger,
+    sanitizeReason,
+    signal: shutdownController.signal,
+  };
   const handle = startLoop({
     intervalMs: env.WORKER_POLL_MS,
     // A drain-level throw (claim query fails, tryLock throws) must be logged, not swallowed, or a
@@ -138,13 +148,29 @@ export async function main(): Promise<void> {
       }),
   });
 
-  // 4. Graceful shutdown: stop both loops before exit (scratch of an in-flight job is released by
-  //    the ScratchManager the executor holds; full mid-dump cancel is the runner's timeout path).
-  //    Also drop the dedicated advisory-lock connection so its session lock is released promptly.
+  // 4. Graceful shutdown: abort the in-flight job and clean up, rather than wait for it. A logical
+  //    dump takes minutes to hours and `docker stop` gives ~10s, so draining is not on the table.
+  //    An unfinished backup is a FAILED job and an UNOBSERVED artifact — consistent with the thesis
+  //    — and, crucially, no cleartext dump survives the shutdown. The abort rides paths that already
+  //    exist: the runner kills the container, the executor's finally releases the scratch
+  //    reservation, and runWorkerOnce's catch marks the job FAILED. Boot-time orphan recovery and
+  //    the scratch sweep remain the backstop for a SIGKILL that beats the grace.
   installShutdown({
     onSignal: async () => {
       handle.stop();
       schedulerHandle.stop();
+      shutdownController.abort();
+      const graceMs = env.SCHRODUMP_SHUTDOWN_GRACE_MS;
+      const timedOut = await Promise.race([
+        handle.whenIdle().then(() => false),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), graceMs).unref()),
+      ]);
+      if (timedOut) {
+        // The cleanup is wedged (most likely a hung Docker daemon call). Exit anyway — holding the
+        // process past the docker-stop window only trades this for a SIGKILL, and the boot sweep
+        // recovers either way.
+        logger.warn({ graceMs }, "shutdown grace expired with a job still cleaning up");
+      }
       await advisoryLockPrisma.$disconnect();
     },
   });

@@ -43,4 +43,18 @@ describe("loadEnv worker config", () => {
     const env = loadEnv({ ...base, SCHRODUMP_MAX_CONCURRENT_STAGED: "1" } as NodeJS.ProcessEnv);
     expect(env.SCHRODUMP_MAX_CONCURRENT_STAGED).toBe(1);
   });
+
+  it("defaults the shutdown grace to 8000ms and accepts an override", () => {
+    expect(loadEnv({ ...base } as NodeJS.ProcessEnv).SCHRODUMP_SHUTDOWN_GRACE_MS).toBe(8000);
+    expect(
+      loadEnv({ ...base, SCHRODUMP_SHUTDOWN_GRACE_MS: "2500" } as NodeJS.ProcessEnv)
+        .SCHRODUMP_SHUTDOWN_GRACE_MS,
+    ).toBe(2500);
+  });
+
+  it("rejects a non-positive shutdown grace", () => {
+    expect(() =>
+      loadEnv({ ...base, SCHRODUMP_SHUTDOWN_GRACE_MS: "0" } as NodeJS.ProcessEnv),
+    ).toThrow();
+  });
 });
