@@ -213,15 +213,14 @@ describe("DockerRunner.run", () => {
   it("never starts a container and ends the stdout sink when the signal is already aborted", async () => {
     const engine = new FakeEngine();
     const sink = new PassThrough();
-    let ended = false;
-    sink.on("finish", () => {
-      ended = true;
-    });
     await expect(
       new DockerRunner(engine).run(DESCRIPTOR, opts({ signal: AbortSignal.abort(), stdout: sink })),
     ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
     expect(engine.started).toBe(false);
-    expect(ended).toBe(true);
+    // `.end()` sets writableEnded synchronously; 'finish' is emitted later through the Writable's
+    // own nextTick chain, so the event is not observable yet at this point. What matters to the
+    // caller is that the sink was ended — a consumer piping FROM it sees EOF and unblocks.
+    expect(sink.writableEnded).toBe(true);
   });
 
   it("removes its abort listener once the run settles, so a long-lived signal never accumulates them", async () => {
