@@ -31,6 +31,8 @@ export interface BackupWiringDeps {
   network: string;
   prefix: string;
   timeoutMs: number;
+  // Shutdown cancellation, forwarded into the dump container's run().
+  signal?: AbortSignal;
   // The mongo dump reads its password from a `--config` file that must be bind-mounted into the
   // mongodump executor (kept off argv). Set ONLY for the mongodb engine; every other engine passes
   // the password via env (PGPASSWORD/MYSQL_PWD) and runs with no mount. Materialized + cleaned up by
@@ -74,6 +76,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       stdout: dumpOut,
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     // Attached synchronously, in the same tick runPromise is created — not merely "eventually
     // awaited". encryptStream() below crosses a real threadpool boundary (WebCrypto), so if the run

@@ -310,7 +310,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     });
   };
 
-  const runBackup = async (job: ClaimedJob): Promise<BackupResult> => {
+  const runBackup = async (job: ClaimedJob, signal?: AbortSignal): Promise<BackupResult> => {
     // A BACKUP job without a policy has no target/destination to work from (Task 1 guarantees one;
     // this is the structural guard for a corrupt row, mirroring the verify orphan below).
     if (job.policyId === null) {
@@ -413,6 +413,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
       prefix: destination.prefix,
       timeoutMs: DUMP_TIMEOUT_MS,
+      ...(signal !== undefined ? { signal } : {}),
       // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
       ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
       setState: (state, reason) => setJobState(job.id, state, reason),
@@ -519,7 +520,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     }
   };
 
-  const runVerify = async (job: ClaimedJob): Promise<void> => {
+  const runVerify = async (job: ClaimedJob, signal?: AbortSignal): Promise<void> => {
     // ON DELETE SET NULL: the artifact this job targeted was deleted. An orphaned verify job is
     // failed with a clear reason, never silently skipped.
     if (job.artifactId === null) {
@@ -698,6 +699,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 ageIdentity,
                 network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
                 timeoutMs: DUMP_TIMEOUT_MS,
+                ...(signal !== undefined ? { signal } : {}),
                 correlationId: job.id,
                 buildRestoreDescriptor: (sourcePath) =>
                   adapter.buildRestore({
@@ -761,6 +763,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   stdout: assertOut,
                   timeoutMs: DUMP_TIMEOUT_MS,
                   correlationId: job.id,
+                  ...(signal !== undefined ? { signal } : {}),
                 },
               );
               const count = Number.parseInt(Buffer.concat(chunks).toString("utf8").trim(), 10);
@@ -770,6 +773,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 ? "VERIFIED"
                 : "FAILED";
             },
+            { ...(signal !== undefined ? { signal } : {}) },
           );
         } catch (err) {
           // TOTAL catch: typed restore/runner codes → FAILED (artifact) vs INCONCLUSIVE (our infra);
@@ -797,7 +801,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     );
   };
 
-  const runRestore = async (job: ClaimedJob): Promise<void> => {
+  const runRestore = async (job: ClaimedJob, signal?: AbortSignal): Promise<void> => {
     const params = restoreParamsOf(job.restoreParams);
 
     // I1: restore writes the decrypted CLEARTEXT dump to disk. Only the scratch volume is swept by
@@ -969,6 +973,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           ageIdentity,
           network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
           timeoutMs: DUMP_TIMEOUT_MS,
+          ...(signal !== undefined ? { signal } : {}),
           correlationId: job.id,
           buildRestoreDescriptor: (sourcePath) =>
             adapter.buildRestore({

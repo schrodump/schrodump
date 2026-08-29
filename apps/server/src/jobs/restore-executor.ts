@@ -182,6 +182,8 @@ export interface RestorePipelineDeps {
   // Isolated executor network; never inherited.
   network: string;
   timeoutMs: number;
+  // Shutdown cancellation, forwarded into the restore container's run().
+  signal?: AbortSignal;
   // Threaded into every run for log correlation and the runner's typed errors.
   correlationId: string;
   // Engine restore descriptor (pg_restore / mysql / mongorestore) built for the mount path the
@@ -342,6 +344,7 @@ async function restoreOne(
       mounts: [dumpMount, ...extraMounts],
       timeoutMs: deps.timeoutMs,
       correlationId: deps.correlationId,
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     if (restoreResult.exitCode !== 0) {
       throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
