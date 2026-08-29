@@ -4,6 +4,9 @@ services:
   schrodump:
     image: schrodump/schrodump:latest
     restart: unless-stopped
+    # A margin over SCHRODUMP_SHUTDOWN_GRACE_MS (8s default). The abort itself is sub-second; this
+    # only guarantees docker does not SIGKILL while the cleanup is still running.
+    stop_grace_period: 15s
     depends_on:
       db:
         condition: service_healthy

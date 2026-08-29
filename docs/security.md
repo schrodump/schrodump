@@ -65,11 +65,11 @@ Your responsibilities:
 
 Schrodump sweeps abandoned scratch directories at boot and periodically.
 
-> **Known limitation.** A container killed mid-job does **not** release its scratch directory:
-> neither the server nor the runner installs a `SIGTERM` handler today, so the process exits
-> immediately and the directory survives until the next sweep. The dump in it is in clear for that
-> window. Signal delivery itself works — `docker stop` reaches the process and shuts it down
-> cleanly — but the cleanup on the way out does not exist yet.
+> **Cleanup on the way out.** A `SIGTERM` (what `docker stop` sends) aborts the in-flight job: the
+> executor container is killed and its scratch directory — which holds the dump **in clear** — is
+> removed before the process exits, inside `SCHRODUMP_SHUTDOWN_GRACE_MS` (default 8s). The residual
+> window is narrower but not zero: a `SIGKILL` that beats the grace, or a Docker daemon that hangs
+> during teardown, still leaves the directory for the `ScratchManager` sweep on the next boot.
 
 ## The KEK belongs somewhere else
 

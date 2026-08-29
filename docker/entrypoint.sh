@@ -29,9 +29,10 @@ log "starting web on port ${WEB_PORT}"
 PORT="$WEB_PORT" node "$WEB_ENTRY" &
 web_pid=$!
 
-# NOTE: the signal is delivered correctly, but neither the API nor the runner installs a SIGTERM
-# handler today, so Node exits immediately and scratch directories from an in-flight job are left
-# behind. They are reclaimed by the ScratchManager sweep on the next boot, not at shutdown.
+# NOTE: the API installs a SIGTERM/SIGINT handler. It aborts the in-flight job — the executor
+# container is killed and its scratch directory (holding the dump in clear) is removed — within
+# SCHRODUMP_SHUTDOWN_GRACE_MS, then exits. A SIGKILL that beats that window still leaves scratch
+# for the ScratchManager sweep on the next boot.
 stop() {
   log "signal received, stopping children"
   kill -TERM "$api_pid" "$web_pid" 2>/dev/null || true
