@@ -58,9 +58,10 @@ export interface EphemeralServiceHandle {
 export interface Runner {
   run(descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult>;
   // Provisions an ephemeral service, waits for readiness, hands the caller a connectable
-  // address, then always tears the container down — even if `use` throws.
+  // address, then always tears the container down — even if `use` throws or the run is cancelled.
   withEphemeralService<T>(
     spec: EphemeralServiceSpec,
     use: (handle: EphemeralServiceHandle) => Promise<T>,
+    opts?: { readonly signal?: AbortSignal },
   ): Promise<T>;
 }

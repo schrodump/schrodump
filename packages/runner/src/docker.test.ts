@@ -278,6 +278,44 @@ describe("DockerRunner.withEphemeralService", () => {
     // real-Docker-only; not unit-tested here.)
     expect(engine.startServiceCalled).toBe(false);
   });
+
+  it("rejects RUNNER_ABORTED and removes the service when the signal aborts during use", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    const controller = new AbortController();
+    const promise = new DockerRunner(engine).withEphemeralService(
+      SERVICE_SPEC,
+      () => new Promise<string>(() => undefined), // a restore that never finishes on its own
+      { signal: controller.signal },
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("never creates a service when the signal is already aborted", async () => {
+    const engine = new FakeEngine({ readyAfter: 1 });
+    await expect(
+      new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "x", {
+        signal: AbortSignal.abort(),
+      }),
+    ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.startServiceCalled).toBe(false);
+  });
+
+  it("aborts while readiness is still being polled, without waiting out readinessTimeoutMs", async () => {
+    const engine = new FakeEngine({ readyAfter: Infinity }); // never becomes ready
+    const controller = new AbortController();
+    const promise = new DockerRunner(engine).withEphemeralService(
+      { ...SERVICE_SPEC, readinessTimeoutMs: 60_000 },
+      async () => "x",
+      { signal: controller.signal },
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.serviceRemoved).toBe(true);
+  });
 });
 
 describe("sanitizeStderr", () => {

@@ -182,7 +182,12 @@ export class DockerRunner implements Runner {
   async withEphemeralService<T>(
     spec: EphemeralServiceSpec,
     use: (handle: EphemeralServiceHandle) => Promise<T>,
+    opts?: { readonly signal?: AbortSignal },
   ): Promise<T> {
+    // Already shutting down: refuse before createContainer, so no sandbox is ever born into a
+    // process that is leaving.
+    if (opts?.signal?.aborted === true) throw abortedError(spec.correlationId);
+
     // Pre-flight the network exactly as run() does, and BEFORE startService — a missing network makes
     // container.start() throw AFTER createContainer already succeeded, orphaning the container we'd
     // never get a handle to remove. Failing here means no container is created in that case.
@@ -195,13 +200,31 @@ export class DockerRunner implements Runner {
     }
 
     const svc = await this.#engine.startService(spec);
+    let onAbort: (() => void) | undefined;
 
     try {
-      await this.#waitUntilReady(svc, spec);
-      return await use({ host: svc.host, port: spec.port });
+      // Readiness polling AND `use` are both raced against the signal: readiness can wait up to
+      // readinessTimeoutMs (60s in production) and `use` runs a whole restore — neither may outlive
+      // the docker-stop budget. The service's own containers inside `use` carry the same signal and
+      // tear themselves down; this race is what stops the SANDBOX from surviving the shutdown.
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const signal = opts?.signal;
+        if (signal === undefined) return; // never settles — inert in the race
+        onAbort = () => reject(abortedError(spec.correlationId));
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
+      const guarded = (async () => {
+        await this.#waitUntilReady(svc, spec);
+        return await use({ host: svc.host, port: spec.port });
+      })();
+      guarded.catch(() => undefined); // swallow a late rejection if the abort wins the race
+
+      return await Promise.race([guarded, aborted]);
     } finally {
-      // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw
-      // or readiness never arrived.
+      if (onAbort !== undefined) opts?.signal?.removeEventListener("abort", onAbort);
+      // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw,
+      // readiness never arrived, or the shutdown cancelled it.
       await svc.remove().catch(() => undefined);
     }
   }
