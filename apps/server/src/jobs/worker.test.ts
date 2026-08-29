@@ -24,6 +24,7 @@ function makeDeps(over: {
   verify?: JobExecutor["runVerify"];
   restore?: JobExecutor["runRestore"];
   enqueueVerify?: WorkerStore["enqueueVerify"];
+  signal?: AbortSignal;
 }): {
   deps: WorkerDeps;
   store: { enqueueVerify: ReturnType<typeof vi.fn>; failJob: ReturnType<typeof vi.fn> };
@@ -44,7 +45,13 @@ function makeDeps(over: {
   };
   const log = { info: vi.fn(), error: vi.fn() };
   return {
-    deps: { store, executor, log, sanitizeReason: () => "sanitized" },
+    deps: {
+      store,
+      executor,
+      log,
+      sanitizeReason: () => "sanitized",
+      ...(over.signal !== undefined ? { signal: over.signal } : {}),
+    },
     store: { enqueueVerify, failJob },
     log,
   };
@@ -147,11 +154,44 @@ describe("runWorkerOnce", () => {
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(store.failJob).toHaveBeenCalledWith("j1", "sanitized");
   });
+
+  it("claims nothing and reports idle once the shutdown signal is aborted", async () => {
+    const { deps, store } = makeDeps({ jobs: [backupJob], signal: AbortSignal.abort() });
+    expect(await runWorkerOnce(deps)).toBe("idle");
+    expect(store.failJob).not.toHaveBeenCalled();
+  });
+
+  it("hands the shutdown signal to the executor", async () => {
+    const controller = new AbortController();
+    const backup = vi.fn(() =>
+      Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "NONE" as const }),
+    );
+    const { deps } = makeDeps({ jobs: [backupJob], backup, signal: controller.signal });
+    await runWorkerOnce(deps);
+    expect(backup).toHaveBeenCalledWith(backupJob, controller.signal);
+  });
 });
 
 describe("drainQueue", () => {
   it("drains every ready job then stops, returning the count", async () => {
     const { deps } = makeDeps({ jobs: [backupJob, verifyJob, backupJob] });
     expect(await drainQueue(deps)).toBe(3);
+  });
+});
+
+describe("drainQueue under shutdown", () => {
+  it("stops claiming the moment the signal aborts, instead of starting another dump", async () => {
+    const controller = new AbortController();
+    const backup = vi.fn(() => {
+      controller.abort(); // the shutdown lands while this job is running
+      return Promise.resolve({ ok: true, artifactId: null, verifyLevel: "NONE" as const });
+    });
+    const { deps } = makeDeps({
+      jobs: [backupJob, backupJob, backupJob],
+      backup,
+      signal: controller.signal,
+    });
+    expect(await drainQueue(deps)).toBe(1);
+    expect(backup).toHaveBeenCalledTimes(1);
   });
 });

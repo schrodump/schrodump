@@ -27,13 +27,16 @@ export interface BackupResult {
 }
 
 export interface JobExecutor {
+  // Each method takes the process-wide shutdown signal so it can cancel the containers it starts.
+  // Optional: a caller with no shutdown story (tests, integration harnesses) omits it.
+  //
   // Runs the backup pipeline (which sets the job's terminal state via its own ports) and reports
   // the outcome the worker needs to decide chaining.
-  runBackup(job: ClaimedJob): Promise<BackupResult>;
+  runBackup(job: ClaimedJob, signal?: AbortSignal): Promise<BackupResult>;
   // Runs verify (which sets the job AND artifact terminal state via its own ports).
-  runVerify(job: ClaimedJob): Promise<void>;
+  runVerify(job: ClaimedJob, signal?: AbortSignal): Promise<void>;
   // Runs restore (which sets the RESTORE job's terminal state via its own ports).
-  runRestore(job: ClaimedJob): Promise<void>;
+  runRestore(job: ClaimedJob, signal?: AbortSignal): Promise<void>;
 }
 
 export interface WorkerStore {
@@ -53,9 +56,17 @@ export interface WorkerDeps {
   log: WorkerLogger;
   // Turns an arbitrary thrown value into a log/DB-safe reason (never a raw driver message).
   sanitizeReason(err: unknown): string;
+  // Tripped by the SIGTERM handler. It both cancels the in-flight job's containers and stops this
+  // worker from claiming another one — see the guard at the top of runWorkerOnce.
+  signal?: AbortSignal;
 }
 
 export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
+  // Shutting down: do not claim work this process cannot finish. Claiming here would start a fresh
+  // dump inside the docker-stop budget and leak exactly the cleartext scratch the shutdown exists
+  // to remove. Reporting "idle" is also what ends drainQueue's loop.
+  if (deps.signal?.aborted === true) return "idle";
+
   const job = await deps.store.claimNextJob();
   if (job === null) return "idle";
 
@@ -64,11 +75,11 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
   let backup: BackupResult | null = null;
   try {
     if (job.kind === "BACKUP") {
-      backup = await deps.executor.runBackup(job);
+      backup = await deps.executor.runBackup(job, deps.signal);
     } else if (job.kind === "VERIFY") {
-      await deps.executor.runVerify(job);
+      await deps.executor.runVerify(job, deps.signal);
     } else if (job.kind === "RESTORE") {
-      await deps.executor.runRestore(job);
+      await deps.executor.runRestore(job, deps.signal);
     } else {
       await deps.store.failJob(job.id, `unsupported job kind: ${job.kind}`);
     }
