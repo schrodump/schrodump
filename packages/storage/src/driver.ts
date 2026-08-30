@@ -9,6 +9,10 @@ export interface PutOptions {
   // memory trade-off.
   readonly partSize: number;
   readonly metadata: Record<string, string>;
+  // Cancellation. A multipart upload is not interruptible on its own, so without this a caller
+  // waiting on put() — the backup pipeline waits on it before releasing the scratch directory that
+  // holds the cleartext dump — has no way to stop it inside a shutdown grace.
+  readonly signal?: AbortSignal;
 }
 
 export interface PutResult {

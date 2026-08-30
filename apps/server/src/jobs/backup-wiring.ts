@@ -45,10 +45,24 @@ export interface BackupWiringDeps {
   reserveScratch(estimatedBytes: number): Promise<Reservation>;
   resolveRecipients(): Promise<Recipients>;
   // Descriptors are built by the caller (which holds the decrypted target connection + scope).
-  buildDumpDescriptor(mode: ExecutionMode, parallelism: number, probe: ProbeResult): ExecutionDescriptor;
+  buildDumpDescriptor(
+    mode: ExecutionMode,
+    parallelism: number,
+    probe: ProbeResult,
+  ): ExecutionDescriptor;
   buildGlobalsDescriptor(probe: ProbeResult): ExecutionDescriptor | null;
-  buildManifest(input: { probe: ProbeResult; mode: ExecutionMode; recipients: Recipients; upload: UploadResult }): Manifest;
-  persistArtifact(input: { probe: ProbeResult; mode: ExecutionMode; recipients: Recipients; upload: UploadResult }): Promise<string>;
+  buildManifest(input: {
+    probe: ProbeResult;
+    mode: ExecutionMode;
+    recipients: Recipients;
+    upload: UploadResult;
+  }): Manifest;
+  persistArtifact(input: {
+    probe: ProbeResult;
+    mode: ExecutionMode;
+    recipients: Recipients;
+    upload: UploadResult;
+  }): Promise<string>;
 }
 
 // Encrypts a compressed Node stream for the recipients using age's STREAM construction (chunked,
@@ -104,6 +118,9 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
         contentType: "application/octet-stream",
         partSize: PART_SIZE,
         metadata: {},
+        // Without this the allSettled below waits for the multipart upload to finish on its own,
+        // and the scratch release behind it misses the shutdown grace on a slow link.
+        ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
       }),
       runPromise,
     ]);
@@ -162,7 +179,11 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     },
 
     writeManifest: ({ probe, mode, recipients, upload }) =>
-      writeManifest(deps.driver, deps.prefix, deps.buildManifest({ probe, mode, recipients, upload })),
+      writeManifest(
+        deps.driver,
+        deps.prefix,
+        deps.buildManifest({ probe, mode, recipients, upload }),
+      ),
 
     persistArtifact: deps.persistArtifact,
   };

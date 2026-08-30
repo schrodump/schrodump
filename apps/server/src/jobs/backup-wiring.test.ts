@@ -9,7 +9,7 @@ import type { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
-import type { PutResult, StorageDriver } from "@schrodump/storage/driver";
+import type { PutOptions, PutResult, StorageDriver } from "@schrodump/storage/driver";
 import type { RunOptions, RunResult, Runner } from "@schrodump/runner/runner";
 import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
 import type { ProbeResult } from "./backup.js";
@@ -255,13 +255,48 @@ describe("createBackupPorts.executeAndUpload", () => {
       });
     };
 
-    const mount = { source: "/scratch/job-1/mongo-config.yaml", target: "/etc/schrodump/mongodb.yaml", readOnly: true };
+    const mount = {
+      source: "/scratch/job-1/mongo-config.yaml",
+      target: "/etc/schrodump/mongodb.yaml",
+      readOnly: true,
+    };
     await run(mount);
     expect(capture[0]?.mounts).toEqual([mount]);
 
     capture.length = 0;
     await run(undefined);
     expect(capture[0]?.mounts).toEqual([]);
+  });
+
+  // The scratch release waits on put() settling (Promise.allSettled below the upload), and
+  // lib-storage's Upload is not signal-aware on its own — so without the signal reaching the driver
+  // an aborted STAGED backup holds its cleartext scratch directory until the multipart upload
+  // finishes on its own, which on a slow link outlasts the shutdown grace.
+  it("forwards the shutdown signal into the upload options", async () => {
+    const capture: PutOptions[] = [];
+    const signal = new AbortController().signal;
+    const capturingDriver: StorageDriver = {
+      ...fakeDriver(),
+      put: (_key: string, body: Readable, opts: PutOptions): Promise<PutResult> => {
+        capture.push(opts);
+        body.resume();
+        return new Promise((resolve) =>
+          body.on("end", () => resolve({ etag: "e", sizeBytes: 1, checksum: null })),
+        );
+      },
+    };
+
+    const { deps, recipient } = await makeDeps(0, { driver: capturingDriver });
+    const ports = createBackupPorts({ ...deps, signal });
+    await ports.executeAndUpload({
+      mode: "STREAM",
+      parallelism: 1,
+      probe: PROBE,
+      recipients: { recipients: [recipient], keyIds: ["k"] },
+    });
+
+    expect(capture.length).toBeGreaterThan(0);
+    expect(capture[0]?.signal).toBe(signal);
   });
 
   // Task 3: the shutdown AbortSignal is a construction-time dependency (bound once at
@@ -279,7 +314,11 @@ describe("createBackupPorts.executeAndUpload", () => {
     };
     const controller = new AbortController();
     const { deps, recipient } = await makeDeps(0);
-    const ports = createBackupPorts({ ...deps, runner: capturingRunner, signal: controller.signal });
+    const ports = createBackupPorts({
+      ...deps,
+      runner: capturingRunner,
+      signal: controller.signal,
+    });
 
     await ports.executeAndUpload({
       mode: "STREAM",
