@@ -99,6 +99,8 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
         : {}),
       stagedCapable: caps.stagedCapable,
     });
+    // Unreachable while STAGED is disabled (resolveExecutionMode explains why). Kept, not deleted:
+    // the directory pipeline that re-enables STAGED needs exactly this reserve/release lifecycle.
     if (mode.mode === "STAGED") {
       reservation = await ports.reserveScratch(probe.estimatedBytes); // 4 (pre-check before dump)
     }
