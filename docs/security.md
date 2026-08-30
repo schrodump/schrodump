@@ -66,10 +66,27 @@ Your responsibilities:
 Schrodump sweeps abandoned scratch directories at boot and periodically.
 
 > **Cleanup on the way out.** A `SIGTERM` (what `docker stop` sends) aborts the in-flight job: the
-> executor container is killed and its scratch directory — which holds the dump **in clear** — is
-> removed before the process exits, inside `SCHRODUMP_SHUTDOWN_GRACE_MS` (default 8s). The residual
-> window is narrower but not zero: a `SIGKILL` that beats the grace, or a Docker daemon that hangs
-> during teardown, still leaves the directory for the `ScratchManager` sweep on the next boot.
+> executor container is killed, the scratch directory — which holds the dump **in clear** — is
+> released, and the job row is marked `FAILED`, all inside `SCHRODUMP_SHUTDOWN_GRACE_MS`
+> (default 8s).
+>
+> **Your orchestrator's stop grace must be longer than that**, by a few seconds. The shipped
+> `compose.yaml` sets `stop_grace_period: 15s` against the 8000 ms default; a bare `docker stop`
+> gives 10s, and a hand-written systemd unit gives whatever its `TimeoutStopSec` says. Set it below
+> the Schrodump grace and the `SIGKILL` lands in the middle of the cleanup — which is the first
+> case below.
+>
+> The window is narrower than it was, not closed. Cases that still leave the directory behind —
+> and this list is what we know of, not a proof that nothing else can:
+>
+> - a `SIGKILL` that arrives before the grace expires;
+> - a Docker daemon that hangs during the teardown;
+> - a **STAGED** backup whose scratch release is waiting on an in-flight S3 multipart upload to
+>   finalize. That upload is not cancellable today, so on a slow link the release can outlast the
+>   grace even though nothing is wedged.
+>
+> In each of those the directory waits for the `ScratchManager` sweep on the next boot, exactly as
+> it did before.
 
 ## The KEK belongs somewhere else
 

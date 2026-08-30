@@ -34,10 +34,16 @@ Execução via Docker e gestão de scratch. Prevalece sobre o `CLAUDE.md` da rai
 > **Shutdown cancellation:** `RunOptions.signal` and the third parameter of `withEphemeralService`
 > accept an `AbortSignal`. On abort the runner kills the container through **the same path the
 > timeout already uses**, `run()` rejects with `RUNNER_ABORTED`, and the executor's `finally`
-> releases the scratch reservation — so the cleartext dump does not survive a `docker stop`. The
-> handler that trips the abort lives in the server (`server.ts`), bounded by
-> `SCHRODUMP_SHUTDOWN_GRACE_MS`. Residual: a `SIGKILL` that beats the grace still relies on the
-> sweep at the next boot.
+> releases the scratch reservation — so the cleartext dump does not survive a `docker stop`. An
+> aborted `withEphemeralService` waits for its `use` callback to unwind before removing the sandbox
+> (bounded by `SERVICE_ABORT_UNWIND_MS`), so that inner cleanup is never left running detached
+> behind a caller that already believes it is done. The handler that trips the abort lives in the
+> server (`server.ts`), bounded by `SCHRODUMP_SHUTDOWN_GRACE_MS` — and the orchestrator's own stop
+> grace has to exceed that by a few seconds, or the `SIGKILL` lands mid-cleanup. Residual, known
+> cases rather than a complete list: a `SIGKILL` that beats the grace, a Docker daemon that hangs
+> during teardown, and a STAGED backup whose scratch release is waiting on an in-flight S3
+> multipart upload (not cancellable today) to finalize. Those still rely on the sweep at the next
+> boot.
 
 ## SPDX
 

@@ -30,9 +30,13 @@ PORT="$WEB_PORT" node "$WEB_ENTRY" &
 web_pid=$!
 
 # NOTE: the API installs a SIGTERM/SIGINT handler. It aborts the in-flight job — the executor
-# container is killed and its scratch directory (holding the dump in clear) is removed — within
-# SCHRODUMP_SHUTDOWN_GRACE_MS, then exits. A SIGKILL that beats that window still leaves scratch
-# for the ScratchManager sweep on the next boot.
+# container is killed, its scratch directory (holding the dump in clear) is released and the job
+# row is marked FAILED — within SCHRODUMP_SHUTDOWN_GRACE_MS, then exits. The orchestrator's stop
+# grace must exceed that by a few seconds (compose.yaml ships stop_grace_period: 15s; a bare
+# `docker stop` gives 10s). Known cases that still outlast the grace and leave scratch for the
+# ScratchManager sweep on the next boot: a SIGKILL that beats it, a Docker daemon that hangs during
+# teardown, and a STAGED backup whose scratch release is waiting on an in-flight S3 multipart
+# upload to finalize.
 stop() {
   log "signal received, stopping children"
   kill -TERM "$api_pid" "$web_pid" 2>/dev/null || true
