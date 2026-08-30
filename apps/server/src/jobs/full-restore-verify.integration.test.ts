@@ -31,7 +31,9 @@ import type { ClaimedJob } from "./worker.js";
 
 const s3Endpoint = process.env.SCHRODUMP_TEST_S3_ENDPOINT;
 const enabled =
-  process.env.SCHRODUMP_TEST_INTEGRATION === "1" && s3Endpoint !== undefined && s3Endpoint.length > 0;
+  process.env.SCHRODUMP_TEST_INTEGRATION === "1" &&
+  s3Endpoint !== undefined &&
+  s3Endpoint.length > 0;
 
 const ORIGIN_PASSWORD = "schrodump-it-origin-pw";
 // docker.ts's executor network must already exist (RUNNER_NETWORK_MISSING otherwise) — "bridge" is
@@ -90,7 +92,19 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
       })
       .withNetworkMode(EXECUTOR_NETWORK)
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // Wait.forListeningPorts() is satisfied by the postgres image's TEMPORARY socket-only server,
+      // which the entrypoint runs during initialisation before stopping it and starting the real one.
+      // Connecting against that window fails with "the database system is starting up" — a flake that
+      // reads as a code failure and trains everyone to re-run a red CI. `-h` forces pg_isready onto
+      // TCP, which only the real server listens on: the same lesson already documented for the verify
+      // sandbox in packages/engines/src/adapters/postgres.ts.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d postgres"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
 
     // A real user table so the FULL_RESTORE assertion (count of restored user tables) has
@@ -113,9 +127,25 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
     // committed schema, exactly like claim.test.ts — the integration job gives Docker but no
     // ambient DATABASE_URL.
     metadata = await new GenericContainer("postgres:16-alpine")
-      .withEnvironment({ POSTGRES_USER: "schrodump", POSTGRES_PASSWORD: "schrodump", POSTGRES_DB: "app" })
+      .withEnvironment({
+        POSTGRES_USER: "schrodump",
+        POSTGRES_PASSWORD: "schrodump",
+        POSTGRES_DB: "app",
+      })
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // Wait.forListeningPorts() is satisfied by the postgres image's TEMPORARY socket-only server,
+      // which the entrypoint runs during initialisation before stopping it and starting the real one.
+      // Connecting against that window fails with "the database system is starting up" — a flake that
+      // reads as a code failure and trains everyone to re-run a red CI. `-h` forces pg_isready onto
+      // TCP, which only the real server listens on: the same lesson already documented for the verify
+      // sandbox in packages/engines/src/adapters/postgres.ts.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d app"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
     const metadataUrl = `postgresql://schrodump:schrodump@${metadata.getHost()}:${metadata.getMappedPort(5432)}/app?schema=public`;
     const schemaPath = fileURLToPath(new URL("../../prisma/schema.prisma", import.meta.url));
@@ -155,7 +185,10 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
         bucket: process.env.SCHRODUMP_TEST_S3_BUCKET ?? "schrodump-test",
         prefix: `it/full-restore-verify/${randomUUID()}`,
         accessKeyId: process.env.SCHRODUMP_TEST_S3_ACCESS_KEY ?? "",
-        encryptedSecretAccessKey: encryptCredential(kek, process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? ""),
+        encryptedSecretAccessKey: encryptCredential(
+          kek,
+          process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? "",
+        ),
         forcePathStyle: true,
         sealMode: "operational",
       },
@@ -247,7 +280,9 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
     const result = await executor.runBackup(claimed);
     if (!result.ok || result.artifactId === null) {
       const row = await prisma.backupJob.findUniqueOrThrow({ where: { id: job.id } });
-      throw new Error(`backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`);
+      throw new Error(
+        `backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`,
+      );
     }
     return result.artifactId;
   }
@@ -278,48 +313,40 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
     return job.id;
   }
 
-  it(
-    "restores a real postgres artifact into an ephemeral sandbox, verifies it, and leaves no container behind",
-    async () => {
-      const artifactId = await seedArtifact();
+  it("restores a real postgres artifact into an ephemeral sandbox, verifies it, and leaves no container behind", async () => {
+    const artifactId = await seedArtifact();
 
-      const before = new Set(listContainerIds());
-      const verifyJobId = await verifyArtifact(artifactId);
-      const leaked = listContainerIds().filter((id) => !before.has(id));
-      expect(leaked).toEqual([]);
+    const before = new Set(listContainerIds());
+    const verifyJobId = await verifyArtifact(artifactId);
+    const leaked = listContainerIds().filter((id) => !before.has(id));
+    expect(leaked).toEqual([]);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("VERIFIED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("VERIFIED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("SUCCEEDED");
-    },
-    300_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("SUCCEEDED");
+  }, 300_000);
 
-  it(
-    "an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED",
-    async () => {
-      const artifactId = await seedArtifact();
-      // postgresAdapter.imageFor (packages/engines/src/adapters/postgres.ts) is the ONLY place a
-      // postgres sandbox image tag comes from, and it is deterministic over the supported major
-      // range (13-18) — there is no way through the public adapter contract to hand it a bogus
-      // *existing* tag. An out-of-range major is the one way to reach the SAME failure this guards
-      // against (no valid image can be resolved) without a network-dependent, flaky "pull a made-up
-      // tag" step: imageFor throws EngineDescriptorError before any container starts, worker-wiring's
-      // total catch (runFullRestore) catches it, and classifyVerifyError maps it to INCONCLUSIVE —
-      // identically to how a real bad-tag docker pull failure (RUNNER_FAILED) would classify.
-      await prisma.artifact.update({ where: { id: artifactId }, data: { serverVersionNum: 190000 } });
+  it("an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED", async () => {
+    const artifactId = await seedArtifact();
+    // postgresAdapter.imageFor (packages/engines/src/adapters/postgres.ts) is the ONLY place a
+    // postgres sandbox image tag comes from, and it is deterministic over the supported major
+    // range (13-18) — there is no way through the public adapter contract to hand it a bogus
+    // *existing* tag. An out-of-range major is the one way to reach the SAME failure this guards
+    // against (no valid image can be resolved) without a network-dependent, flaky "pull a made-up
+    // tag" step: imageFor throws EngineDescriptorError before any container starts, worker-wiring's
+    // total catch (runFullRestore) catches it, and classifyVerifyError maps it to INCONCLUSIVE —
+    // identically to how a real bad-tag docker pull failure (RUNNER_FAILED) would classify.
+    await prisma.artifact.update({ where: { id: artifactId }, data: { serverVersionNum: 190000 } });
 
-      const verifyJobId = await verifyArtifact(artifactId);
+    const verifyJobId = await verifyArtifact(artifactId);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("UNOBSERVED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("UNOBSERVED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("FAILED");
-      expect(job.reason).toMatch(/inconclusive/i);
-    },
-    180_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("FAILED");
+    expect(job.reason).toMatch(/inconclusive/i);
+  }, 180_000);
 });

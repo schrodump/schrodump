@@ -42,7 +42,9 @@ import type { ClaimedJob } from "./worker.js";
 
 const s3Endpoint = process.env.SCHRODUMP_TEST_S3_ENDPOINT;
 const enabled =
-  process.env.SCHRODUMP_TEST_INTEGRATION === "1" && s3Endpoint !== undefined && s3Endpoint.length > 0;
+  process.env.SCHRODUMP_TEST_INTEGRATION === "1" &&
+  s3Endpoint !== undefined &&
+  s3Endpoint.length > 0;
 
 // docker.ts's executor network must already exist (RUNNER_NETWORK_MISSING otherwise) — "bridge" is
 // Docker's own default network, always present. Mirrors full-restore-verify.integration.test.ts.
@@ -136,7 +138,10 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
       // init phase logs "ready for connections" twice); forcing TCP against 127.0.0.1 only the
       // FINAL server binds — same fix probe.integration.test.ts already uses for the same race.
       .withHealthCheck({
-        test: ["CMD-SHELL", `mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} --silent`],
+        test: [
+          "CMD-SHELL",
+          `mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} --silent`,
+        ],
         interval: 2000,
         timeout: 5000,
         retries: 30,
@@ -157,9 +162,25 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
     }
 
     metadata = await new GenericContainer("postgres:16-alpine")
-      .withEnvironment({ POSTGRES_USER: "schrodump", POSTGRES_PASSWORD: "schrodump", POSTGRES_DB: "app" })
+      .withEnvironment({
+        POSTGRES_USER: "schrodump",
+        POSTGRES_PASSWORD: "schrodump",
+        POSTGRES_DB: "app",
+      })
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // Wait.forListeningPorts() is satisfied by the postgres image's TEMPORARY socket-only server,
+      // which the entrypoint runs during initialisation before stopping it and starting the real one.
+      // Connecting against that window fails with "the database system is starting up" — a flake that
+      // reads as a code failure and trains everyone to re-run a red CI. `-h` forces pg_isready onto
+      // TCP, which only the real server listens on: the same lesson already documented for the verify
+      // sandbox in packages/engines/src/adapters/postgres.ts.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d app"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
     const metadataUrl = `postgresql://schrodump:schrodump@${metadata.getHost()}:${metadata.getMappedPort(5432)}/app?schema=public`;
     const schemaPath = fileURLToPath(new URL("../../prisma/schema.prisma", import.meta.url));
@@ -199,7 +220,10 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
         bucket: process.env.SCHRODUMP_TEST_S3_BUCKET ?? "schrodump-test",
         prefix: `it/mysql-full-restore-verify/${randomUUID()}`,
         accessKeyId: process.env.SCHRODUMP_TEST_S3_ACCESS_KEY ?? "",
-        encryptedSecretAccessKey: encryptCredential(kek, process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? ""),
+        encryptedSecretAccessKey: encryptCredential(
+          kek,
+          process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? "",
+        ),
         forcePathStyle: true,
         sealMode: "operational",
       },
@@ -288,7 +312,9 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
     const result = await executor.runBackup(claimed);
     if (!result.ok || result.artifactId === null) {
       const row = await prisma.backupJob.findUniqueOrThrow({ where: { id: job.id } });
-      throw new Error(`mysql backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`);
+      throw new Error(
+        `mysql backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`,
+      );
     }
     return result.artifactId;
   }
@@ -317,66 +343,57 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
     return job.id;
   }
 
-  it(
-    "restores a real mysql artifact into an ephemeral sandbox, verifies it, and leaves no container behind",
-    async () => {
-      const artifactId = await seedArtifact();
+  it("restores a real mysql artifact into an ephemeral sandbox, verifies it, and leaves no container behind", async () => {
+    const artifactId = await seedArtifact();
 
-      const before = new Set(listContainerIds());
-      const verifyJobId = await verifyArtifact(artifactId);
-      const leaked = listContainerIds().filter((id) => !before.has(id));
-      expect(leaked).toEqual([]);
+    const before = new Set(listContainerIds());
+    const verifyJobId = await verifyArtifact(artifactId);
+    const leaked = listContainerIds().filter((id) => !before.has(id));
+    expect(leaked).toEqual([]);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("VERIFIED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("VERIFIED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("SUCCEEDED");
-    },
-    300_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("SUCCEEDED");
+  }, 300_000);
 
-  it(
-    "a corrupted artifact leaves verify FAILED",
-    async () => {
-      const artifactId = await seedArtifact();
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      await corruptArtifact(prisma, kek, orgId, destinationId, artifact.bucketKey);
+  it("a corrupted artifact leaves verify FAILED", async () => {
+    const artifactId = await seedArtifact();
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    await corruptArtifact(prisma, kek, orgId, destinationId, artifact.bucketKey);
 
-      const verifyJobId = await verifyArtifact(artifactId);
+    const verifyJobId = await verifyArtifact(artifactId);
 
-      const updated = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(updated.state).toBe("FAILED");
+    const updated = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(updated.state).toBe("FAILED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("FAILED");
-    },
-    300_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("FAILED");
+  }, 300_000);
 
-  it(
-    "an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED",
-    async () => {
-      const artifactId = await seedArtifact();
-      // Unlike postgres, mysqlAdapter.imageFor (packages/engines/src/adapters/mysql.ts) never
-      // validates a supported range — it always computes `mysql:<major>.<minor>` from
-      // serverVersionNum. A large-enough version therefore resolves to a tag that does not exist
-      // on the registry (mysql:99.99); the pull fails inside withEphemeralService, which the outer
-      // catch in worker-wiring.ts's runFullRestore funnels through classifyVerifyError exactly
-      // like any other our-infra failure — INCONCLUSIVE, never FAILED.
-      await prisma.artifact.update({ where: { id: artifactId }, data: { serverVersionNum: 999_999 } });
+  it("an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED", async () => {
+    const artifactId = await seedArtifact();
+    // Unlike postgres, mysqlAdapter.imageFor (packages/engines/src/adapters/mysql.ts) never
+    // validates a supported range — it always computes `mysql:<major>.<minor>` from
+    // serverVersionNum. A large-enough version therefore resolves to a tag that does not exist
+    // on the registry (mysql:99.99); the pull fails inside withEphemeralService, which the outer
+    // catch in worker-wiring.ts's runFullRestore funnels through classifyVerifyError exactly
+    // like any other our-infra failure — INCONCLUSIVE, never FAILED.
+    await prisma.artifact.update({
+      where: { id: artifactId },
+      data: { serverVersionNum: 999_999 },
+    });
 
-      const verifyJobId = await verifyArtifact(artifactId);
+    const verifyJobId = await verifyArtifact(artifactId);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("UNOBSERVED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("UNOBSERVED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("FAILED");
-      expect(job.reason).toMatch(/inconclusive/i);
-    },
-    180_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("FAILED");
+    expect(job.reason).toMatch(/inconclusive/i);
+  }, 180_000);
 });
 
 describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () => {
@@ -456,9 +473,25 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
     }
 
     metadata = await new GenericContainer("postgres:16-alpine")
-      .withEnvironment({ POSTGRES_USER: "schrodump", POSTGRES_PASSWORD: "schrodump", POSTGRES_DB: "app" })
+      .withEnvironment({
+        POSTGRES_USER: "schrodump",
+        POSTGRES_PASSWORD: "schrodump",
+        POSTGRES_DB: "app",
+      })
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // Wait.forListeningPorts() is satisfied by the postgres image's TEMPORARY socket-only server,
+      // which the entrypoint runs during initialisation before stopping it and starting the real one.
+      // Connecting against that window fails with "the database system is starting up" — a flake that
+      // reads as a code failure and trains everyone to re-run a red CI. `-h` forces pg_isready onto
+      // TCP, which only the real server listens on: the same lesson already documented for the verify
+      // sandbox in packages/engines/src/adapters/postgres.ts.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d app"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
     const metadataUrl = `postgresql://schrodump:schrodump@${metadata.getHost()}:${metadata.getMappedPort(5432)}/app?schema=public`;
     const schemaPath = fileURLToPath(new URL("../../prisma/schema.prisma", import.meta.url));
@@ -500,7 +533,10 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
         bucket: process.env.SCHRODUMP_TEST_S3_BUCKET ?? "schrodump-test",
         prefix: `it/mongo-full-restore-verify/${randomUUID()}`,
         accessKeyId: process.env.SCHRODUMP_TEST_S3_ACCESS_KEY ?? "",
-        encryptedSecretAccessKey: encryptCredential(kek, process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? ""),
+        encryptedSecretAccessKey: encryptCredential(
+          kek,
+          process.env.SCHRODUMP_TEST_S3_SECRET_KEY ?? "",
+        ),
         forcePathStyle: true,
         sealMode: "operational",
       },
@@ -591,7 +627,9 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
     const result = await executor.runBackup(claimed);
     if (!result.ok || result.artifactId === null) {
       const row = await prisma.backupJob.findUniqueOrThrow({ where: { id: job.id } });
-      throw new Error(`mongo backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`);
+      throw new Error(
+        `mongo backup fixture did not produce an artifact: ${row.reason ?? "unknown reason"}`,
+      );
     }
     return result.artifactId;
   }
@@ -620,62 +658,53 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
     return job.id;
   }
 
-  it(
-    "restores a real mongo artifact into an ephemeral sandbox, verifies it, and leaves no container behind",
-    async () => {
-      const artifactId = await seedArtifact();
+  it("restores a real mongo artifact into an ephemeral sandbox, verifies it, and leaves no container behind", async () => {
+    const artifactId = await seedArtifact();
 
-      const before = new Set(listContainerIds());
-      const verifyJobId = await verifyArtifact(artifactId);
-      const leaked = listContainerIds().filter((id) => !before.has(id));
-      expect(leaked).toEqual([]);
+    const before = new Set(listContainerIds());
+    const verifyJobId = await verifyArtifact(artifactId);
+    const leaked = listContainerIds().filter((id) => !before.has(id));
+    expect(leaked).toEqual([]);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("VERIFIED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("VERIFIED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("SUCCEEDED");
-    },
-    300_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("SUCCEEDED");
+  }, 300_000);
 
-  it(
-    "a corrupted artifact leaves verify FAILED",
-    async () => {
-      const artifactId = await seedArtifact();
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      await corruptArtifact(prisma, kek, orgId, destinationId, artifact.bucketKey);
+  it("a corrupted artifact leaves verify FAILED", async () => {
+    const artifactId = await seedArtifact();
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    await corruptArtifact(prisma, kek, orgId, destinationId, artifact.bucketKey);
 
-      const verifyJobId = await verifyArtifact(artifactId);
+    const verifyJobId = await verifyArtifact(artifactId);
 
-      const updated = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(updated.state).toBe("FAILED");
+    const updated = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(updated.state).toBe("FAILED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("FAILED");
-    },
-    300_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("FAILED");
+  }, 300_000);
 
-  it(
-    "an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED",
-    async () => {
-      const artifactId = await seedArtifact();
-      // mongodbAdapter.imageFor (packages/engines/src/adapters/mongodb.ts) always computes
-      // `mongo:<major>` with no supported-range check — a large-enough version resolves to a tag
-      // that does not exist (mongo:99), whose pull fails inside withEphemeralService exactly like
-      // the mysql case above: classifyVerifyError funnels it to INCONCLUSIVE, never FAILED.
-      await prisma.artifact.update({ where: { id: artifactId }, data: { serverVersionNum: 999_999 } });
+  it("an unresolvable sandbox image leaves verify INCONCLUSIVE and the artifact UNOBSERVED", async () => {
+    const artifactId = await seedArtifact();
+    // mongodbAdapter.imageFor (packages/engines/src/adapters/mongodb.ts) always computes
+    // `mongo:<major>` with no supported-range check — a large-enough version resolves to a tag
+    // that does not exist (mongo:99), whose pull fails inside withEphemeralService exactly like
+    // the mysql case above: classifyVerifyError funnels it to INCONCLUSIVE, never FAILED.
+    await prisma.artifact.update({
+      where: { id: artifactId },
+      data: { serverVersionNum: 999_999 },
+    });
 
-      const verifyJobId = await verifyArtifact(artifactId);
+    const verifyJobId = await verifyArtifact(artifactId);
 
-      const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
-      expect(artifact.state).toBe("UNOBSERVED");
+    const artifact = await prisma.artifact.findUniqueOrThrow({ where: { id: artifactId } });
+    expect(artifact.state).toBe("UNOBSERVED");
 
-      const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-      expect(job.state).toBe("FAILED");
-      expect(job.reason).toMatch(/inconclusive/i);
-    },
-    180_000,
-  );
+    const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
+    expect(job.state).toBe("FAILED");
+    expect(job.reason).toMatch(/inconclusive/i);
+  }, 180_000);
 });
