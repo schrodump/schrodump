@@ -19,6 +19,11 @@ export type { EphemeralServiceHandle, EphemeralServiceSpec } from "./runner.js";
 const STDERR_LIMIT_BYTES = 8 * 1024;
 // How often withEphemeralService polls readinessCommand while waiting for the service to come up.
 const SERVICE_READINESS_POLL_MS = 250;
+// How long an aborted withEphemeralService waits for its `use` callback to unwind before giving
+// up on it. The inner runs carry the same signal and reject in milliseconds, so this is a ceiling
+// for a wedged callback, not an expected cost — but it must exist: an unbounded wait would let a
+// `use` that never settles hold the whole shutdown open.
+const SERVICE_ABORT_UNWIND_MS = 2000;
 
 export interface ContainerSpec {
   readonly image: string;
@@ -181,6 +186,13 @@ export class DockerRunner implements Runner {
       if (onAbort !== undefined) opts.signal?.removeEventListener("abort", onAbort);
       // Manual removal (never AutoRemove) so exit code and stderr are read first.
       await container.remove().catch(() => undefined);
+      // Unconditional backstop for the caller's stdout sink. A no-op on the success path and on
+      // every failure path that already ended it (endStdout checks first), and it closes the one
+      // gap left: a mid-run abort assumes the daemon ends the attach stream when the killed
+      // container dies, which a failed removal over a live container does not do. Without this the
+      // sink stays open, the backup upload reading FROM it never settles, and whenIdle() never
+      // resolves — the deadlock endStdout exists to prevent, reached by the only path that lacked it.
+      endStdout(opts.stdout);
     }
   }
 
@@ -206,6 +218,11 @@ export class DockerRunner implements Runner {
 
     const svc = await this.#engine.startService(spec);
     let onAbort: (() => void) | undefined;
+    // Hoisted out of the try so the finally can wait for it to unwind on the abort path, and the
+    // flag that tells the finally it IS that path. A flag, not a re-read of signal.aborted: the
+    // entry guard above already narrowed that property to false for the rest of the function.
+    let guarded: Promise<T> | undefined;
+    let abortFired = false;
 
     try {
       // Readiness polling AND `use` are both raced against the signal: readiness can wait up to
@@ -215,14 +232,17 @@ export class DockerRunner implements Runner {
       const aborted = new Promise<never>((_resolve, reject) => {
         const signal = opts?.signal;
         if (signal === undefined) return; // never settles — inert in the race
-        onAbort = () => reject(abortedError(spec.correlationId));
+        onAbort = () => {
+          abortFired = true;
+          reject(abortedError(spec.correlationId));
+        };
         signal.addEventListener("abort", onAbort, { once: true });
         // Same race as run(): the signal can fire while networkExists()/startService() are in
         // flight. A past abort is never replayed to a new listener, so re-check it here.
         if (signal.aborted) onAbort();
       });
 
-      const guarded = (async () => {
+      guarded = (async () => {
         await this.#waitUntilReady(svc, spec);
         return await use({ host: svc.host, port: spec.port });
       })();
@@ -231,6 +251,17 @@ export class DockerRunner implements Runner {
       return await Promise.race([guarded, aborted]);
     } finally {
       if (onAbort !== undefined) opts?.signal?.removeEventListener("abort", onAbort);
+      // On the abort path the race rejects immediately while `guarded` — the readiness poll plus the
+      // ENTIRE `use` callback, which for verify is a whole restore — is still in flight. Returning
+      // here would detach that work: the caller's whenIdle() could resolve and the process exit while
+      // the restore's own finally (the rm of its cleartext dump) is still pending, so whenIdle()
+      // would be claiming "the tick settled" when what the shutdown needs is "every cleanup this job
+      // started has finished". Wait for it — bounded, because an unbounded wait would let a `use`
+      // that never settles hold the shutdown open, which is worse than the leak. The normal path
+      // never enters this branch and is unchanged: the race above already awaited `guarded`.
+      if (abortFired && guarded !== undefined) {
+        await settleWithin(guarded, SERVICE_ABORT_UNWIND_MS);
+      }
       // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw,
       // readiness never arrived, or the shutdown cancelled it.
       await svc.remove().catch(() => undefined);
@@ -261,16 +292,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// End the caller's stdout sink so a consumer piping FROM it sees EOF and unblocks. Called only on
-// the paths where run() fails BEFORE the container's stdout is wired to it (missing network, a
-// createContainer that 404s on an absent image); the success/execution paths end it through their
-// own `pipeline(container.stdout, opts.stdout)`. `.end()` (clean EOF), never `.destroy(err)`: Node's
-// `.pipe()` does not forward a source error to its destination, so destroying the sink would strand
-// the consumer's own gzip/encrypt pipeline waiting on a stream that never closes — the very deadlock
-// this prevents. A clean end lets that pipeline drain; the run() rejection is what the caller then
-// observes. Guarded because a sink already torn down would throw.
+// Resolves when `work` settles, or after `ms`, whichever comes first. Never rejects — the caller
+// only needs to know the wait is over, and `work`'s own rejection is already accounted for by its
+// owner. Its own timer is unref'd (as the server's grace timer is) so this ceiling can never be the
+// thing keeping the process alive once everything else has finished.
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref();
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    void work.then(done, done);
+  });
+}
+
+// End the caller's stdout sink so a consumer piping FROM it sees EOF and unblocks. Called on the
+// paths where run() fails BEFORE the container's stdout is wired to it (missing network, a
+// createContainer that 404s on an absent image), AND unconditionally from run()'s `finally` as the
+// backstop for every other exit — the success/execution paths have already ended it through their
+// own `pipeline(container.stdout, opts.stdout)`, so there it is a no-op, while a mid-run abort whose
+// container outlives a failed removal would otherwise leave it open forever. `.end()` (clean EOF),
+// never `.destroy(err)`: Node's `.pipe()` does not forward a source error to its destination, so
+// destroying the sink would strand the consumer's own gzip/encrypt pipeline waiting on a stream that
+// never closes — the very deadlock this prevents. A clean end lets that pipeline drain; the run()
+// rejection is what the caller then observes.
 function endStdout(stdout: Writable | undefined): void {
   if (stdout === undefined) return;
+  // `.end()` on a stream that already finished emits ERR_STREAM_ALREADY_FINISHED as an 'error'
+  // event rather than throwing, so the try/catch below would not contain it. Check first.
+  if (stdout.writableEnded || stdout.destroyed) return;
   try {
     stdout.end();
   } catch {

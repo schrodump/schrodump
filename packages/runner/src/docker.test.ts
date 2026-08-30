@@ -26,6 +26,12 @@ class FakeEngine implements DockerEngine {
   startFails = false;
   statusCode = 0;
   neverExits = false;
+  // Return an OPEN stdout that nothing ever writes to and nothing ever ends, instead of the default
+  // already-ended `Readable.from(chunks)`. That is what a real attach stream looks like while the
+  // container is still alive: the daemon is the one that ends it, when the container dies. Needed to
+  // reach the deadlock class where the daemon does NOT do that (a removal that fails fast while the
+  // container survives) — with an always-ended stdout no test can express it.
+  openStdout = false;
   stdoutChunks: Buffer[] = [];
   stderrChunks: Buffer[] = [];
   started = false;
@@ -54,7 +60,7 @@ class FakeEngine implements DockerEngine {
     if (this.startFails) throw new Error("No such image: postgres:16-alpine");
     this.started = true;
     return {
-      stdout: Readable.from(this.stdoutChunks),
+      stdout: this.openStdout ? new PassThrough() : Readable.from(this.stdoutChunks),
       stderr: Readable.from(this.stderrChunks),
       wait: () =>
         this.neverExits ? new Promise<number>(() => undefined) : Promise.resolve(this.statusCode),
@@ -223,6 +229,28 @@ describe("DockerRunner.run", () => {
     expect(sink.writableEnded).toBe(true);
   });
 
+  it("ends the stdout sink on a mid-run abort, even when the container's stdout stays open", async () => {
+    // Every other failure path in run() ends opts.stdout explicitly; the mid-run abort relied on the
+    // Docker daemon ending the attach stream when the killed container dies. If removal fails fast
+    // while the container survives (a daemon 500, a socket-proxy denial), nothing ends the sink —
+    // backup-wiring's upload pipes FROM it and never settles, so whenIdle() never resolves. That is
+    // the exact deadlock class endStdout exists to prevent, so run()'s finally must end it too.
+    const engine = new FakeEngine();
+    engine.openStdout = true; // the attach stream the daemon never ended
+    engine.neverExits = true;
+    const sink = new PassThrough();
+    const controller = new AbortController();
+    const promise = new DockerRunner(engine).run(
+      DESCRIPTOR,
+      opts({ signal: controller.signal, stdout: sink }),
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    // Ended by run() itself, not by the pipeline: nothing else ever will.
+    expect(sink.writableEnded).toBe(true);
+  });
+
   it("removes its abort listener once the run settles, so a long-lived signal never accumulates them", async () => {
     const engine = new FakeEngine();
     engine.stdoutChunks = [Buffer.from("dump")];
@@ -347,6 +375,62 @@ describe("DockerRunner.withEphemeralService", () => {
         signal: controller.signal,
       }),
     ).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(engine.serviceRemoved).toBe(true);
+  });
+
+  it("does not remove the service until the aborted use callback has unwound", async () => {
+    // Before the fix the race rejected and the finally tore the sandbox down while `guarded` — the
+    // readiness poll plus the whole `use` callback, a full restore for verify — was still running.
+    // The inner cleanup was then detached: whenIdle() could resolve, and the process exit, with a
+    // cleartext dump's rm still pending. The teardown must follow the unwind, not race it.
+    const engine = new FakeEngine({ readyAfter: 1 });
+    const controller = new AbortController();
+    const order: string[] = [];
+    let unwind: (() => void) | undefined;
+
+    const promise = new DockerRunner(engine).withEphemeralService(
+      SERVICE_SPEC,
+      () =>
+        new Promise<string>((_resolve, reject) => {
+          // Stands in for a restore that observes the same signal and then runs its own cleanup:
+          // it settles only when we say so, so the ordering below is deterministic.
+          unwind = () => {
+            order.push("use-unwound");
+            reject(new Error("restore aborted, its scratch released"));
+          };
+        }),
+      { signal: controller.signal },
+    );
+    // Let readiness pass and `use` be entered before aborting.
+    while (unwind === undefined) await new Promise((r) => setTimeout(r, 1));
+    controller.abort();
+
+    // The race has already rejected by now, but the sandbox must still be up: its inner work has
+    // not unwound yet.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.serviceRemoved).toBe(false);
+
+    unwind();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    order.push("service-removed");
+    expect(engine.serviceRemoved).toBe(true);
+    expect(order).toEqual(["use-unwound", "service-removed"]);
+  });
+
+  it("gives up on a wedged use callback after the unwind bound, rather than holding the shutdown open", async () => {
+    // The other half of the same fix: the wait must be bounded. A `use` that never settles is a
+    // worse outcome than the detached cleanup — it would hold the process past the docker-stop
+    // window and trade an abort for a SIGKILL. The service is still removed.
+    const engine = new FakeEngine({ readyAfter: 1 });
+    const controller = new AbortController();
+    const promise = new DockerRunner(engine).withEphemeralService(
+      SERVICE_SPEC,
+      () => new Promise<string>(() => undefined), // never settles, not even on abort
+      { signal: controller.signal },
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
     expect(engine.serviceRemoved).toBe(true);
   });
 
