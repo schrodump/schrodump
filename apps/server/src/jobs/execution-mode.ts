@@ -7,7 +7,11 @@ export interface ExecutionModeInput {
   requestedParallelism: number;
   scratchConfigured: boolean;
   estimatedBytes: number;
-  stagedThresholdBytes: number;
+  // Dumps above this go STAGED. OPTIONAL, and absent by default: STAGED artifacts cannot be
+  // restored or FULL_RESTORE-verified in v1, so routing there without being asked hands the
+  // operator an artifact they cannot restore — and it would do so on their LARGEST databases
+  // first. Absent means size never selects the mode; only an explicit parallelism > 1 does.
+  stagedThresholdBytes?: number;
   // From the capability matrix: mongodb, for example, is not staged-capable.
   stagedCapable: boolean;
 }
@@ -47,6 +51,10 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
     return { mode: "STREAM", parallelism: 1, warnings: [] };
   }
 
-  const mode: ExecutionMode = input.estimatedBytes > input.stagedThresholdBytes ? "STAGED" : "STREAM";
+  // Explicit, rather than leaning on `n > undefined` evaluating false: that reads as a bug to the
+  // next person, and it is one comparison away from silently becoming one.
+  const threshold = input.stagedThresholdBytes;
+  const mode: ExecutionMode =
+    threshold !== undefined && input.estimatedBytes > threshold ? "STAGED" : "STREAM";
   return { mode, parallelism: 1, warnings: [] };
 }

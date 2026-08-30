@@ -55,11 +55,11 @@ docker compose up -d
 
 Three containers come up:
 
-| Service        | What it is                                                              |
-| -------------- | ----------------------------------------------------------------------- |
-| `schrodump`    | The API and the web UI                                                   |
-| `db`           | PostgreSQL holding Schrodump's own metadata — not your backups           |
-| `docker-proxy` | A filtered view of the Docker socket, so Schrodump can start executors   |
+| Service        | What it is                                                             |
+| -------------- | ---------------------------------------------------------------------- |
+| `schrodump`    | The API and the web UI                                                 |
+| `db`           | PostgreSQL holding Schrodump's own metadata — not your backups         |
+| `docker-proxy` | A filtered view of the Docker socket, so Schrodump can start executors |
 
 Migrations are applied by the container's entrypoint before the server accepts a request, so
 there is no separate migration step.
@@ -108,17 +108,24 @@ Then trigger a backup and wait for the verify job. A backup that has been verifi
 
 Everything lives in `.env`. The defaults are in `.env.example`.
 
-| Variable                   | Required | What it does                                              |
-| -------------------------- | -------- | --------------------------------------------------------- |
-| `DB_PASSWORD`              | yes      | Password for Schrodump's own metadata database             |
-| `SCHRODUMP_KEK`            | yes      | Key-encryption key. See step 2                             |
-| `SCHRODUMP_URL`            | no       | Public URL, used to build the setup link                   |
-| `PORT`                     | no       | Host port for the web UI (default 8080)                    |
-| `SCRATCH_MAX_BYTES`        | no       | Ceiling for the scratch volume (default 100 GiB)           |
-| `MAX_STAGED`               | no       | How many staged backups may run at once                    |
-| `EXECUTOR_NETWORK`         | no       | Docker network the executors join to reach your databases  |
-| `SCHRODUMP_ADMIN_EMAIL`    | no       | Provision the first admin without the setup link           |
-| `SCHRODUMP_ADMIN_PASSWORD` | no       | Same                                                       |
+| Variable                           | Required | What it does                                                                                       |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `DB_PASSWORD`                      | yes      | Password for Schrodump's own metadata database                                                     |
+| `SCHRODUMP_KEK`                    | yes      | Key-encryption key. See step 2                                                                     |
+| `SCHRODUMP_URL`                    | no       | Public URL, used to build the setup link                                                           |
+| `PORT`                             | no       | Host port for the web UI (default 8080)                                                            |
+| `SCRATCH_MAX_BYTES`                | no       | Ceiling for the scratch volume (default 100 GiB)                                                   |
+| `SCHRODUMP_STAGED_THRESHOLD_BYTES` | no       | Dumps estimated above this run STAGED. Unset by default, and read the note below before setting it |
+| `MAX_STAGED`                       | no       | How many staged backups may run at once                                                            |
+| `EXECUTOR_NETWORK`                 | no       | Docker network the executors join to reach your databases                                          |
+| `SCHRODUMP_ADMIN_EMAIL`            | no       | Provision the first admin without the setup link                                                   |
+| `SCHRODUMP_ADMIN_PASSWORD`         | no       | Same                                                                                               |
+
+> **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** Leave it unset unless you know you want it. A STAGED
+> artifact cannot be restored or `FULL_RESTORE`-verified in this version — the directory restore
+> pipeline does not exist yet — so a backup routed there by size is one you cannot restore and did
+> not ask for, on your largest databases first. Setting `parallelism > 1` on a policy already
+> selects STAGED explicitly, which is the deliberate way in.
 
 ### Reaching your databases
 

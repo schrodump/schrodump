@@ -36,7 +36,8 @@ export interface BackupContext {
   jobId: string;
   organizationId: string;
   requestedParallelism: number;
-  stagedThresholdBytes: number;
+  // Absent means size never selects STAGED — see resolveExecutionMode's note.
+  stagedThresholdBytes?: number;
   scratchConfigured: boolean;
 }
 
@@ -93,7 +94,9 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
       requestedParallelism: ctx.requestedParallelism,
       scratchConfigured: ctx.scratchConfigured,
       estimatedBytes: probe.estimatedBytes,
-      stagedThresholdBytes: ctx.stagedThresholdBytes,
+      ...(ctx.stagedThresholdBytes !== undefined
+        ? { stagedThresholdBytes: ctx.stagedThresholdBytes }
+        : {}),
       stagedCapable: caps.stagedCapable,
     });
     if (mode.mode === "STAGED") {
