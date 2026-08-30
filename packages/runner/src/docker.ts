@@ -175,6 +175,13 @@ export class DockerRunner implements Runner {
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       if (onAbort !== undefined) opts.signal?.removeEventListener("abort", onAbort);
+      // The backstop every other failure path already has, and the one the abort path lacked.
+      // Killing the container normally makes the daemon end the attach stream, which ends this sink
+      // through the pipeline above — but if the kill or the removal fails while the container
+      // survives, nothing else ever ends it, and a consumer piping FROM it (the backup upload)
+      // blocks forever on a stream that will never close. Runs BEFORE the removal so a removal that
+      // HANGS cannot skip it. A no-op once the pipeline already ended the sink.
+      endStdout(opts.stdout);
       // Manual removal (never AutoRemove) so exit code and stderr are read first.
       await container.remove().catch(() => undefined);
     }
@@ -259,6 +266,10 @@ function abortedError(correlationId: string): SchrodumpError {
 // observes. Guarded because a sink already torn down would throw.
 function endStdout(stdout: Writable | undefined): void {
   if (stdout === undefined) return;
+  // `.end()` on a stream that already finished emits ERR_STREAM_ALREADY_FINISHED as an 'error'
+  // EVENT rather than throwing, so the try/catch below would not contain it — an unhandled 'error'
+  // on a sink nobody is listening to takes the process down. Check the state first.
+  if (stdout.writableEnded || stdout.destroyed) return;
   try {
     stdout.end();
   } catch {

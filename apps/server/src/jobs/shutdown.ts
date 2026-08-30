@@ -14,6 +14,12 @@ export interface GracefulShutdownDeps {
 // run() rejects → executor finally releases the scratch dir → runWorkerOnce marks the job FAILED),
 // await the tick settling but never past graceMs, then drop the advisory-lock connection. A drain
 // that outlasts the grace falls through to the boot-time backstop (orphan recovery + scratch sweep).
+// Bounds the advisory-lock disconnect. The grace below covers the drain; without this the disconnect
+// after it is unbounded, so a wedged connection could still hold the process past the docker stop
+// window the whole feature is budgeted against. The lock is session-scoped — if the disconnect never
+// lands, the socket dies with the process and PostgreSQL releases it anyway.
+const DISCONNECT_GRACE_MS = 2000;
+
 export async function runGracefulShutdown(deps: GracefulShutdownDeps): Promise<void> {
   deps.log.info({}, "shutdown: stopping loops");
   deps.handle.stop();
@@ -27,6 +33,13 @@ export async function runGracefulShutdown(deps: GracefulShutdownDeps): Promise<v
   });
   await Promise.race([deps.handle.whenIdle(), grace]);
   if (graceTimer !== undefined) clearTimeout(graceTimer);
-  await deps.disconnect();
+  // Still attempted on every path, including grace expiry — dropping the session lock promptly is
+  // the point — but no longer able to outlast it.
+  let disconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  const disconnectGrace = new Promise<void>((resolve) => {
+    disconnectTimer = setTimeout(resolve, DISCONNECT_GRACE_MS);
+  });
+  await Promise.race([deps.disconnect(), disconnectGrace]);
+  if (disconnectTimer !== undefined) clearTimeout(disconnectTimer);
   deps.log.info({}, "shutdown: complete");
 }

@@ -18,6 +18,12 @@ describe("classifyVerifyError", () => {
     expect(classifyVerifyError(err("RUNNER_NETWORK_MISSING"))).toBe("INCONCLUSIVE");
   });
 
+  it("classifies a shutdown abort as INCONCLUSIVE — an interrupted look observed nothing", () => {
+    // Load-bearing, and correct only by RESTORE_ABORTED's absence from RESTORE_FAILED_CODES: adding
+    // it there would make every `docker stop` mid-restore condemn an artifact nothing ever read.
+    expect(classifyVerifyError(err("RESTORE_ABORTED"))).toBe("INCONCLUSIVE");
+  });
+
   it("classifies a decrypt failure as FAILED — the artifact itself is bad", () => {
     expect(classifyVerifyError(err("RESTORE_DECRYPT_FAILED"))).toBe("FAILED");
   });

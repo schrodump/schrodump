@@ -66,7 +66,10 @@ export function restoreParamsOf(raw: unknown): RestoreParams {
 // SECURITY: a RESTORE job may only ever touch an artifact in its OWN organization. The worker runs
 // on raw prisma (system process), so this ownership check is explicit and happens BEFORE any
 // decrypt — a job referencing another org's artifact must fail, never proceed.
-export function artifactBelongsToOrg(artifactOrganizationId: string, jobOrganizationId: string): boolean {
+export function artifactBelongsToOrg(
+  artifactOrganizationId: string,
+  jobOrganizationId: string,
+): boolean {
   return artifactOrganizationId === jobOrganizationId;
 }
 
@@ -155,6 +158,17 @@ const SCRATCH_WRITE_ERRNOS = new Set([
 // A staging write/open failure (our disk) vs. a decrypt/gunzip failure (the artifact). Detect a Node
 // system error either by its errno code OR by the syscall that raised it (write/open/ftruncate), so a
 // less common errno on those syscalls is still attributed to our scratch, not the backup.
+// A restore interrupted by the process shutdown signal. Deliberately its OWN code: an abort is not
+// a claim about the artifact, and verify's classifier maps every code outside RESTORE_FAILED_CODES to
+// INCONCLUSIVE — so a `docker stop` leaves the backup UNOBSERVED instead of condemning something
+// nothing ever finished looking at.
+function abortedRestoreError(correlationId: string): SchrodumpError {
+  return new SchrodumpError("restore aborted by shutdown", {
+    code: "RESTORE_ABORTED",
+    correlationId,
+  });
+}
+
 function isScratchWriteError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const sys = err as { code?: unknown; syscall?: unknown };
@@ -198,7 +212,9 @@ export interface RestorePipelineDeps {
   // secret lands on the same swept 0700 volume as the decrypted dump and needs no second scratch
   // reservation (avoiding a self-deadlock on the staged-concurrency semaphore) — and removed before
   // the staging dir is released. Absent for engines that pass the password via env.
-  provideExtraMounts?: (stagingDir: string) => Promise<{ mounts: RunMount[]; cleanup: () => Promise<void> }>;
+  provideExtraMounts?: (
+    stagingDir: string,
+  ) => Promise<{ mounts: RunMount[]; cleanup: () => Promise<void> }>;
   // The shutdown signal, bound once at createJobExecutor construction and forwarded into every
   // container-creating run so the runner can force-remove the container on abort. Undefined outside
   // a shutdown (or in tests) — the runner behaves exactly as before.
@@ -229,6 +245,10 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
       deps.buildGlobalsRestoreDescriptor,
     );
     for (const step of steps) {
+      // postgres restores globals first, then the database. Starting a second step after the signal
+      // trips would decrypt another cleartext dump into scratch inside the grace window, with no
+      // time left to remove it.
+      if (deps.signal?.aborted === true) throw abortedRestoreError(deps.correlationId);
       await restoreOne(deps, staging.dir, step, extra?.mounts ?? []);
     }
     return true;
@@ -295,7 +315,18 @@ async function restoreOne(
       // to the file — so world-read on the file is inert on the host while letting every engine's
       // throwaway executor read it. (Never reproduces on Docker Desktop, whose VM file-sharing masks
       // the mount's ownership; it is a native-Linux executor failure, caught by CI.)
-      await pipeline(decrypted, createGunzip(), createWriteStream(dumpPath, { mode: 0o644 }));
+      // The signal rides the pipeline itself, not just the runner call below. This write IS the
+      // cleartext: on a multi-GB artifact it is the longest phase of a restore and the one most
+      // likely to be in flight at shutdown. Without cancelling it, the `finally` that removes
+      // dumpPath does not run until the write finishes on its own — long past the grace, leaving a
+      // decrypted dump on the scratch volume. Destroying the chain routes straight into that
+      // `finally` instead.
+      await pipeline(
+        decrypted,
+        createGunzip(),
+        createWriteStream(dumpPath, { mode: 0o644 }),
+        ...(deps.signal !== undefined ? [{ signal: deps.signal }] : []),
+      );
       // createWriteStream's mode is masked by umask; enforce 0644 explicitly (mirrors writeMongoConfig)
       // so the mongo executor can read it regardless of the worker process's umask.
       await chmod(dumpPath, 0o644);
@@ -304,6 +335,12 @@ async function restoreOne(
       // THROUGH the decrypt/gunzip pipeline (it rejects when its input stream errors) — pass it
       // through unchanged rather than re-wrapping it as a decrypt failure.
       if (err instanceof SchrodumpError) throw err;
+      // Aborting the pipeline above rejects with an AbortError, which is neither a SchrodumpError nor
+      // a scratch-write errno — so without this branch it falls through to RESTORE_DECRYPT_FAILED
+      // below, a code verify maps to FAILED. That would make a `docker stop` mark an artifact nothing
+      // observed as bad: the exact inversion of the thesis. Checked before the scratch-write branch
+      // too, so a destroyed write stream's errno cannot win the classification either.
+      if (deps.signal?.aborted === true) throw abortedRestoreError(deps.correlationId);
       // A write-side failure on the scratch volume (ENOSPC/EDQUOT/EIO/EROFS/EACCES, an fd limit, ...)
       // rejects the same pipeline, but it means OUR disk failed, not that the artifact is bad. It gets
       // a DISTINCT code because the two are classified oppositely on the verify path: a decrypt/gunzip

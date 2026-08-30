@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { createGzip } from "node:zlib";
 import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
@@ -22,15 +22,29 @@ import {
 
 describe("restoreParamsOf", () => {
   it("reads a valid RESTORE job's params", () => {
-    const p = restoreParamsOf({ target: "DATABASE", confirmExistingDatabase: true, triggeredByUserId: "u1" });
-    expect(p).toEqual({ target: "DATABASE", confirmExistingDatabase: true, triggeredByUserId: "u1" });
+    const p = restoreParamsOf({
+      target: "DATABASE",
+      confirmExistingDatabase: true,
+      triggeredByUserId: "u1",
+    });
+    expect(p).toEqual({
+      target: "DATABASE",
+      confirmExistingDatabase: true,
+      triggeredByUserId: "u1",
+    });
   });
 
   it("throws on missing/garbage params (a RESTORE job must carry them)", () => {
     expect(() => restoreParamsOf(null)).toThrow();
     expect(() => restoreParamsOf({ target: "NOPE" })).toThrow();
     // A blank user id is not a valid trigger — never audit a restore to nobody.
-    expect(() => restoreParamsOf({ target: "DATABASE", confirmExistingDatabase: false, triggeredByUserId: "" })).toThrow();
+    expect(() =>
+      restoreParamsOf({
+        target: "DATABASE",
+        confirmExistingDatabase: false,
+        triggeredByUserId: "",
+      }),
+    ).toThrow();
   });
 });
 
@@ -160,7 +174,14 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     const unused = (): never => {
       throw new Error("not used in this test");
     };
-    return { put: unused, get: () => get(), head: unused, delete: unused, list: unused, canary: unused };
+    return {
+      put: unused,
+      get: () => get(),
+      head: unused,
+      delete: unused,
+      list: unused,
+      canary: unused,
+    };
   }
 
   function capturingRunner(capture: RunOptions[]): Runner {
@@ -195,7 +216,8 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
       buildRestoreDescriptor: restoreDescriptor,
       buildGlobalsRestoreDescriptor: () => null,
       reserveStaging,
-      provideExtraMounts: () => Promise.resolve({ mounts: [configMount], cleanup: () => Promise.resolve() }),
+      provideExtraMounts: () =>
+        Promise.resolve({ mounts: [configMount], cleanup: () => Promise.resolve() }),
     });
 
     expect(ok).toBe(true);
@@ -204,6 +226,99 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     expect(mounts[0]?.readOnly).toBe(true);
     expect(mounts[0]?.source.startsWith(stagingDir)).toBe(true);
     expect(mounts[1]).toEqual(configMount);
+  });
+
+  it("refuses to start a step once the shutdown signal has tripped, and stages no cleartext", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+
+    await expect(
+      runRestorePipeline({
+        driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+        runner: capturingRunner(capture),
+        bucketKey: "artifact.bin",
+        globalsKey: null,
+        ageIdentity: identity,
+        network: "schrodump_targets",
+        timeoutMs: 1000,
+        correlationId: "job-1",
+        buildRestoreDescriptor: restoreDescriptor,
+        buildGlobalsRestoreDescriptor: () => null,
+        reserveStaging,
+        signal: AbortSignal.abort(),
+      }),
+    ).rejects.toMatchObject({ code: "RESTORE_ABORTED" });
+
+    // The point of the code: no executor ran, and nothing decrypted was left on the volume.
+    expect(capture).toHaveLength(0);
+    expect(await readdir(stagingDir).catch(() => [])).toEqual([]);
+    expect(stagingCleanupCalls).toBe(1);
+  });
+
+  it("cancels the decrypt-to-scratch write mid-flight and leaves no cleartext behind", async () => {
+    // The one the step-loop guard does NOT cover: the signal trips while the decrypted dump is
+    // already being written. On a multi-GB artifact that write is the longest phase of a restore
+    // and the most likely to be in flight at shutdown; without the signal on the pipeline itself,
+    // the `finally` that removes the file waits for the write to finish on its own.
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const controller = new AbortController();
+    const capture: RunOptions[] = [];
+
+    // Real ciphertext, delivered and then held open — the stream never ends on its own.
+    const stalled = new PassThrough();
+    void (async () => {
+      for await (const chunk of await encryptedGzip("hello", recipient)) {
+        stalled.write(chunk as Buffer);
+      }
+    })();
+
+    const promise = runRestorePipeline({
+      driver: fakeDriver(() => Promise.resolve(stalled)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ code: "RESTORE_ABORTED" });
+    expect(capture).toHaveLength(0); // never reached the executor
+    expect(await readdir(stagingDir).catch(() => [])).toEqual([]);
+  });
+
+  it("forwards the shutdown signal to the runner, so a run in flight is cancellable", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+    const signal = new AbortController().signal;
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+      signal,
+    });
+
+    expect(ok).toBe(true);
+    expect(capture[0]?.signal).toBe(signal);
   });
 
   it("mounts only [dumpMount] when there is no provideExtraMounts (non-mongo)", async () => {

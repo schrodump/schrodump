@@ -21,7 +21,14 @@ describe("runGracefulShutdown", () => {
     const disconnect = vi.fn(async () => {
       order.push("disconnect");
     });
-    await runGracefulShutdown({ handle, scheduler, controller, disconnect, graceMs: 8000, log: fakeLog });
+    await runGracefulShutdown({
+      handle,
+      scheduler,
+      controller,
+      disconnect,
+      graceMs: 8000,
+      log: fakeLog,
+    });
     expect(order).toEqual(["stopWorker", "stopScheduler", "abort", "whenIdle", "disconnect"]);
   });
 
@@ -40,6 +47,27 @@ describe("runGracefulShutdown", () => {
       await vi.advanceTimersByTimeAsync(8000);
       await p;
       expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait forever on a wedged disconnect", async () => {
+    vi.useFakeTimers();
+    try {
+      // The drain finishes promptly; the disconnect is what hangs. Before the disconnect was
+      // bounded, this shutdown never completed and the process sat past the docker stop window
+      // until SIGKILL — the one outcome the grace exists to avoid.
+      const p = runGracefulShutdown({
+        handle: { stop: vi.fn(), whenIdle: () => Promise.resolve() },
+        scheduler: { stop: vi.fn() },
+        controller: { abort: vi.fn() },
+        disconnect: () => new Promise(() => {}), // never settles
+        graceMs: 8000,
+        log: fakeLog,
+      });
+      await vi.advanceTimersByTimeAsync(2000);
+      await expect(p).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
