@@ -593,7 +593,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           requestedParallelism: policy.parallelism,
           // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
           // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
-          stagedThresholdBytes: deps.env.SCHRODUMP_SCRATCH_MAX_BYTES,
+          // NOT SCHRODUMP_SCRATCH_MAX_BYTES, which is the volume's CEILING, not a routing
+          // threshold: using it meant size only ever selected STAGED for dumps larger than the whole
+          // scratch budget — never for the mid-sized ones staging exists to help, and precisely for
+          // the ones least likely to fit.
+          ...(deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES !== undefined
+            ? { stagedThresholdBytes: deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES }
+            : {}),
           scratchConfigured: scratch !== null,
         },
         ports,

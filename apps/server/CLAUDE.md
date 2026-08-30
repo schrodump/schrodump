@@ -62,10 +62,19 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 `env.ts` valida com Zod. Além de `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,
 `SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (e `BETTER_AUTH_SECRET`/`LOG_LEVEL`), agora lê
 a config de worker/executor: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
-`SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK` e `WORKER_POLL_MS`. Scratch path
+`SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
+`SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS` e
+`SCHRODUMP_STAGED_THRESHOLD_BYTES`. Scratch path
 ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — passar string vazia é
 valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
 link de setup.
+
+> **`SCHRODUMP_STAGED_THRESHOLD_BYTES` não tem default, e isso é a decisão.** Artefato STAGED não
+> restaura nem passa por `FULL_RESTORE` verify nesta versão, então escolher esse modo POR conta do
+> operador — e primeiro nos bancos maiores — entrega um artefato que ele não pediu e não consegue
+> restaurar. `parallelism > 1` na policy continua sendo o caminho explícito para STAGED. Antes
+> deste ajuste o limiar recebia `SCHRODUMP_SCRATCH_MAX_BYTES`, que é o **teto do volume**, não um
+> limiar de roteamento: o efeito era só estagiar dumps maiores que todo o orçamento de scratch.
 
 > **Nota:** `DOCKER_HOST` não passa pelo `env.ts` — o runner (dockerode) o lê direto do ambiente.
 
@@ -119,7 +128,7 @@ link de setup.
   `mongorestore` só viaja via arquivo `--config` montado (nunca argv/env), e esse arquivo precisa
   viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.
   Sem scratch configurado, backup de mongo falha alto e cedo (`MONGO_CONFIG_SCRATCH_REQUIRED_
-  REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
+REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
 - **Recursos são editáveis, com campos de identidade retidos.** `/targets`, `/destinations` e
   `/policies` têm `PATCH` (operator+, schema `.strict()` e `.partial()`, patch vazio é 400). O que
   **não** se edita, e por quê — cada um invalidaria artefato já existente:

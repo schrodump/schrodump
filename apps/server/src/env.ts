@@ -17,6 +17,10 @@ const EnvSchema = z.object({
   SCHRODUMP_SCRATCH_PATH: z.string().min(1).optional(),
   SCHRODUMP_SCRATCH_MAX_BYTES: z.coerce.number().int().default(107374182400), // 100 GiB
   SCHRODUMP_MAX_CONCURRENT_STAGED: z.coerce.number().int().min(1).default(2),
+  // Dumps estimated above this are executed STAGED. Deliberately has NO default: STAGED artifacts
+  // cannot be restored or FULL_RESTORE-verified in v1, so the mode is never chosen for an operator
+  // by size — only by an explicit parallelism > 1 on the policy. Set it to opt in.
+  SCHRODUMP_STAGED_THRESHOLD_BYTES: z.coerce.number().int().positive().optional(),
   SCHRODUMP_EXECUTOR_NETWORK: z.string().default("schrodump_targets"),
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.
