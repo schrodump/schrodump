@@ -10,14 +10,14 @@ rather than the software's.
 
 ## What an attacker gets from each piece
 
-| If they get…                  | They get…                                                            |
-| ----------------------------- | -------------------------------------------------------------------- |
-| The Docker socket             | Root on the host. Everything below stops mattering                    |
-| The metadata database + KEK   | Every stored database credential                                      |
-| The metadata database alone   | Credential ciphertext, useless without the KEK                        |
-| The bucket + artefact keys    | Your data                                                             |
-| The bucket alone              | Encrypted artefacts and their sizes and timing                        |
-| The scratch volume mid-job    | One database dump, in clear                                           |
+| If they get…                | They get…                                          |
+| --------------------------- | -------------------------------------------------- |
+| The Docker socket           | Root on the host. Everything below stops mattering |
+| The metadata database + KEK | Every stored database credential                   |
+| The metadata database alone | Credential ciphertext, useless without the KEK     |
+| The bucket + artefact keys  | Your data                                          |
+| The bucket alone            | Encrypted artefacts and their sizes and timing     |
+| The scratch volume mid-job  | One database dump, in clear                        |
 
 ## The Docker socket is the most critical asset
 
@@ -30,12 +30,12 @@ read-only into `tecnativa/docker-socket-proxy`, which exposes only the endpoints
 
 ```yaml
 CONTAINERS: 1 # create and inspect executors
-IMAGES: 1     # pull executor images
-NETWORKS: 1   # attach executors to the target network
+IMAGES: 1 # pull executor images
+NETWORKS: 1 # attach executors to the target network
 INFO: 1
 POST: 1
-EXEC: 0       # no docker exec into a running container
-VOLUMES: 0    # no volume creation, so no mounting the host filesystem
+EXEC: 0 # no docker exec into a running container
+VOLUMES: 0 # no volume creation, so no mounting the host filesystem
 ```
 
 `EXEC: 0` and `VOLUMES: 0` are the two that matter. With `EXEC` a compromised Schrodump could run
@@ -72,6 +72,20 @@ Schrodump sweeps abandoned scratch directories at boot and periodically.
 > path, the same as any other job failure. **Known limitation.** A `SIGKILL` — or a drain that
 > outlasts the grace budget — still bypasses this: the process exits immediately and the directory
 > survives, in clear, until the next sweep.
+
+> **Verified 2026-08-30, and here is exactly what was verified.** A backup was run against a real
+> PostgreSQL origin (4M rows of incompressible data) through a real Docker executor onto real
+> S3-compatible storage, in `STAGED` mode so the dump really was writing a cleartext directory to
+> the scratch volume. The shutdown signal was tripped 2.5s into the dump. Result: the scratch
+> directory existed while the dump ran and was **gone** afterwards, **no** executor container
+> remained on the daemon, and the job row read `FAILED` with reason `run aborted by shutdown`.
+> Cleanup finished in under two seconds, well inside the grace.
+>
+> Two things that check did NOT cover, stated so nobody reads more into it than it earned. The
+> signal was tripped **in process**, not by `docker stop` on the packaged image, so the delivery leg
+> — `dumb-init` → `entrypoint.sh` → the Node process — is not covered here (it predates this
+> handler and was already working). And the wall clock of a real `docker stop` against the shipped
+> image was not measured; only that the cleanup fits the internal grace with room to spare.
 
 ## The KEK belongs somewhere else
 
