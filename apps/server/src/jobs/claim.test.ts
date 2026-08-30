@@ -20,9 +20,25 @@ describe.skipIf(!enabled)("claimNextJob (integration)", () => {
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
-      .withEnvironment({ POSTGRES_USER: "schrodump", POSTGRES_PASSWORD: "schrodump", POSTGRES_DB: "app" })
+      .withEnvironment({
+        POSTGRES_USER: "schrodump",
+        POSTGRES_PASSWORD: "schrodump",
+        POSTGRES_DB: "app",
+      })
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // Wait.forListeningPorts() is satisfied by the postgres image's TEMPORARY socket-only server,
+      // which the entrypoint runs during initialisation before stopping it and starting the real one.
+      // Connecting against that window fails with "the database system is starting up" — a flake that
+      // reads as a code failure and trains everyone to re-run a red CI. `-h` forces pg_isready onto
+      // TCP, which only the real server listens on: the same lesson already documented for the verify
+      // sandbox in packages/engines/src/adapters/postgres.ts.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d app"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
     const url = `postgresql://schrodump:schrodump@${container.getHost()}:${container.getMappedPort(5432)}/app?schema=public`;
 
@@ -33,7 +49,9 @@ describe.skipIf(!enabled)("claimNextJob (integration)", () => {
     });
 
     prisma = new PrismaClient({ datasourceUrl: url });
-    const org = await prisma.organization.create({ data: { name: "claim-test", slug: `claim-test-${Date.now()}` } });
+    const org = await prisma.organization.create({
+      data: { name: "claim-test", slug: `claim-test-${Date.now()}` },
+    });
     orgId = org.id;
   }, 180_000);
 
@@ -51,10 +69,18 @@ describe.skipIf(!enabled)("claimNextJob (integration)", () => {
   });
 
   it("claims a pending job, flips it to RUNNING, and never hands the same row twice", async () => {
-    await prisma.backupJob.create({ data: { organizationId: orgId, kind: "BACKUP", state: "PENDING", correlationId: "c1" } });
-    await prisma.backupJob.create({ data: { organizationId: orgId, kind: "BACKUP", state: "PENDING", correlationId: "c2" } });
+    await prisma.backupJob.create({
+      data: { organizationId: orgId, kind: "BACKUP", state: "PENDING", correlationId: "c1" },
+    });
+    await prisma.backupJob.create({
+      data: { organizationId: orgId, kind: "BACKUP", state: "PENDING", correlationId: "c2" },
+    });
 
-    const [a, b, c] = await Promise.all([claimNextJob(prisma), claimNextJob(prisma), claimNextJob(prisma)]);
+    const [a, b, c] = await Promise.all([
+      claimNextJob(prisma),
+      claimNextJob(prisma),
+      claimNextJob(prisma),
+    ]);
     const claimed = [a, b, c].filter((j): j is NonNullable<typeof j> => j !== null);
     expect(claimed).toHaveLength(2);
     expect(new Set(claimed.map((j) => j.id)).size).toBe(2); // no double-claim
