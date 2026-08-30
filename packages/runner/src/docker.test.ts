@@ -42,6 +42,11 @@ class FakeEngine implements DockerEngine {
   // Lets a test hold start() pending — e.g. to abort mid createContainer/attach/start, the async
   // gap between run()'s entry check and its abort-listener registration — then release it deterministically.
   startGate: Promise<void> | undefined;
+  // Readable.from() is ALWAYS already ended, so a sink handed to run() gets ended by the pipeline no
+  // matter what run() does — which makes the deadlock the abort path guards against untestable. This
+  // returns a container stdout nothing ever writes to or ends, i.e. a container that outlived its
+  // kill: the only shape in which the finally's endStdout backstop is observable.
+  openStdout = false;
 
   readonly #readyAfter: number;
   execCalls = 0;
@@ -65,7 +70,7 @@ class FakeEngine implements DockerEngine {
     if (this.startFails) throw new Error("No such image: postgres:16-alpine");
     this.started = true;
     return {
-      stdout: Readable.from(this.stdoutChunks),
+      stdout: this.openStdout ? new PassThrough() : Readable.from(this.stdoutChunks),
       stderr: Readable.from(this.stderrChunks),
       wait: () =>
         this.neverExits ? new Promise<number>(() => undefined) : Promise.resolve(this.statusCode),
@@ -260,6 +265,45 @@ describe("DockerRunner.run", () => {
     await expect(p).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
     expect(engine.killed).toBe(true);
     expect(engine.removed).toBe(true); // finally still reaps
+  });
+
+  it("ends the caller's stdout sink on abort even when the container outlives its kill", async () => {
+    // The deadlock this guards: normally killing the container makes the daemon end the attach
+    // stream, which ends the sink through run()'s pipeline. If the kill or the removal fails while
+    // the container survives, nothing else ever ends it — and the backup upload piping FROM this
+    // sink waits forever on a stream that will never close.
+    const engine = new FakeEngine();
+    engine.openStdout = true;
+    engine.neverExits = true;
+    const sink = new PassThrough();
+    const controller = new AbortController();
+
+    const promise = new DockerRunner(engine).run(
+      DESCRIPTOR,
+      opts({ signal: controller.signal, stdout: sink }),
+    );
+    await flushMicrotasks();
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+    expect(sink.writableEnded).toBe(true);
+  });
+
+  it("does not double-end a sink the pipeline already closed", async () => {
+    // The finally's backstop runs on every path, success included. endStdout must no-op there:
+    // .end() on a finished writable emits ERR_STREAM_ALREADY_FINISHED as an 'error' event, which
+    // nothing here is listening for, so an unhandled one would take the process down.
+    const engine = new FakeEngine();
+    engine.stdoutChunks = [Buffer.from("dump")];
+    const sink = new PassThrough();
+    const errors: unknown[] = [];
+    sink.on("error", (err) => errors.push(err));
+
+    const result = await new DockerRunner(engine).run(DESCRIPTOR, opts({ stdout: sink }));
+
+    expect(result.exitCode).toBe(0);
+    expect(sink.writableEnded).toBe(true);
+    expect(errors).toEqual([]);
   });
 });
 
