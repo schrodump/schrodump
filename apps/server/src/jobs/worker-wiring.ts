@@ -15,11 +15,14 @@ import type { EngineKind } from "@schrodump/core/types";
 import type { Manifest } from "@schrodump/core/manifest";
 import { retentionIsConfigured, type RetentionPolicy } from "@schrodump/core/retention";
 import { resolveAdapter } from "@schrodump/engines/registry";
-import type { DumpScope, TargetConnection } from "@schrodump/engines/descriptor";
+import type { DumpScope, TargetConnection, TargetFacts } from "@schrodump/engines/descriptor";
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
-import type { ProbeConnection, ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
+import type {
+  ProbeConnection,
+  ProbeResult as EngineProbeResult,
+} from "@schrodump/engines/probe/types";
 import { createDockerRunner, type RunMount } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
 import {
@@ -222,7 +225,8 @@ export function resolveVerifyPlan(
   if (requested === "FULL_RESTORE" && executionMode === "STAGED") {
     return {
       effectiveLevel: "CHECKSUM",
-      downgradeReason: "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
+      downgradeReason:
+        "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
     };
   }
   // An empty-string db name is not a real scope entry: the route rejects it (targets.ts .min(1)).
@@ -257,6 +261,18 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
 // the authSource, whereas THIS is the real data db the verify assertion must inspect. Only the unscoped
 // mongo fallback is "admin" (a full-instance archive has no single origin db — the multi-db case is a
 // deferred follow-up), so a scoped mongo target resolves its actual db here.
+// Whether the archive this dump is about to produce carries an oplog. mongodb's buildDump emits
+// --oplog exactly when the target is a replica set, and hard-refuses a SCOPED dump there — so a
+// replica-set mongo artifact is always full-instance and oplog-bearing. Recorded at dump time
+// because it is unrecoverable later: restore cannot re-derive it without re-probing an origin that
+// may have changed topology or ceased to exist.
+//
+// undefined for every other engine, deliberately: false would assert something about an oplog for a
+// database that has none, and the stored value would stop meaning what it says.
+export function sourceHasOplogFor(engine: EngineKind, facts: TargetFacts): boolean | undefined {
+  return engine === "mongodb" ? facts.isReplicaSet : undefined;
+}
+
 export function originDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
   const first = scopedDatabases[0];
   if (first !== undefined && first.length > 0) return first;
@@ -383,7 +399,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       where: { id: policy.targetId },
     });
 
-    const destination = await driverForDestination(prisma, deps.kek, job.organizationId, policy.destinationId);
+    const destination = await driverForDestination(
+      prisma,
+      deps.kek,
+      job.organizationId,
+      policy.destinationId,
+    );
     if (destination === null) {
       await failJob(job.id, "backup destination unavailable");
       return { ok: false, artifactId: null, verifyLevel: "NONE", retentionConfigured: false };
@@ -396,7 +417,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     const connectDatabase = probeDatabaseFor(engine, scopedDatabases);
 
     // Decrypt the credential to USE it — hand it to the probe/driver. It never leaves this scope.
-    const password = decryptCredential(deps.kek, parseEncryptedCredential(target.encryptedCredential));
+    const password = decryptCredential(
+      deps.kek,
+      parseEncryptedCredential(target.encryptedCredential),
+    );
 
     // The RICH probe runs here, outside the pipeline, so a probe failure is sanitized by the worker
     // (sanitizeReason) instead of being written verbatim into BackupJob.reason via the pipeline's
@@ -511,6 +535,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             }),
       buildManifest: ({ probe, mode, recipients, upload }): Manifest => ({
         manifestVersion: 1,
+        // Recorded here or lost forever: restore cannot re-derive it without re-probing an origin
+        // that may have changed topology or ceased to exist.
+        ...(sourceHasOplogFor(engine, facts) !== undefined
+          ? { sourceHasOplog: sourceHasOplogFor(engine, facts) }
+          : {}),
         jobId: job.id,
         organizationId: job.organizationId,
         engine,
@@ -541,6 +570,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             engine,
             executionMode: mode,
             serverVersionNum: probe.serverVersionNum,
+            sourceHasOplog: sourceHasOplogFor(engine, facts) ?? null,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
             checksumAlgorithm: upload.checksumAlgorithm,
@@ -629,7 +659,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     // malformed stored scope degrades to unscoped (never throws) — this is verify, not restore.
     const originScope = ScopeSchema.safeParse(producingJob.policy?.target?.scope);
     const scopedDatabases = originScope.success ? originScope.data.databases : [];
-    const plan = resolveVerifyPlan(policyLevel, artifact.engine, artifact.executionMode, scopedDatabases);
+    const plan = resolveVerifyPlan(
+      policyLevel,
+      artifact.engine,
+      artifact.executionMode,
+      scopedDatabases,
+    );
     const sealed = artifact.destination.sealMode === "sealed";
 
     const destination = await driverForDestination(
@@ -770,6 +805,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                     target: "FULL_CLUSTER",
                     scope: restoreScope,
                     executionMode: artifact.executionMode,
+                    ...(artifact.sourceHasOplog !== null
+                      ? { sourceHasOplog: artifact.sourceHasOplog }
+                      : {}),
                     sourcePath,
                   }),
                 buildGlobalsRestoreDescriptor: (sourcePath) =>
@@ -949,6 +987,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           executionMode: artifact.executionMode,
           serverVersionNum: artifact.serverVersionNum,
           destinationName: artifact.destination.name,
+          // null (unknown provenance) becomes undefined: the domain distinguishes "we never recorded
+          // it" from "it has no oplog", and only the former degrades with a recorded reason.
+          ...(artifact.sourceHasOplog !== null ? { sourceHasOplog: artifact.sourceHasOplog } : {}),
         }),
       availableKeys: async () => {
         // ALL keys (active + retired): an artifact may have been encrypted with a now-retired key.
@@ -1044,6 +1085,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               target: params.target,
               scope,
               executionMode: artifact.executionMode,
+              ...(artifact.sourceHasOplog !== null
+                ? { sourceHasOplog: artifact.sourceHasOplog }
+                : {}),
               sourcePath,
             }),
           buildGlobalsRestoreDescriptor: (sourcePath) =>

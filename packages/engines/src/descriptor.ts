@@ -61,6 +61,11 @@ export interface RestoreInput {
   readonly executionMode: ExecutionMode;
   // Path to the artifact inside the executor (stream on stdin or a staged directory).
   readonly sourcePath?: string;
+  // Whether the SOURCE archive was dumped with an oplog — mongodb's buildDump emits --oplog exactly
+  // when it dumped a replica set. Recorded at dump time and carried on the artifact, never
+  // re-derived here: the origin's topology may have changed, or the origin may be gone. `undefined`
+  // means the artifact predates the fact being tracked, which is NOT the same claim as `false`.
+  readonly sourceHasOplog?: boolean;
 }
 
 export interface VerifyInput {

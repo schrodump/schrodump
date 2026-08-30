@@ -21,6 +21,9 @@ export interface ArtifactForRestore {
   executionMode: "STREAM" | "STAGED";
   supportedRestoreTargets: RestoreTarget[];
   destinationName: string;
+  // mongodb only: whether the archive was dumped with an oplog. undefined means unknown — either a
+  // non-mongo engine, or an artifact written before the fact was recorded.
+  sourceHasOplog?: boolean;
 }
 
 export interface RestorePorts {
@@ -66,14 +69,20 @@ export async function runRestoreJob(
     // 1. Validate the target against the capability matrix — a single-table restore of an artifact
     //    that lacks that granularity is a clear error, not a partial attempt.
     if (!artifact.supportedRestoreTargets.includes(req.target)) {
-      return await fail(ports, `restore target ${req.target} is not supported for ${artifact.engine} artifacts`);
+      return await fail(
+        ports,
+        `restore target ${req.target} is not supported for ${artifact.engine} artifacts`,
+      );
     }
 
     // 2. Resolve the decryption key from the manifest's keyIds (retired keys included), never from
     //    global config.
     const keyId = resolveDecryptionKeyId(artifact.manifestKeyIds, await ports.availableKeys());
     if (keyId === null) {
-      return await fail(ports, "no server-held identity matches this artifact (sealed) — supply an identity in memory");
+      return await fail(
+        ports,
+        "no server-held identity matches this artifact (sealed) — supply an identity in memory",
+      );
     }
 
     // 3. Restore over existing data requires explicit confirmation.
@@ -90,7 +99,21 @@ export async function runRestoreJob(
       keyId,
     });
     const ok = await ports.runRestore(keyId);
-    await ports.setJobState(ok ? "SUCCEEDED" : "FAILED");
+    // 5. A mongo FULL_CLUSTER restore of an archive whose provenance we never recorded runs without
+    //    --oplogReplay, because emitting it against an archive that has no oplog crashes the whole
+    //    restore. The restore still happens — refusing it would strand the operator mid-incident —
+    //    but the cost is written down rather than swallowed: without replay, each collection lands
+    //    at a slightly different effective timestamp. Each stays internally consistent; they just do
+    //    not share one dump-end instant. Only "unknown" degrades: a recorded true was replayed, and
+    //    a recorded false never had an oplog to replay.
+    const degraded =
+      ok &&
+      artifact.engine === "mongodb" &&
+      req.target === "FULL_CLUSTER" &&
+      artifact.sourceHasOplog === undefined
+        ? "restored without oplog replay: this artifact predates oplog tracking, so its collections may not share a single point in time"
+        : undefined;
+    await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degraded);
     return { ok, keyId, error: ok ? null : "restore failed" };
   } catch (error) {
     return await fail(ports, error instanceof Error ? error.message : "restore error");

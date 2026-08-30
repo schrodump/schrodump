@@ -37,12 +37,14 @@ interface Harness {
   ports: RestorePorts;
   audits: unknown[];
   jobStates: string[];
+  jobReasons: (string | undefined)[];
   restoredWithKey: string[];
 }
 
 function makeHarness(over: Partial<RestorePorts> = {}, existingData = false): Harness {
   const audits: unknown[] = [];
   const jobStates: string[] = [];
+  const jobReasons: (string | undefined)[] = [];
   const restoredWithKey: string[] = [];
   const ports: RestorePorts = {
     loadArtifact: () => Promise.resolve(ARTIFACT),
@@ -52,8 +54,9 @@ function makeHarness(over: Partial<RestorePorts> = {}, existingData = false): Ha
       audits.push(event);
       return Promise.resolve();
     },
-    setJobState: (state) => {
+    setJobState: (state, reason) => {
       jobStates.push(state);
+      jobReasons.push(reason);
       return Promise.resolve();
     },
     runRestore: (keyId) => {
@@ -62,8 +65,51 @@ function makeHarness(over: Partial<RestorePorts> = {}, existingData = false): Ha
     },
     ...over,
   };
-  return { ports, audits, jobStates, restoredWithKey };
+  return { ports, audits, jobStates, jobReasons, restoredWithKey };
 }
+
+describe("runRestoreJob — oplog provenance caveat", () => {
+  const mongo = (over: Partial<ArtifactForRestore> = {}): ArtifactForRestore => ({
+    ...ARTIFACT,
+    engine: "mongodb",
+    supportedRestoreTargets: ["FULL_CLUSTER"],
+    ...over,
+  });
+  const fullCluster: RestoreRequest = { ...REQ, target: "FULL_CLUSTER" };
+
+  it("records the consistency caveat when the archive's provenance is unknown", async () => {
+    // An artifact written before the fact was tracked. The restore still happens — refusing it
+    // would strand the operator mid-incident — but it must not happen silently: without oplog
+    // replay each collection lands on a slightly different instant.
+    const h = makeHarness({ loadArtifact: () => Promise.resolve(mongo()) });
+    const outcome = await runRestoreJob(fullCluster, h.ports);
+    expect(outcome.ok).toBe(true);
+    expect(h.jobStates).toEqual(["RUNNING", "SUCCEEDED"]);
+    expect(h.jobReasons[1]).toMatch(/oplog/i);
+  });
+
+  it("stays silent when the archive is known to carry an oplog — it was replayed", async () => {
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve(mongo({ sourceHasOplog: true })),
+    });
+    await runRestoreJob(fullCluster, h.ports);
+    expect(h.jobReasons[1]).toBeUndefined();
+  });
+
+  it("stays silent when the archive is known to carry no oplog — there was nothing to replay", async () => {
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve(mongo({ sourceHasOplog: false })),
+    });
+    await runRestoreJob(fullCluster, h.ports);
+    expect(h.jobReasons[1]).toBeUndefined();
+  });
+
+  it("stays silent for a non-mongo engine, which has no oplog to speak of", async () => {
+    const h = makeHarness();
+    await runRestoreJob({ ...REQ, target: "FULL_CLUSTER" }, h.ports);
+    expect(h.jobReasons[1]).toBeUndefined();
+  });
+});
 
 describe("runRestoreJob", () => {
   it("restores using a retired key resolved from the manifest, and audits it", async () => {

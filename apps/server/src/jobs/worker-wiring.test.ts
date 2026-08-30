@@ -11,6 +11,7 @@ import {
   originDatabaseFor,
   resolveVerifyPlan,
   sanitizeReason,
+  sourceHasOplogFor,
   toBackupProbe,
   toRetentionPolicy,
   verifyEngineWiring,
@@ -86,7 +87,9 @@ describe("resolveVerifyPlan", () => {
   it("downgrades an UNSCOPED mongo FULL_RESTORE (STREAM) to CHECKSUM (full-instance archive)", () => {
     const plan = resolveVerifyPlan("FULL_RESTORE", "mongodb", "STREAM", []);
     expect(plan.effectiveLevel).toBe("CHECKSUM");
-    expect(plan.downgradeReason).toMatch(/unscoped mongodb artifacts cannot be FULL_RESTORE-verified/i);
+    expect(plan.downgradeReason).toMatch(
+      /unscoped mongodb artifacts cannot be FULL_RESTORE-verified/i,
+    );
   });
 
   it("treats a scope whose first entry is empty as unscoped — consistent with originDatabaseFor (M3)", () => {
@@ -128,6 +131,28 @@ describe("resolveVerifyPlan", () => {
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
+  });
+});
+
+describe("sourceHasOplogFor", () => {
+  const facts = (isReplicaSet: boolean) => ({ isReplicaSet, hasMyisam: false });
+
+  it("records true for a mongo dump of a replica set — the archive carries an oplog", () => {
+    // buildDump emits --oplog exactly when it dumps a replica set, and refuses a SCOPED dump there,
+    // so reaching this point with isReplicaSet means the archive is full-instance and oplog-bearing.
+    expect(sourceHasOplogFor("mongodb", facts(true))).toBe(true);
+  });
+
+  it("records false for a mongo dump of a standalone", () => {
+    expect(sourceHasOplogFor("mongodb", facts(false))).toBe(false);
+  });
+
+  it("records nothing for a non-mongo engine, rather than a misleading false", () => {
+    // false would be a claim about an oplog for an engine that has no such concept. Absent is the
+    // honest value, and it keeps the column meaning "unknown or not applicable" uniformly.
+    expect(sourceHasOplogFor("postgres", facts(false))).toBeUndefined();
+    expect(sourceHasOplogFor("mysql", facts(true))).toBeUndefined();
+    expect(sourceHasOplogFor("mariadb", facts(false))).toBeUndefined();
   });
 });
 
@@ -185,7 +210,9 @@ describe("verifyEngineWiring", () => {
 
 describe("sanitizeReason", () => {
   it("reduces an Error to its name and NEVER echoes the raw message (driver errors embed the URI)", () => {
-    const reason = sanitizeReason(new Error("mongodb://user:hunter2@db.internal/app connection refused"));
+    const reason = sanitizeReason(
+      new Error("mongodb://user:hunter2@db.internal/app connection refused"),
+    );
     expect(reason).toBe("job failed: Error");
     expect(reason).not.toContain("hunter2");
     expect(reason).not.toContain("mongodb://");
@@ -240,7 +267,10 @@ describe("runVerify org-scoping guard", () => {
 
   function fakePrisma(artifact: { organizationId: string }) {
     const backupJobUpdate = vi.fn<
-      (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<Record<string, unknown>>
+      (args: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => Promise<Record<string, unknown>>
     >(async () => ({}));
     const artifactUpdate = vi.fn(async () => ({}));
     const encryptionKeyFindMany = vi.fn(async () => []);
@@ -254,11 +284,23 @@ describe("runVerify org-scoping guard", () => {
       backupPolicy: { findUnique: backupPolicyFindUnique },
       encryptionKey: { findMany: encryptionKeyFindMany },
     };
-    return { prisma: prisma as unknown as PrismaClient, backupJobUpdate, artifactUpdate, encryptionKeyFindMany, backupPolicyFindUnique };
+    return {
+      prisma: prisma as unknown as PrismaClient,
+      backupJobUpdate,
+      artifactUpdate,
+      encryptionKeyFindMany,
+      backupPolicyFindUnique,
+    };
   }
 
   it("fails a mis-scoped VERIFY job LOUD, before any policy lookup or decrypt, and leaves the artifact untouched", async () => {
-    const { prisma, backupJobUpdate, artifactUpdate, encryptionKeyFindMany, backupPolicyFindUnique } = fakePrisma({
+    const {
+      prisma,
+      backupJobUpdate,
+      artifactUpdate,
+      encryptionKeyFindMany,
+      backupPolicyFindUnique,
+    } = fakePrisma({
       organizationId: "org-other",
     });
     const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), env });

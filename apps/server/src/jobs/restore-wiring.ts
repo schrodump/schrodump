@@ -16,6 +16,7 @@ export interface RestoreWiringDeps {
     executionMode: "STREAM" | "STAGED";
     serverVersionNum: number;
     destinationName: string;
+    sourceHasOplog?: boolean;
   }>;
   availableKeys(): Promise<EncryptionKeyRecord[]>;
   targetHasExistingData(): Promise<boolean>;
@@ -41,6 +42,7 @@ export function createRestorePorts(deps: RestoreWiringDeps): RestorePorts {
         executionMode: row.executionMode,
         supportedRestoreTargets: [...caps.supportedRestoreTargets],
         destinationName: row.destinationName,
+        ...(row.sourceHasOplog !== undefined ? { sourceHasOplog: row.sourceHasOplog } : {}),
       };
     },
     availableKeys: deps.availableKeys,
