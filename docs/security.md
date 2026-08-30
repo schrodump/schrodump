@@ -69,9 +69,11 @@ Schrodump sweeps abandoned scratch directories at boot and periodically.
 > aborts the in-flight run (the runner force-kills that job's container), waits for the drain to
 > settle under `SCHRODUMP_SHUTDOWN_GRACE_MS` (default 8s, `compose.yaml` gives it a 15s
 > `stop_grace_period` to finish inside), then exits — releasing the scratch directory in the normal
-> path, the same as any other job failure. **Known limitation.** A `SIGKILL` — or a drain that
-> outlasts the grace budget — still bypasses this: the process exits immediately and the directory
-> survives, in clear, until the next sweep.
+> path, the same as any other job failure. The in-flight artifact upload is cancelled along with the
+> dump, so the release no longer waits for a multipart upload to finish — which used to be the most
+> likely way a drain overran its budget on a slow link. **Known limitation.** A `SIGKILL` — or a
+> drain that outlasts the grace budget anyway — still bypasses this: the process exits immediately
+> and the directory survives, in clear, until the next sweep.
 
 > **Verified 2026-08-30, and here is exactly what was verified.** A backup was run against a real
 > PostgreSQL origin (4M rows of incompressible data) through a real Docker executor onto real

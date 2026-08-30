@@ -16,7 +16,14 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { z } from "zod";
 import { runCanary } from "./canary.js";
-import type { HealthResult, ObjectMeta, Page, PutOptions, PutResult, StorageDriver } from "./driver.js";
+import type {
+  HealthResult,
+  ObjectMeta,
+  Page,
+  PutOptions,
+  PutResult,
+  StorageDriver,
+} from "./driver.js";
 
 /**
  * Configuration for one S3-compatible destination.
@@ -101,7 +108,12 @@ class S3Driver implements StorageDriver {
   }
 
   async put(key: string, body: Readable, opts: PutOptions): Promise<PutResult> {
+    // Already shutting down: never begin a multipart upload we would immediately have to abort.
+    if (opts.signal?.aborted === true) {
+      throw this.#wrap("put", key, new Error("upload aborted before it started"));
+    }
     const counted = countedStream(body);
+    let onAbort: (() => void) | undefined;
     try {
       const upload = new Upload({
         client: this.#client,
@@ -115,6 +127,20 @@ class S3Driver implements StorageDriver {
         partSize: opts.partSize,
         leavePartsOnError: false,
       });
+      const signal = opts.signal;
+      if (signal !== undefined) {
+        // lib-storage's own cancellation, not a stream teardown: abort() sends
+        // AbortMultipartUpload, so the parts already written are reclaimed server-side instead of
+        // lingering as a partial upload nobody will ever complete. done() then rejects, which is
+        // what lets the caller stop waiting. Destroying `body` instead would reach into the
+        // caller's stream — the one feeding its checksum and size accounting — for no gain.
+        onAbort = () => void upload.abort().catch(() => undefined);
+        signal.addEventListener("abort", onAbort, { once: true });
+        // The signal can fire between the entry check above and this registration, and a past
+        // abort is never replayed to a listener added afterwards — the same race the runner guards
+        // in packages/runner/src/docker.ts.
+        if (signal.aborted) onAbort();
+      }
       const out = await upload.done();
       return {
         etag: stripQuotes(out.ETag),
@@ -123,6 +149,10 @@ class S3Driver implements StorageDriver {
       };
     } catch (err) {
       throw this.#wrap("put", key, err);
+    } finally {
+      // opts.signal is the process-wide shutdown signal and outlives every upload; a listener left
+      // behind accumulates one per object written.
+      if (onAbort !== undefined) opts.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -141,7 +171,9 @@ class S3Driver implements StorageDriver {
 
   async head(key: string): Promise<ObjectMeta | null> {
     try {
-      const out = await this.#client.send(new HeadObjectCommand({ Bucket: this.#bucket, Key: key }));
+      const out = await this.#client.send(
+        new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
+      );
       return {
         key,
         sizeBytes: out.ContentLength ?? 0,
@@ -195,7 +227,10 @@ class S3Driver implements StorageDriver {
         etag: stripQuotes(o.ETag),
         lastModified: o.LastModified ?? new Date(0),
       }));
-      return { items, cursor: out.IsTruncated === true ? (out.NextContinuationToken ?? null) : null };
+      return {
+        items,
+        cursor: out.IsTruncated === true ? (out.NextContinuationToken ?? null) : null,
+      };
     } catch (err) {
       throw this.#wrap("list", prefix, err);
     }
