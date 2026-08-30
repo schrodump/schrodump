@@ -42,7 +42,11 @@ interface Harness {
   states: string[];
 }
 
-function makeHarness(over: Partial<BackupPorts> = {}, caps?: Capabilities, probe: ProbeResult = PROBE): Harness {
+function makeHarness(
+  over: Partial<BackupPorts> = {},
+  caps?: Capabilities,
+  probe: ProbeResult = PROBE,
+): Harness {
   const calls: string[] = [];
   const released = { value: false };
   const persistedStates: string[] = [];
@@ -115,18 +119,13 @@ describe("runBackupJob", () => {
     ]);
   });
 
-  it("reserves and releases scratch in STAGED mode", async () => {
-    const h = makeHarness({}, { stagedCapable: true, requiresSeparateGlobalsDump: false }, {
-      ...PROBE,
-      estimatedBytes: 5000,
-    });
-    const outcome = await runBackupJob({ ...CTX, stagedThresholdBytes: 1000 }, h.ports);
-    expect(outcome.mode).toBe("STAGED");
-    expect(h.calls).toContain("reserveScratch");
-    expect(h.released.value).toBe(true);
-  });
+  // The scratch reserve/release lifecycle used to be covered here through STAGED mode. STAGED is
+  // now unreachable on purpose (see resolveExecutionMode: a staged dump uploaded an EMPTY artifact
+  // while reporting SUCCEEDED), so nothing in runBackupJob reserves scratch any more and there is
+  // no honest way to exercise that branch from here. The branch is kept for the directory pipeline
+  // that will restore it; this comment is the marker that its coverage went with STAGED.
 
-  it("releases scratch and marks the job FAILED when a mid-pipeline step throws", async () => {
+  it("marks the job FAILED when a mid-pipeline step throws", async () => {
     const h = makeHarness(
       { executeAndUpload: () => Promise.reject(new Error("dump failed")) },
       { stagedCapable: true, requiresSeparateGlobalsDump: false },
@@ -135,7 +134,6 @@ describe("runBackupJob", () => {
     const outcome = await runBackupJob({ ...CTX, stagedThresholdBytes: 1000 }, h.ports);
     expect(outcome.ok).toBe(false);
     expect(h.states).toContain("FAILED");
-    expect(h.released.value).toBe(true);
   });
 
   it("runs the postgres globals dump when the capability requires it", async () => {

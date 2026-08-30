@@ -105,6 +105,14 @@ link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
+- **Dump STAGED está desligado, e o motivo importa:** o dump em diretório (`pg_dump -Fd`, mydumper)
+  escreve num diretório, mas o caminho de upload lê o **stdout** do container — ninguém nunca leu
+  aquele diretório de volta. O resultado era um artefato **vazio** (só cabeçalhos de gzip+age, 318
+  bytes) com o job marcado `SUCCEEDED`, verificado contra um banco real de 545 MB. E como restore
+  recusa artefato STAGED e verify o rebaixa para CHECKSUM — que **passa** nesses 318 bytes —, o
+  artefato podia chegar a `VERIFIED`. `resolveExecutionMode` agora degrada para STREAM com aviso.
+  Reabilitar exige pipeline de diretório nos dois lados (tar na ida, untar na volta).
+
 - **Restore roda ponta a ponta para as quatro engines, mas só artefato STREAM:** a rota enfileira,
   o worker despacha `RESTORE` e roda o pipeline real (download → decrypt in-process → gunzip →
   arquivo montado → `pg_restore`/`mysql`/`mongorestore`). A tranca é por **`executionMode`, não por
