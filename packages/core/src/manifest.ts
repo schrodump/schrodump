@@ -43,6 +43,13 @@ export const ManifestSchema = z.object({
     keyIds: z.array(z.string().min(1)).min(1),
   }),
   dependsOn: z.array(z.string()),
+  // mongodb only: whether the archive was dumped with --oplog (i.e. from a replica set). Restore
+  // reads it to decide whether --oplogReplay is safe to emit; without it, each collection lands on a
+  // slightly different instant. OPTIONAL by necessity, not by taste: every manifest already written
+  // lacks it, and this document is what the catalog rebuild reads when the metadata database is
+  // gone — a required field would fail that recovery on every existing artifact. Absent therefore
+  // means "unknown provenance", which is a weaker claim than false.
+  sourceHasOplog: z.boolean().optional(),
   createdAt: z.iso.datetime({ offset: true }),
   durationMs: z.number().int().min(0),
 });

@@ -25,6 +25,31 @@ const VALID: Manifest = {
   durationMs: 5000,
 };
 
+describe("parseManifest — sourceHasOplog", () => {
+  it("carries the fact through a parse -> serialize -> parse round trip", () => {
+    const parsed = parseManifest({ ...VALID, engine: "mongodb", sourceHasOplog: true });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.sourceHasOplog).toBe(true);
+
+    const again = parseManifest(JSON.parse(serializeManifest(parsed.manifest)));
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.manifest.sourceHasOplog).toBe(true);
+  });
+
+  it("still parses a manifest written before the fact was tracked", () => {
+    // The field is OPTIONAL, not defaulted: every manifest already in a bucket lacks it, and the
+    // catalog rebuild — the recovery path when the metadata database is lost — parses those. A
+    // required field here would make disaster recovery fail on every artifact ever written. Absent
+    // must stay distinguishable from false: it means "unknown provenance", not "no oplog".
+    const parsed = parseManifest(VALID);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.sourceHasOplog).toBeUndefined();
+  });
+});
+
 describe("parseManifest / serializeManifest", () => {
   it("round-trips parse -> serialize -> parse", () => {
     const first = parseManifest(VALID);

@@ -2,7 +2,12 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { EngineDescriptorError, type DumpInput, type RestoreInput, type TargetConnection } from "../descriptor.js";
+import {
+  EngineDescriptorError,
+  type DumpInput,
+  type RestoreInput,
+  type TargetConnection,
+} from "../descriptor.js";
 import { mongodbAdapter } from "./mongodb.js";
 
 const CONN: TargetConnection = {
@@ -97,19 +102,6 @@ describe("mongodbAdapter.buildRestore", () => {
     expect(descriptor.outputKind).toBe("directory");
   });
 
-  it("never emits --oplogReplay, even for a FULL_CLUSTER target", () => {
-    // RestoreInput carries no fact saying whether the source archive has an oplog (buildDump's
-    // own facts.isReplicaSet choice is not threaded through), and mongorestore hard-refuses
-    // --oplogReplay against an archive that lacks one — see the comment in buildRestore.
-    const descriptor = mongodbAdapter.buildRestore(
-      restoreInput({
-        target: "FULL_CLUSTER",
-        sourcePath: "/var/lib/schrodump/restore-source",
-      }),
-    );
-    expect(descriptor.command).not.toContain("--oplogReplay");
-  });
-
   it("includes --tls when connection.tls is true", () => {
     const descriptor = mongodbAdapter.buildRestore(
       restoreInput({
@@ -141,6 +133,46 @@ describe("mongodbAdapter.buildRestore", () => {
     }
     expect(descriptor.command).toContain("--config");
     expect(descriptor.env.MONGODB_PASSWORD).toBe("s3cret");
+  });
+});
+
+describe("mongodbAdapter.buildRestore — oplog replay", () => {
+  it("replays the oplog for a FULL_CLUSTER restore of an oplog-bearing archive", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        target: "FULL_CLUSTER",
+        sourceHasOplog: true,
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    );
+    expect(descriptor.command).toContain("--oplogReplay");
+  });
+
+  it("never replays for an archive dumped without --oplog, whatever the target", () => {
+    // mongorestore hard-refuses --oplogReplay when the archive carries no oplog ("no oplog file to
+    // replay"), so emitting it here would crash the whole restore rather than degrade it.
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({ target: "FULL_CLUSTER", sourceHasOplog: false }),
+    );
+    expect(descriptor.command).not.toContain("--oplogReplay");
+  });
+
+  it("never replays when the archive's provenance is unknown", () => {
+    // Artifacts written before the fact was recorded. Guessing "yes" crashes a real restore during
+    // an incident; the caller records the consistency caveat on the job instead.
+    const descriptor = mongodbAdapter.buildRestore(restoreInput({ target: "FULL_CLUSTER" }));
+    expect(descriptor.command).not.toContain("--oplogReplay");
+  });
+
+  it("never replays into a sub-scope target, even from an oplog-bearing archive", () => {
+    // --oplogReplay applies the oplog across the WHOLE archive; against a DATABASE/COLLECTION
+    // target that would write outside the scope the operator asked for.
+    for (const target of ["DATABASE", "COLLECTION"] as const) {
+      const descriptor = mongodbAdapter.buildRestore(
+        restoreInput({ target, sourceHasOplog: true }),
+      );
+      expect(descriptor.command).not.toContain("--oplogReplay");
+    }
   });
 });
 
@@ -207,6 +239,12 @@ describe("mongodbAdapter.buildVerifyAssertions", () => {
       serverVersionNum: 80004,
       scope: { databases: ["shop"], schemas: [], collections: [] },
     });
-    expect(descriptor.command).toEqual(["mongosh", "--nodb", "--quiet", "--eval", descriptor.command.at(-1)]);
+    expect(descriptor.command).toEqual([
+      "mongosh",
+      "--nodb",
+      "--quiet",
+      "--eval",
+      descriptor.command.at(-1),
+    ]);
   });
 });

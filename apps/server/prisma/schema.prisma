@@ -338,6 +338,11 @@ model Artifact {
   compression         CompressionAlgorithm
   // Fingerprints of the recipients the artifact was encrypted for.
   keyIds              String[]
+  // mongodb only: whether the archive was dumped with --oplog (i.e. from a replica set). NULL means
+  // unknown — either a non-mongo engine, or an artifact written before the fact was tracked. Restore
+  // needs it to decide whether --oplogReplay is safe; it cannot be re-derived later, because the
+  // origin's topology may have changed or the origin may be gone.
+  sourceHasOplog      Boolean?
   // jobIds this artifact depends on (full/incremental chain).
   dependsOn           String[]
   createdAt           DateTime      @default(now())

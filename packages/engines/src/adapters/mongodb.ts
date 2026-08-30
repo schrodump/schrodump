@@ -93,19 +93,19 @@ export const mongodbAdapter: EngineAdapter = {
 
   buildRestore(input) {
     const connection = input.connection;
-    // --oplogReplay is NEVER emitted, deliberately, even for a FULL_CLUSTER target. mongorestore
-    // hard-refuses it ("no oplog file to replay") unless the SOURCE archive was dumped with
-    // --oplog, and RestoreInput carries no fact telling this builder whether it was — buildDump's
-    // own choice (facts.isReplicaSet) is not threaded through to restore, in either the real
-    // restore path or FULL_RESTORE verify's sandbox restore (which never re-probes the origin by
-    // design). Guessing "yes" is a hard crash of the WHOLE restore for the guaranteed-common case
-    // (buildDump refuses a scoped dump on a replica set, so any scoped mongo artifact — the only
-    // kind FULL_RESTORE verify's sandbox ever restores, since resolveVerifyPlan downgrades
-    // unscoped mongo to CHECKSUM — is provably never oplog-bearing); guessing "no" means an actual
-    // replica-set-sourced FULL_CLUSTER restore is restored WITHOUT oplog replay — each collection
-    // ends at a slightly different effective timestamp (a cross-collection point-in-time consistency
-    // loss; each collection stays internally consistent), not a crash. Reachable only on the real
-    // restore path, never in verify (which only restores scoped, non-oplog archives). See roadmap.md.
+    // --oplogReplay replays the archive's oplog so every collection lands on ONE instant. Emitted
+    // only when both hold:
+    //   sourceHasOplog === true — mongorestore hard-refuses the flag against an archive without an
+    //     oplog ("no oplog file to replay"), crashing the whole restore. `undefined` (an artifact
+    //     older than the fact) is deliberately NOT treated as true: the caller records the
+    //     consistency caveat on the job instead of gambling a restore during an incident.
+    //   target === FULL_CLUSTER — the oplog applies across the WHOLE archive, so replaying it into a
+    //     DATABASE/COLLECTION target would write outside the scope that was asked for. (Same
+    //     territory as the --drop warning below; both want --nsInclude when sub-scope restore lands.)
+    // Without replay each collection ends at a slightly different effective timestamp — internally
+    // consistent, but not sharing one dump-end instant.
+    const oplogArgs =
+      input.sourceHasOplog === true && input.target === "FULL_CLUSTER" ? ["--oplogReplay"] : [];
     const command = [
       "mongorestore",
       ...mongoConnArgs(connection),
@@ -118,6 +118,7 @@ export const mongodbAdapter: EngineAdapter = {
       // restore (DATABASE/COLLECTION into a real, possibly-non-empty target) lands, --drop would drop
       // every namespace present in the archive, not just the scoped one — add --nsInclude scoping then.
       "--drop",
+      ...oplogArgs,
     ];
 
     if (input.sourcePath !== undefined) {

@@ -52,6 +52,9 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
           manifestKey: `${deps.prefix}/${deps.organizationId}/${manifest.jobId}/manifest.json`,
           engine: manifest.engine,
           serverVersionNum: manifest.serverVersionNum,
+          // A rebuild must not silently downgrade a known-oplog artifact to unknown provenance:
+          // that would make every later restore of it record a caveat it does not deserve.
+          sourceHasOplog: manifest.sourceHasOplog ?? null,
           sizeRawBytes: BigInt(manifest.sizeRawBytes),
           sizeCompressedBytes: BigInt(manifest.sizeCompressedBytes),
           checksumAlgorithm: manifest.checksumAlgorithm,
