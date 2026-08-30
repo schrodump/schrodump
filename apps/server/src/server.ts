@@ -152,26 +152,39 @@ export async function main(): Promise<void> {
   //    dump takes minutes to hours and `docker stop` gives ~10s, so draining is not on the table.
   //    An unfinished backup is a FAILED job and an UNOBSERVED artifact — consistent with the thesis
   //    — and, crucially, no cleartext dump survives the shutdown. The abort rides paths that already
-  //    exist: the runner kills the container, the executor's finally releases the scratch
-  //    reservation, and runWorkerOnce's catch marks the job FAILED. Boot-time orphan recovery and
-  //    the scratch sweep remain the backstop for a SIGKILL that beats the grace.
+  //    exist: the runner kills the container and the executor's finally releases the scratch
+  //    reservation, while the job's own catch is what records the terminal state — BACKUP through
+  //    backup.ts, RESTORE through restore.ts, VERIFY through verify.ts's INCONCLUSIVE branch (a
+  //    shutdown observed nothing, so it must never condemn the artifact). runWorkerOnce's catch is
+  //    only the backstop for a throw that escapes all three. Boot-time orphan recovery and the
+  //    scratch sweep remain the backstop for a SIGKILL that beats the grace.
   installShutdown({
     onSignal: async () => {
       handle.stop();
       schedulerHandle.stop();
       shutdownController.abort();
       const graceMs = env.SCHRODUMP_SHUTDOWN_GRACE_MS;
-      const timedOut = await Promise.race([
-        handle.whenIdle().then(() => false),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), graceMs).unref()),
-      ]);
-      if (timedOut) {
-        // The cleanup is wedged (most likely a hung Docker daemon call). Exit anyway — holding the
-        // process past the docker-stop window only trades this for a SIGKILL, and the boot sweep
-        // recovers either way.
-        logger.warn({ graceMs }, "shutdown grace expired with a job still cleaning up");
+      // ONE deadline over the WHOLE sequence, drain AND disconnect. Bounding only the drain leaves
+      // the shutdown unbounded: $disconnect can block too (a metadata-DB connection that never
+      // answers), and an unbounded step after a bounded one is still an unbounded shutdown. The
+      // timer is unref'd so this ceiling can never itself be what holds the process open.
+      const deadline = new Promise<"expired">((resolve) =>
+        setTimeout(() => resolve("expired"), graceMs).unref(),
+      );
+      let drained = false;
+      const sequence = handle
+        .whenIdle()
+        .then(() => {
+          drained = true;
+          return advisoryLockPrisma.$disconnect();
+        })
+        .then(() => "settled" as const);
+      if ((await Promise.race([sequence, deadline])) === "expired") {
+        // Wedged (most likely a hung Docker daemon call, or a stuck connection). Exit anyway —
+        // holding the process past the docker-stop window only trades this for a SIGKILL, and the
+        // boot sweep recovers either way. `drained` says which half ran out of budget.
+        logger.warn({ graceMs, drained }, "shutdown grace expired");
       }
-      await advisoryLockPrisma.$disconnect();
     },
   });
 }

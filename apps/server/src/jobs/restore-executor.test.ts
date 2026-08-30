@@ -311,6 +311,34 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     expect(stagingContentsAtCleanup).toEqual([]);
   });
 
+  // Same claim as backup-wiring's: the shutdown signal has to ARRIVE at the runner, by identity.
+  // A call site that dropped it would leave a restore container running past the shutdown with
+  // nothing failing.
+  it("hands the shutdown signal through to the restore run", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+    const { signal } = new AbortController();
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      signal,
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    });
+
+    expect(ok).toBe(true);
+    expect(capture[0]?.signal).toBe(signal);
+  });
+
   // Postgres restores globals and then the database. An abort between the two must not begin the
   // second step: it would stage a fresh cleartext dump the grace has no budget left to remove.
   it("refuses to begin a step once the shutdown signal has fired, staging nothing", async () => {

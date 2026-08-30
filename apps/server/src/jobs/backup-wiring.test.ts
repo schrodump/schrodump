@@ -263,4 +263,31 @@ describe("createBackupPorts.executeAndUpload", () => {
     await run(undefined);
     expect(capture[0]?.mounts).toEqual([]);
   });
+
+  // The shutdown signal has to ARRIVE at the runner — that is the whole mechanism by which a
+  // SIGTERM kills the dump container and releases its cleartext scratch. Threading it rested on tsc
+  // plus a manual audit, so a call site that silently dropped it would leak a container class on
+  // every shutdown with no test failing. Assert identity, not presence: the wrong signal is as
+  // useless as none.
+  it("hands the shutdown signal through to the dump run", async () => {
+    const capture: RunOptions[] = [];
+    const capturingRunner: Runner = {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push(opts);
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+    const { signal } = new AbortController();
+    const { deps, recipient } = await makeDeps(0);
+    const ports = createBackupPorts({ ...deps, runner: capturingRunner, signal });
+    await ports.executeAndUpload({
+      mode: "STREAM",
+      parallelism: 1,
+      probe: PROBE,
+      recipients: { recipients: [recipient], keyIds: ["k"] },
+    });
+    expect(capture[0]?.signal).toBe(signal);
+  });
 });

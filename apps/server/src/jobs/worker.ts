@@ -70,8 +70,10 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
   const job = await deps.store.claimNextJob();
   if (job === null) return "idle";
 
-  // Only the executor's own run may fail the job. A crash here means the job never reached a
-  // terminal state, so failJob is correct.
+  // Each job kind records its OWN terminal state: BACKUP through backup.ts's catch, RESTORE through
+  // restore.ts's, VERIFY through verify.ts (an INCONCLUSIVE proof fails the job and leaves the
+  // artifact untouched). This catch is the backstop for a throw that escapes all three — the job
+  // never reached a terminal state, so failJob is correct — not the normal failure path.
   let backup: BackupResult | null = null;
   try {
     if (job.kind === "BACKUP") {
