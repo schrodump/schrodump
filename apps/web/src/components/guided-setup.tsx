@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useDestinations, usePolicies, useTargets } from "@/hooks/use-resources";
+import { useDestinations, useEncryptionKeys, usePolicies, useTargets } from "@/hooks/use-resources";
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
@@ -24,14 +24,20 @@ export function GuidedSetup() {
   const destinations = useDestinations();
   const targets = useTargets();
   const policies = usePolicies();
+  const keys = useEncryptionKeys();
 
+  // First, and not by taste. Until both keys exist every backup fails inside resolveRecipients, so
+  // a checklist that started at "destination" walked the operator through four steps and then a
+  // failed job with a message about a key they were never told to create.
+  const hasKeys = (keys.data ?? []).some((key) => key.type === "escrow" && key.state === "active");
   const hasDestination = (destinations.data ?? []).length > 0;
   const hasTarget = (targets.data ?? []).length > 0;
   const hasVerifyingPolicy = (policies.data ?? []).some((policy) => policy.verifyLevel !== "NONE");
 
-  if (hasDestination && hasTarget && hasVerifyingPolicy) return null;
+  if (hasKeys && hasDestination && hasTarget && hasVerifyingPolicy) return null;
 
   const steps: Step[] = [
+    { key: "guided.step.keys", href: "/settings", done: hasKeys },
     { key: "guided.step.destination", href: "/destinations", done: hasDestination },
     { key: "guided.step.canary", href: "/destinations", done: false, manual: true },
     { key: "guided.step.target", href: "/targets", done: hasTarget },

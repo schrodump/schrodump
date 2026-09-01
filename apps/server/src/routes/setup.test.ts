@@ -53,7 +53,7 @@ describe("/setup", () => {
     const res = await app.inject({
       method: "POST",
       url: "/setup",
-      payload: { token: "t", email: "a@b.c", password: "password1" },
+      payload: { token: "t", email: "a@b.c", password: "password1234" },
     });
     expect(res.statusCode).toBe(404);
     await app.close();
@@ -67,7 +67,7 @@ describe("/setup", () => {
     const res = await app.inject({
       method: "POST",
       url: "/setup",
-      payload: { token, email: "admin@example.com", password: "password1" },
+      payload: { token, email: "admin@example.com", password: "password1234" },
     });
     expect(res.statusCode).toBe(201);
     expect(deps.created).toHaveLength(1);
@@ -85,9 +85,27 @@ describe("/setup", () => {
     const res = await app.inject({
       method: "POST",
       url: "/setup",
-      payload: { token, email: "admin@example.com", password: "password1" },
+      payload: { token, email: "admin@example.com", password: "password1234" },
     });
     expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
+describe("/setup password floor", () => {
+  // The setup form is the one screen an operator sees before they have an account. A password of
+  // 8 to 11 characters used to pass this schema and then be rejected deeper in, by Better-Auth,
+  // from inside consumeAndCreateAdmin — a 500 with nothing actionable on it.
+  it("rejects a password below the server's own floor here, not deeper in", async () => {
+    const deps = baseDeps();
+    const app = await appWith(deps);
+    const res = await app.inject({
+      method: "POST",
+      url: "/setup",
+      payload: { token: "t", email: "a@b.c", password: "elevenchar" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(deps.created).toHaveLength(0);
     await app.close();
   });
 });

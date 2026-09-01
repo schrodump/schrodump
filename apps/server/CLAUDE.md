@@ -162,6 +162,22 @@ link de setup.
   `wiring.test.ts` assere a forma da query com um fake que passa pelo wrapper real do
   `scopedPrisma`, o que de quebra prova que o filtro de `organizationId` continua aplicado.
 
+## Provisionamento de chaves (`routes/encryption-keys.ts`, `crypto/key-provisioning.ts`)
+
+- **Até isto existir, nada no produto criava `EncryptionKey`.** `generateAgeKeyPair` era chamada só
+  por teste e toda referência de produção era leitura — uma instalação nova falhava o primeiro
+  backup dentro do `resolveRecipients` sem caminho de conserto pela interface.
+- **A identidade de escrow é devolvida UMA vez e não é persistida.** `encryptedIdentity` fica null
+  por construção. Se fosse guardada, perder o banco de metadados perderia as duas chaves de uma vez
+  e o self-backup nunca poderia ser recuperado — que é o motivo inteiro de ele selar para escrow.
+  Coberto por teste que assere que a linha escrita não contém rastro dela.
+- **Recipient trazido pelo operador é validado pelo próprio age** (`isValidAgeRecipient`), checksum
+  bech32 incluído: caractere trocado é recusado agora, não descoberto meses depois como artefato que
+  ninguém abre.
+- **409, não 400, quando já há chave ativa do tipo.** Duas operacionais ativas fariam o `find` do
+  `resolveRecipients` escolher por ordem de linha — decisão que ninguém tomou. Rotação é operação
+  separada e não existe.
+
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
 - **STAGED funciona nos dois sentidos, e três coisas precisaram entrar juntas.** O diretório de

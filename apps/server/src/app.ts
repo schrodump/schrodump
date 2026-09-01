@@ -10,6 +10,7 @@ import { registerAuditTrail } from "./observability/audit.js";
 import { newCorrelationId } from "./observability/pino.js";
 import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js";
 import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
+import { encryptionKeyRoutes, type EncryptionKeyRoutesDeps } from "./routes/encryption-keys.js";
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
@@ -35,6 +36,7 @@ export interface AppDeps {
   jobsService: JobsService;
   catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
   prisma: PrismaClient;
+  encryptionKeys: Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision">;
   // Null when self-backup is unconfigured; surfaced by GET /self-backups so the UI can distinguish
   // "not configured" from "configured and never ran".
   selfBackupDestinationId: string | null;
@@ -112,6 +114,7 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     catalogRoutes({ resolver: deps.resolver, rebuild: deps.catalogRebuild })(instance);
+    encryptionKeyRoutes({ resolver: deps.resolver, ...deps.encryptionKeys })(instance);
     selfBackupRoutes({
       resolver: deps.resolver,
       prisma: deps.prisma,

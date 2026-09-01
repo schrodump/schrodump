@@ -15,7 +15,10 @@ export interface SetupDeps {
 const BodySchema = z.object({
   token: z.string().min(1),
   email: z.email(),
-  password: z.string().min(8),
+  // 12, matching the server's minPasswordLength. At 8 a password would pass this schema and then
+  // be rejected by Better-Auth from inside consumeAndCreateAdmin, surfacing as a confusing 500 on
+  // the one screen an operator sees before they have an account.
+  password: z.string().min(12),
 });
 
 // There is no web recovery mode: /setup 404s once any user exists. Recovery is CLI only
