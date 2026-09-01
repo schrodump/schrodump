@@ -89,7 +89,9 @@ export function PolicyForm({
       : { keepLast: 7, keepDaily: 0, keepWeekly: 4, keepMonthly: 6, keepYearly: 1 },
   );
   const [verifyLevel, setVerifyLevel] = useState<VerifyLevel>(policy?.verifyLevel ?? "CHECKSUM");
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>(policy?.executionMode ?? "STREAM");
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(
+    policy?.executionMode ?? "STREAM",
+  );
   const [parallelism, setParallelism] = useState(policy?.parallelism ?? 1);
   const [invalid, setInvalid] = useState(false);
 
@@ -179,12 +181,16 @@ export function PolicyForm({
               </option>
             ))}
           </Select>
-          {editing ? <p className="text-xs text-muted-foreground">{t("policies.repointLocked")}</p> : null}
+          {editing ? (
+            <p className="text-xs text-muted-foreground">{t("policies.repointLocked")}</p>
+          ) : null}
         </div>
       </div>
 
       <fieldset className="grid gap-3 sm:grid-cols-5">
-        <legend className="mb-1 text-sm font-medium sm:col-span-5">{t("policies.retention")}</legend>
+        <legend className="mb-1 text-sm font-medium sm:col-span-5">
+          {t("policies.retention")}
+        </legend>
         {GFS_FIELDS.map((field) => (
           <div key={field.name} className="space-y-1.5">
             <Label htmlFor={field.name}>{t(field.key)}</Label>
@@ -193,7 +199,9 @@ export function PolicyForm({
               type="number"
               min={0}
               value={gfs[field.name]}
-              onChange={(e) => setGfs((prev) => ({ ...prev, [field.name]: Number(e.target.value) }))}
+              onChange={(e) =>
+                setGfs((prev) => ({ ...prev, [field.name]: Number(e.target.value) }))
+              }
             />
           </div>
         ))}
@@ -202,7 +210,11 @@ export function PolicyForm({
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="verifyLevel">{t("policies.verifyLevel")}</Label>
-          <Select id="verifyLevel" value={verifyLevel} onChange={(e) => setVerifyLevel(e.target.value as VerifyLevel)}>
+          <Select
+            id="verifyLevel"
+            value={verifyLevel}
+            onChange={(e) => setVerifyLevel(e.target.value as VerifyLevel)}
+          >
             {VERIFY_LEVELS.map((level) => (
               <option key={level} value={level}>
                 {t(verifyLabel[level])}
@@ -212,7 +224,11 @@ export function PolicyForm({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="executionMode">{t("policies.executionMode")}</Label>
-          <Select id="executionMode" value={executionMode} onChange={(e) => setExecutionMode(e.target.value as ExecutionMode)}>
+          <Select
+            id="executionMode"
+            value={executionMode}
+            onChange={(e) => setExecutionMode(e.target.value as ExecutionMode)}
+          >
             {EXECUTION_MODES.map((mode) => (
               <option key={mode} value={mode}>
                 {t(modeLabel[mode])}
@@ -236,7 +252,9 @@ export function PolicyForm({
         </div>
       </div>
 
-      {invalid ? <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p> : null}
+      {invalid ? (
+        <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p>
+      ) : null}
       {failure !== null ? <ErrorState message={failure.message} /> : null}
       <div className="flex gap-2">
         <Button type="submit" disabled={pending}>

@@ -4,6 +4,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ProbeFailureCode } from "@/lib/domain";
+import type { NotificationChannel } from "@/lib/types";
 
 export function useCreateTarget() {
   const client = useQueryClient();
@@ -36,9 +37,12 @@ export function useDeleteTarget() {
 export function useTestConnection() {
   return useMutation({
     mutationFn: (targetId: string) =>
-      api.post<{ ok: boolean; serverVersionNum: number | null; failure: ProbeFailureCode | null; driverCode: string | null }>(
-        `/targets/${targetId}/test-connection`,
-      ),
+      api.post<{
+        ok: boolean;
+        serverVersionNum: number | null;
+        failure: ProbeFailureCode | null;
+        driverCode: string | null;
+      }>(`/targets/${targetId}/test-connection`),
   });
 }
 
@@ -70,7 +74,9 @@ export function useDeleteDestination() {
 export function useCanary() {
   return useMutation({
     mutationFn: (destinationId: string) =>
-      api.post<{ ok: boolean; failedOperation: string | null }>(`/destinations/${destinationId}/canary`),
+      api.post<{ ok: boolean; failedOperation: string | null }>(
+        `/destinations/${destinationId}/canary`,
+      ),
   });
 }
 
@@ -110,7 +116,8 @@ export function useTriggerBackup() {
 export function useTriggerVerify() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (artifactId: string) => api.post<{ jobId: string }>(`/artifacts/${artifactId}/verify`),
+    mutationFn: (artifactId: string) =>
+      api.post<{ jobId: string }>(`/artifacts/${artifactId}/verify`),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
   });
 }
@@ -122,5 +129,34 @@ export function useTriggerRestore() {
         target: input.target,
         confirmExistingDatabase: input.confirmExistingDatabase,
       }),
+  });
+}
+
+export function useCreateNotificationChannel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<NotificationChannel>("/notification-channels", body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["notification-channels"] }),
+  });
+}
+
+// Disabling, not deleting, is the reversible operation and the one the interface leads with:
+// deleting a channel that is recording delivery failures throws away the only evidence it was
+// failing.
+export function useSetNotificationChannelEnabled() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.post<NotificationChannel>(`/notification-channels/${id}/enabled`, { enabled }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["notification-channels"] }),
+  });
+}
+
+export function useDeleteNotificationChannel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/notification-channels/${id}`),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["notification-channels"] }),
   });
 }

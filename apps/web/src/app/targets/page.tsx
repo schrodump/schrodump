@@ -20,13 +20,20 @@ function TestConnection({ targetId }: { targetId: string }) {
   const test = useTestConnection();
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button size="sm" variant="outline" onClick={() => test.mutate(targetId)} disabled={test.isPending}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => test.mutate(targetId)}
+        disabled={test.isPending}
+      >
         {test.isPending ? t("common.loading") : t("targets.testConnection")}
       </Button>
       {test.isSuccess && test.data.ok ? (
         <span className="text-sm text-[var(--color-state-verified)]">
           {test.data.serverVersionNum !== null
-            ? t("targets.probe.version", { version: formatServerVersion(test.data.serverVersionNum) })
+            ? t("targets.probe.version", {
+                version: formatServerVersion(test.data.serverVersionNum),
+              })
             : t("targets.probe.ok")}
         </span>
       ) : null}
@@ -41,7 +48,9 @@ function TestConnection({ targetId }: { targetId: string }) {
         </span>
       ) : null}
       {test.isError ? (
-        <span className="text-sm text-[var(--color-state-failed)]">{t("targets.probe.failed")}</span>
+        <span className="text-sm text-[var(--color-state-failed)]">
+          {t("targets.probe.failed")}
+        </span>
       ) : null}
       {/* Only alongside a success: on a failure this reads as if the probe ran and came back thin,
           which is the wrong thing to tell someone whose connection did not work at all. */}

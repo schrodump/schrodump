@@ -40,7 +40,11 @@ function PolicyRow({ policy, scratchConfigured }: { policy: Policy; scratchConfi
     return (
       <Card>
         <CardContent className="pt-6">
-          <PolicyForm onDone={() => setEditing(false)} scratchConfigured={scratchConfigured} policy={policy} />
+          <PolicyForm
+            onDone={() => setEditing(false)}
+            scratchConfigured={scratchConfigured}
+            policy={policy}
+          />
         </CardContent>
       </Card>
     );

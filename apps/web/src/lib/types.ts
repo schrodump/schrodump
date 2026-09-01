@@ -99,3 +99,22 @@ export function countByState(artifacts: Artifact[]): Record<ArtifactState, numbe
   for (const artifact of artifacts) counts[artifact.state] += 1;
   return counts;
 }
+
+// Mirrors the server's ChannelRecord minus the secrets, which the API never returns. lastFailure
+// is present on purpose: a notifier nobody can tell is broken is worse than having none, so the
+// interface has to be able to show it.
+export type NotificationChannelKind = "WEBHOOK" | "SMTP";
+
+export interface NotificationChannel {
+  id: string;
+  kind: NotificationChannelKind;
+  url: string | null;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpUsername: string | null;
+  fromAddress: string | null;
+  toAddresses: string[];
+  enabled: boolean;
+  lastFailureAt: string | null;
+  lastFailure: string | null;
+}

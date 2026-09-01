@@ -91,8 +91,10 @@ state across someone else's network, which is not a tradeoff worth a config flag
 kind or the other, discriminated, so the code cannot read the half that does not belong to it.
 
 Routing rules and per-user preferences remain deliberately out: one channel set per organization.
-**There is still no UI for channels** — they are rows, created by hand. That is the next increment,
-and worth saying plainly rather than leaving someone to discover it.
+Channels are configured through `/notifications` in the interface and a REST API behind it. Secrets
+stay write-only there like everywhere else: a signing secret or SMTP password goes in and is never
+read back. A channel's last delivery failure IS shown, because a notifier nobody can tell is broken
+is worse than having none.
 
 ## Known limitations shipping in v1
 

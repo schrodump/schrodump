@@ -33,8 +33,7 @@ function SetupForm() {
     mutationFn: () => api.post<{ ok: boolean }>("/setup", { token, email, password }),
   });
 
-  const closed =
-    check.isError && check.error instanceof ApiError && check.error.status === 404;
+  const closed = check.isError && check.error instanceof ApiError && check.error.status === 404;
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -80,19 +79,34 @@ function SetupForm() {
         <form className="space-y-4" onSubmit={onSubmit}>
           <div className="space-y-1.5">
             <Label htmlFor="token">{t("setup.token")}</Label>
-            <Input id="token" value={token} onChange={(event) => setToken(event.target.value)} required />
+            <Input
+              id="token"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              required
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="email">{t("setup.email")}</Label>
-            <Input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="password">{t("setup.password")}</Label>
-            <Input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
           </div>
-          {createAdmin.isError ? (
-            <ErrorState message={createAdmin.error.message} />
-          ) : null}
+          {createAdmin.isError ? <ErrorState message={createAdmin.error.message} /> : null}
           <Button type="submit" className="w-full" disabled={createAdmin.isPending}>
             {createAdmin.isPending ? t("common.loading") : t("setup.submit")}
           </Button>

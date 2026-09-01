@@ -7,7 +7,9 @@ import { createAuthClient } from "better-auth/react";
 // client needs an absolute base URL; on the server (prerender) it is never actually called, so a
 // placeholder keeps createAuthClient from throwing on a relative URL.
 const baseURL =
-  typeof window === "undefined" ? "http://localhost/api/auth" : `${window.location.origin}/api/auth`;
+  typeof window === "undefined"
+    ? "http://localhost/api/auth"
+    : `${window.location.origin}/api/auth`;
 
 // Session is a Better-Auth cookie — never localStorage.
 export const authClient = createAuthClient({ baseURL });

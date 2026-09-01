@@ -28,7 +28,8 @@ function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
         <div className="min-w-0">
           <p className="truncate font-medium">{artifact.bucketKey}</p>
           <p className="text-sm text-muted-foreground">
-            {t(`engine.${artifact.engine}`)} · {t("artifacts.size", { size: formatBytes(artifact.sizeCompressedBytes) })} ·{" "}
+            {t(`engine.${artifact.engine}`)} ·{" "}
+            {t("artifacts.size", { size: formatBytes(artifact.sizeCompressedBytes) })} ·{" "}
             {t("artifacts.key", { key })}
           </p>
         </div>

@@ -29,7 +29,9 @@ function JobRow({ job }: { job: Job }) {
         {job.reason ? <p className="text-sm text-muted-foreground">{job.reason}</p> : null}
         {job.stderr ? (
           <details>
-            <summary className="cursor-pointer text-sm text-muted-foreground">{t("jobs.log")}</summary>
+            <summary className="cursor-pointer text-sm text-muted-foreground">
+              {t("jobs.log")}
+            </summary>
             <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap">
               {job.stderr}
             </pre>

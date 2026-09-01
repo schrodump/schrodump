@@ -67,7 +67,9 @@ export function DestinationForm({
   const [accessKeyId, setAccessKeyId] = useState(destination?.accessKeyId ?? "");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [forcePathStyle, setForcePathStyle] = useState(destination?.forcePathStyle ?? false);
-  const [sealMode, setSealMode] = useState<SealMode>((destination?.sealMode as SealMode) ?? "operational");
+  const [sealMode, setSealMode] = useState<SealMode>(
+    (destination?.sealMode as SealMode) ?? "operational",
+  );
   const [invalid, setInvalid] = useState(false);
 
   function onSubmit(event: FormEvent) {
@@ -133,16 +135,32 @@ export function DestinationForm({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="bucket">{t("destinations.bucket")}</Label>
-        <Input id="bucket" value={bucket} disabled={editing} onChange={(e) => setBucket(e.target.value)} />
+        <Input
+          id="bucket"
+          value={bucket}
+          disabled={editing}
+          onChange={(e) => setBucket(e.target.value)}
+        />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="prefix">{t("destinations.prefix")}</Label>
-        <Input id="prefix" value={prefix} disabled={editing} onChange={(e) => setPrefix(e.target.value)} />
-        {editing ? <p className="text-xs text-muted-foreground">{t("destinations.locationLocked")}</p> : null}
+        <Input
+          id="prefix"
+          value={prefix}
+          disabled={editing}
+          onChange={(e) => setPrefix(e.target.value)}
+        />
+        {editing ? (
+          <p className="text-xs text-muted-foreground">{t("destinations.locationLocked")}</p>
+        ) : null}
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="accessKeyId">{t("destinations.accessKeyId")}</Label>
-        <Input id="accessKeyId" value={accessKeyId} onChange={(e) => setAccessKeyId(e.target.value)} />
+        <Input
+          id="accessKeyId"
+          value={accessKeyId}
+          onChange={(e) => setAccessKeyId(e.target.value)}
+        />
       </div>
       <CredentialField
         id="secretAccessKey"
@@ -153,7 +171,12 @@ export function DestinationForm({
       />
       <div className="space-y-1.5">
         <Label htmlFor="sealMode">{t("destinations.sealMode")}</Label>
-        <Select id="sealMode" value={sealMode} disabled={editing} onChange={(e) => setSealMode(e.target.value as SealMode)}>
+        <Select
+          id="sealMode"
+          value={sealMode}
+          disabled={editing}
+          onChange={(e) => setSealMode(e.target.value as SealMode)}
+        >
           {SEAL_MODES.map((mode) => (
             <option key={mode} value={mode}>
               {t(sealLabel[mode])}
@@ -170,7 +193,9 @@ export function DestinationForm({
         {t("destinations.forcePathStyle")}
       </label>
       <div className="sm:col-span-2 space-y-2">
-        {invalid ? <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p> : null}
+        {invalid ? (
+          <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p>
+        ) : null}
         {failure !== null ? <ErrorState message={failure.message} /> : null}
         <div className="flex gap-2">
           <Button type="submit" disabled={pending}>

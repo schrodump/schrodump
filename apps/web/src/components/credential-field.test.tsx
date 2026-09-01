@@ -11,7 +11,13 @@ function renderField(configured: boolean) {
   const onChange = vi.fn();
   render(
     <I18nProvider>
-      <CredentialField id="secret" label="Password" configured={configured} value="" onChange={onChange} />
+      <CredentialField
+        id="secret"
+        label="Password"
+        configured={configured}
+        value=""
+        onChange={onChange}
+      />
     </I18nProvider>,
   );
   return { onChange };

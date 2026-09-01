@@ -9,8 +9,10 @@ const alertVariants = cva("relative w-full rounded-lg border p-4 text-sm", {
   variants: {
     variant: {
       default: "bg-card text-card-foreground",
-      warning: "border-[var(--color-state-unobserved)]/40 bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
-      destructive: "border-destructive/40 bg-[var(--color-state-failed-bg)] text-[var(--color-state-failed)]",
+      warning:
+        "border-[var(--color-state-unobserved)]/40 bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
+      destructive:
+        "border-destructive/40 bg-[var(--color-state-failed-bg)] text-[var(--color-state-failed)]",
     },
   },
   defaultVariants: { variant: "default" },
