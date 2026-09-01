@@ -31,10 +31,17 @@ describe("canRestoreArtifact", () => {
 });
 
 describe("RESTORE_TARGETS_BY_ENGINE", () => {
-  it("mirrors the capability matrix (postgres has SCHEMA, mongodb has COLLECTION)", () => {
+  it("mirrors the capability matrix: postgres has SCHEMA, mongodb has neither", () => {
     expect(RESTORE_TARGETS_BY_ENGINE.postgres).toContain("SCHEMA");
     expect(RESTORE_TARGETS_BY_ENGINE.postgres).not.toContain("COLLECTION");
-    expect(RESTORE_TARGETS_BY_ENGINE.mongodb).toContain("COLLECTION");
     expect(RESTORE_TARGETS_BY_ENGINE.mongodb).not.toContain("SCHEMA");
+  });
+
+  it("offers mongodb no sub-scope target, matching the server's refusal", () => {
+    // Not a UI preference. mongorestore runs with --drop and no --nsInclude, so a scoped restore
+    // would drop and overwrite every namespace in the archive; the server withdrew those targets
+    // and refuses them. Offering one here would put a button in front of a guaranteed rejection —
+    // and the server is the lock, so a drift in this direction is a UX bug, not a safety one.
+    expect(RESTORE_TARGETS_BY_ENGINE.mongodb).toEqual(["FULL_CLUSTER"]);
   });
 });
