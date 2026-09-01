@@ -235,10 +235,21 @@ describe.skipIf(!enabled)("self-backup end to end (integration)", () => {
     expect(key).not.toBeNull();
     const sidecar = JSON.parse((await collect(await driver.get(key ?? ""))).toString("utf8")) as {
       recovery: string;
+      bucketKey: string;
+      checksum: string;
+      checksumAlgorithm: string;
       encryption: { keyIds: string[] };
     };
     // Whoever reads this file is mid-disaster and will not have the docs open.
     expect(sidecar.recovery).toMatch(/escrow/i);
     expect(sidecar.encryption.keyIds.length).toBeGreaterThan(0);
+
+    // These three are a CONTRACT with scripts/rehearse-recovery.sh, which reads them with
+    // `jq -r '.bucketKey'` and `jq -r '.checksum'` to find the object and verify it before
+    // decrypting. Renaming a field here would leave that script failing on the one day it is
+    // used, and nothing else in the suite would notice.
+    expect(sidecar.bucketKey).toBe(row.bucketKey);
+    expect(sidecar.checksumAlgorithm).toBe("sha256");
+    expect(sidecar.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 });
