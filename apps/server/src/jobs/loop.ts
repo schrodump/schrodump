@@ -61,9 +61,14 @@ export function installShutdown(
   const handle = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    // `.finally`, so a shutdown sequence that rejects still exits: hanging until SIGKILL for a
-    // reason nobody can see is worse than exiting with the work half-done.
-    Promise.resolve(handlers.onSignal()).finally(exit);
+    // `.catch` BEFORE `.finally`, and the order is the point. `.finally` does not consume a
+    // rejection — it re-throws it — so a shutdown sequence that fails would surface as an unhandled
+    // rejection, whose default action races the very exit we are performing. Caught here so the
+    // exit always wins; onSignal owns its own logging, and hanging until SIGKILL for a reason
+    // nobody can see is worse than exiting with the work half-done.
+    Promise.resolve(handlers.onSignal())
+      .catch(() => undefined)
+      .finally(exit);
   };
   process.on("SIGTERM", handle);
   process.on("SIGINT", handle);
