@@ -9,6 +9,7 @@ import { createCatalogRebuildPorts } from "./jobs/catalog-rebuild-wiring.js";
 import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
 import { startLoop, installShutdown } from "./jobs/loop.js";
+import { runScheduledSelfBackup } from "./jobs/self-backup-scheduler.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
 import { defaultSmtpDeps } from "./notifications/smtp.js";
 import { runNotifications } from "./notifications/wiring.js";
@@ -98,6 +99,8 @@ export async function main(): Promise<void> {
     jobsService: createJobsService(prisma, kek),
     catalogRebuild: (organizationId, destinationId) =>
       runRebuild(prisma, kek, organizationId, destinationId),
+    prisma,
+    selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
     kek,
   });
 
@@ -178,6 +181,45 @@ export async function main(): Promise<void> {
       }),
   });
 
+  // 4. Self-backup: dumps THIS deployment's metadata database on its own cadence.
+  //
+  //    Its own loop and its own advisory-lock key, not a step inside the scheduler tick: a metadata
+  //    dump takes minutes on a busy install, and startLoop is single-flight, so folding it into the
+  //    scheduler would stop dispatching backups for the length of every self-backup.
+  //
+  //    Unconfigured is a WARNING, not silence. A deployment whose metadata database is not backed
+  //    up still restores every artifact in the bucket — the manifests make that possible — but it
+  //    does so by rebuilding the catalog, which is a much longer day than restoring one dump.
+  const SELF_BACKUP_LOCK_KEY = 0x5343_4852_444d_5033n; // "SCHRDMP3"
+  let selfBackupHandle: { stop(): void; whenIdle(): Promise<void> } | null = null;
+  const selfBackupDestinationId = env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID;
+  if (selfBackupDestinationId === undefined) {
+    logger.warn(
+      "self-backup is not configured (SCHRODUMP_SELF_BACKUP_DESTINATION_ID is unset): this " +
+        "deployment's metadata database is not being backed up",
+    );
+  } else {
+    selfBackupHandle = startLoop({
+      intervalMs: env.SCHRODUMP_SCHEDULER_TICK_MS,
+      tick: () =>
+        withAdvisoryLock(lock, SELF_BACKUP_LOCK_KEY, () =>
+          runScheduledSelfBackup({
+            prisma,
+            kek,
+            databaseUrl: env.DATABASE_URL,
+            destinationId: selfBackupDestinationId,
+            network: env.SCHRODUMP_SELF_BACKUP_NETWORK,
+            intervalMs: env.SCHRODUMP_SELF_BACKUP_INTERVAL_MS,
+            now: () => new Date(),
+            log: logger,
+            signal: shutdownController.signal,
+          }),
+        ).catch((err) => {
+          logger.error({ err }, "self-backup tick failed");
+        }),
+    });
+  }
+
   // 4. Graceful shutdown: stop both loops, abort the in-flight run, await the drain under a grace
   //    budget, then drop the dedicated advisory-lock connection so its session lock is released
   //    promptly. See runGracefulShutdown for the ordering rationale.
@@ -186,6 +228,7 @@ export async function main(): Promise<void> {
       runGracefulShutdown({
         handle,
         scheduler: schedulerHandle,
+        ...(selfBackupHandle !== null ? { selfBackup: selfBackupHandle } : {}),
         controller: shutdownController,
         disconnect: () => advisoryLockPrisma.$disconnect(),
         graceMs: env.SCHRODUMP_SHUTDOWN_GRACE_MS,

@@ -258,6 +258,19 @@ export const en = {
   "notifications.disabled": "Disabled",
   "notifications.lastFailure": "Last delivery failed: {reason}",
   "notifications.tls": "Email is always sent over TLS. This is not configurable.",
+  "selfBackup.title": "Metadata self-backup",
+  "selfBackup.description": "A dump of Schrodump's own database — the catalog that says what every object in the bucket is.",
+  "selfBackup.notConfigured": "Not configured",
+  "selfBackup.notConfigured.hint": "Set SCHRODUMP_SELF_BACKUP_DESTINATION_ID to a destination. Until then this deployment's catalog is not being backed up, and recovering it would mean rebuilding from the manifests in the bucket.",
+  "selfBackup.never": "Configured, but has never run.",
+  "selfBackup.lastRun": "Last run {when}",
+  "selfBackup.size": "{size} written",
+  "selfBackup.reason": "Reason: {reason}",
+  "selfBackup.state.RUNNING": "Running",
+  "selfBackup.state.SUCCEEDED": "Written",
+  "selfBackup.state.FAILED": "Failed",
+  "selfBackup.escrow": "Sealed to the offline escrow key. Recovering it needs that identity — the operational one is stored inside the database this backs up.",
+  "selfBackup.forbidden": "Only an admin can see the self-backup history.",
 } as const;
 
 export type MessageKey = keyof typeof en;

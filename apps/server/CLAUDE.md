@@ -63,8 +63,9 @@ Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e 
 `SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (e `BETTER_AUTH_SECRET`/`LOG_LEVEL`), agora lê
 a config de worker/executor: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
 `SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
-`SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS` e
-`SCHRODUMP_STAGED_THRESHOLD_BYTES`. Scratch path
+`SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS`,
+`SCHRODUMP_STAGED_THRESHOLD_BYTES` e o trio do self-backup
+(`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`, `_NETWORK`). Scratch path
 ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — passar string vazia é
 valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
 link de setup.
@@ -102,6 +103,26 @@ link de setup.
    `Decrypter` no restore; keygen pela mesma lib), sempre 2 recipients (operacional + escrow). Não
    há executor `age`: cifrar/decifrar num container exigia stdin sobre attach hijacked, cujo demux
    corrompia o stream. Pipeline: dump → compressão → criptografia (nunca inverter).
+
+## Self-backup (`jobs/self-backup*.ts`)
+
+- **Selado com a chave de ESCROW, e recusa rodar sem uma ativa.** A identidade da chave
+  **operacional** mora, embrulhada pela KEK, **dentro do banco que o dump salva** — no desastre em
+  que o self-backup seria usado, ela sumiu junto. Um artefato selado só para ela é chamariz: parece
+  proteção e ninguém consegue abrir. `selectSelfBackupRecipients` lança em vez de escrever isso.
+- **`SUCCEEDED` é `UNOBSERVED`, e a UI pinta âmbar.** Um `pg_dump` que saiu 0 é um processo que não
+  reclamou. Verde aqui seria o único lugar do produto afirmando que um backup presta porque um job
+  disse que sim.
+- **O executor entra na rede `internal`, não na `SCHRODUMP_EXECUTOR_NETWORK`.** O banco de
+  metadados é deliberadamente inalcançável a partir da rede onde correm os executores que falam com
+  banco de cliente; esse é o único dump que precisa cruzar a linha, e cruza pela duração dele.
+- **Vencimento é calculado pelo último run `SUCCEEDED`, nunca por timer de processo.** Um timer
+  seria zerado a cada restart, e um self-backup diário num servidor reimplantado de hora em hora
+  não rodaria nunca.
+- **Loop e advisory lock próprios (`SCHRDMP3`).** Um dump de metadados leva minutos e o `startLoop`
+  é single-flight — dobrá-lo dentro do tick do scheduler pararia o dispatch por esse tempo todo.
+- **A linha na tabela nasce ANTES de resolver a configuração.** Destino apagado ou escrow ausente
+  vira `SelfBackup` `FAILED` com motivo legível, visível em `GET /self-backups`, não só um log.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 

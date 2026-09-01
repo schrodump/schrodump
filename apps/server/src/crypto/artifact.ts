@@ -16,7 +16,8 @@
 // ciphertext is useless and leaks nothing; encrypting first would defeat compression).
 
 import { createHash } from "node:crypto";
-import { generateX25519Identity, identityToRecipient } from "age-encryption";
+import { Readable } from "node:stream";
+import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 
 export interface AgeKeyPair {
   // AGE-SECRET-KEY-1... — held server-side (operational) or offline by the operator (escrow).
@@ -72,4 +73,14 @@ export function resolveDecryptionKeyId(
     (key) => key.type === "operational" && manifestKeyIds.includes(key.keyId),
   );
   return match?.keyId ?? null;
+}
+
+// age's STREAM construction: chunked, per-chunk authenticated, truncation-detecting. Shared rather
+// than duplicated because there is exactly one right order — dump, compress, THEN encrypt — and a
+// second copy is a second chance to get it wrong.
+export async function encryptStream(compressed: Readable, recipients: string[]): Promise<Readable> {
+  const encrypter = new Encrypter();
+  for (const recipient of recipients) encrypter.addRecipient(recipient);
+  const source = Readable.toWeb(compressed) as ReadableStream<Uint8Array>;
+  return Readable.fromWeb(await encrypter.encrypt(source));
 }

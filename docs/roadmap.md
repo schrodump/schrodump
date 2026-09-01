@@ -69,7 +69,25 @@ which sets out the position to design against.
 Shipping it half-right would be worse than not shipping it: a retention policy the operator
 believes is running, silently failing against a lock they configured elsewhere.
 
-### Notifications: webhooks now, SMTP still outstanding
+### Self-backup: the catalog now backs itself up
+
+Schrodump dumps its own metadata database on a cadence, to a destination an operator names, and
+records every run so a misconfiguration is a visible row instead of a log line. See
+[install.md](install.md#backing-up-schrodump-itself).
+
+Two things about it are load-bearing and were nearly got wrong:
+
+- **It seals to the ESCROW key and refuses to run without one.** The operational key's identity is
+  stored inside the very database being dumped, so an artifact sealed only to it is unopenable in
+  the exact disaster it exists for. Refusing beats writing a decoy.
+- **A written self-backup is UNOBSERVED, not verified.** It is amber in the UI. A `pg_dump` that
+  exited 0 is a process that did not complain — the same claim this product refuses to accept
+  anywhere else, and it does not get an exception for its own data.
+
+The catalog rebuild from bucket manifests remains the floor, and it is what makes a deployment
+without a self-backup recoverable at all. The self-backup only makes it fast.
+
+### Notifications: webhooks and SMTP both ship
 
 Webhook notifications ship. The trigger is what the position below always said it had to be — a
 change in what the fleet has and has not proven, never a job result:

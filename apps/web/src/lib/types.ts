@@ -118,3 +118,22 @@ export interface NotificationChannel {
   lastFailureAt: string | null;
   lastFailure: string | null;
 }
+
+// A dump of the deployment's own metadata database. Instance-scoped, so it has no organizationId
+// in the DTO. `configured` on the envelope is what separates "never set up" from "set up and never
+// ran" — an empty list alone cannot tell those apart.
+export interface SelfBackup {
+  id: string;
+  state: "RUNNING" | "SUCCEEDED" | "FAILED";
+  destinationId: string;
+  bucketKey: string | null;
+  sizeBytes: number | null;
+  reason: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface SelfBackupList {
+  configured: boolean;
+  items: SelfBackup[];
+}

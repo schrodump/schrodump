@@ -129,9 +129,10 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please don't open a publi
 ## Project status
 
 Schrodump is in active development toward its **v1**. The verification model, scheduling, storage,
-encryption, GFS retention, restore execution, the web UI, and the full CI + signed-release pipeline
-are implemented and tested. Restore covers single-stream artifacts of all four engines; staged
-(directory) artifacts, notification delivery, and physical/PITR backups are on the roadmap.
+encryption, GFS retention, restore execution, notification delivery (webhook and SMTP), self-backup
+of its own catalog, the web UI, and the full CI + signed-release pipeline are implemented and
+tested. Restore covers both single-stream and staged (directory) artifacts; MongoDB restores at
+cluster scope only. Physical/PITR backups are on the roadmap.
 [docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1.
 
 ## Contributing
