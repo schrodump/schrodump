@@ -29,14 +29,36 @@ This is why the default `compose.yaml` does not mount the socket into Schrodump.
 read-only into `tecnativa/docker-socket-proxy`, which exposes only the endpoints Schrodump needs:
 
 ```yaml
-CONTAINERS: 1 # create and inspect executors
+CONTAINERS: 1 # create, inspect and remove executors
 IMAGES: 1 # pull executor images
 NETWORKS: 1 # attach executors to the target network
 INFO: 1
 POST: 1
-EXEC: 0 # no docker exec into a running container
-VOLUMES: 0 # no volume creation, so no mounting the host filesystem
+EXEC: 1 # readiness-probe a verify sandbox; see below
+VOLUMES: 0 # no named-volume management
 ```
+
+**Be precise about what this buys, because the previous version of this section was not.** The
+proxy removes endpoints Schrodump never calls — swarm, system prune, image deletion, and the rest —
+so a bug or a stray call cannot reach them. That is a real reduction in accidental surface.
+
+It is **not** a containment boundary against a compromised Schrodump. `CONTAINERS` plus `POST` is
+the permission to create a container, and a container create carries `Binds` and `Privileged`.
+Verified against `tecnativa/docker-socket-proxy:v0.4.2`: a create with a host bind mount is
+accepted (`201`), and so is one with `Privileged: true`. `VOLUMES: 0` governs named-volume
+management and does not prevent either — the earlier claim that it stopped host mounts was wrong.
+
+So the honest statement is: anything that can reach this proxy can obtain root on the host,
+because that is what running dumps in containers requires. The boundary you actually have is the
+host itself. Run Schrodump where you would be willing to treat the Docker daemon as compromised if
+Schrodump were.
+
+`EXEC: 1` is required rather than optional, and it was `0` until this was measured. `FULL_RESTORE`
+verify stands up a throwaway database and polls its readiness with `docker exec`; with `EXEC: 0`
+the proxy answers `403` to `POST /exec/<id>/start`, the probe never succeeds, and the verification
+this whole product is built around cannot run. CI did not catch it because the integration suite
+talks to the Docker socket directly rather than through the proxy. Given the paragraph above, the
+flag costs nothing an attacker did not already have.
 
 `EXEC: 0` and `VOLUMES: 0` are the two that matter. With `EXEC` a compromised Schrodump could run
 commands inside any container on the host; with `VOLUMES` it could create a container that mounts
