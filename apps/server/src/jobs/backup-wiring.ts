@@ -207,6 +207,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       const caps = resolveCapabilities(deps.engine, serverVersionNum);
       return {
         stagedCapable: caps.stagedCapable,
+        maxParallelism: caps.maxParallelism,
         requiresSeparateGlobalsDump: caps.requiresSeparateGlobalsDump,
       };
     },
