@@ -84,7 +84,16 @@ services:
       NETWORKS: 1
       INFO: 1
       POST: 1
-      EXEC: 0
+      # Required, not optional. FULL_RESTORE verify stands up a throwaway database with
+      # withEphemeralService and polls its readiness with `docker exec` (packages/runner
+      # docker.ts). With EXEC: 0 the proxy answers 403 to POST /exec/<id>/start and GET
+      # /exec/<id>/json — verified against tecnativa/docker-socket-proxy:v0.4.2 — so the readiness
+      # probe never succeeds and the product's central feature cannot run. CI never caught it
+      # because the integration suite talks to the Docker socket directly, not through this proxy.
+      #
+      # It does not widen anything: CONTAINERS + POST already accepts a container create carrying
+      # Binds and Privileged, which is root on the host. See docs/security.md.
+      EXEC: 1
       VOLUMES: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
