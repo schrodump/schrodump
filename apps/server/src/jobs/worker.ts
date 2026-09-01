@@ -97,7 +97,10 @@ export async function runWorkerOnce(deps: WorkerDeps): Promise<"ran" | "idle"> {
   if (backup !== null && backup.ok && backup.artifactId !== null && backup.verifyLevel !== "NONE") {
     try {
       await deps.store.enqueueVerify(job.organizationId, backup.artifactId);
-      deps.log.info({ jobId: job.id, artifactId: backup.artifactId }, "backup ok — verify enqueued");
+      deps.log.info(
+        { jobId: job.id, artifactId: backup.artifactId },
+        "backup ok — verify enqueued",
+      );
     } catch (err) {
       const reason = deps.sanitizeReason(err);
       deps.log.error({ jobId: job.id, reason }, "backup ok but verify enqueue failed");

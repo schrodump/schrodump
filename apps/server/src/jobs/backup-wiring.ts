@@ -12,6 +12,7 @@ import { Encrypter } from "age-encryption";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
 import type { EngineKind } from "@schrodump/core/types";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
+import { buildArchiveStaging } from "@schrodump/engines/staging";
 import type { Manifest } from "@schrodump/core/manifest";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
@@ -36,6 +37,10 @@ export interface BackupWiringDeps {
   // the password via env (PGPASSWORD/MYSQL_PWD) and runs with no mount. Materialized + cleaned up by
   // the composer (worker-wiring), which holds the decrypted password.
   configMount?: RunMount;
+  // Scratch directory a STAGED dump writes its directory-format output into. Mounted into the dump
+  // container at the SAME path it was told to write to — a descriptor path that is not mounted is a
+  // path inside the container, and the dump dies with it.
+  stagingPath?: string;
   // The shutdown signal, bound once at createJobExecutor construction and forwarded into every
   // container-creating run so the runner can force-remove the container on abort. Undefined outside
   // a shutdown (or in tests) — the runner behaves exactly as before.
@@ -82,13 +87,14 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     descriptor: ExecutionDescriptor,
     recipients: string[],
     key: string,
+    extraMounts: RunMount[] = [],
   ): Promise<{ checksum: string; sizeBytes: number }> => {
     const dumpOut = new PassThrough();
     const runPromise = deps.runner.run(descriptor, {
       network: deps.network,
       // Empty for every engine except mongodb, whose password is delivered through the mounted
       // `--config` file rather than argv/env.
-      mounts: deps.configMount !== undefined ? [deps.configMount] : [],
+      mounts: [...(deps.configMount !== undefined ? [deps.configMount] : []), ...extraMounts],
       stdout: dumpOut,
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
@@ -166,6 +172,43 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     return { checksum: hash.digest("hex"), sizeBytes };
   };
 
+  // Two runs, one artifact. Both mount the staging directory at the same path the descriptor names.
+  const archiveStagedDump = async (
+    dumpDescriptor: ExecutionDescriptor,
+    recipients: string[],
+    key: string,
+  ): Promise<{ checksum: string; sizeBytes: number }> => {
+    const stagingPath = deps.stagingPath;
+    if (stagingPath === undefined) {
+      // resolveExecutionMode only chooses STAGED when scratch is configured, so this is a wiring
+      // mistake rather than an operator one — fail loudly instead of silently degrading, which is
+      // how the empty artifact got out in the first place.
+      throw new Error("a STAGED dump requires a staging path, and none was configured");
+    }
+    // Read-write for the dump: pg_dump -Fd and mydumper create their files here.
+    const stagingMount: RunMount = { source: stagingPath, target: stagingPath, readOnly: false };
+
+    const dump = await deps.runner.run(dumpDescriptor, {
+      network: deps.network,
+      mounts: [...(deps.configMount !== undefined ? [deps.configMount] : []), stagingMount],
+      timeoutMs: deps.timeoutMs,
+      correlationId: deps.jobId,
+      ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
+    });
+    if (dump.exitCode !== 0) {
+      throw new Error(`dump execution failed (exit code ${dump.exitCode})`);
+    }
+
+    // The archive step reuses the dump's own image — every engine image already ships tar, so this
+    // introduces no executor image and no new digest to pin. Read-only: it only reads.
+    return await uploadEncrypted(
+      buildArchiveStaging({ image: dumpDescriptor.image, stagingPath }),
+      recipients,
+      key,
+      [{ source: stagingPath, target: stagingPath, readOnly: true }],
+    );
+  };
+
   return {
     setState: deps.setState,
     probe: deps.probe,
@@ -181,11 +224,16 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
 
     executeAndUpload: async ({ mode, parallelism, probe, recipients }) => {
       const key = objectKey("artifact.bin");
-      const { checksum, sizeBytes } = await uploadEncrypted(
-        deps.buildDumpDescriptor(mode, parallelism, probe),
-        recipients.recipients,
-        key,
-      );
+      const dumpDescriptor = deps.buildDumpDescriptor(mode, parallelism, probe);
+
+      // STREAM writes the dump to stdout, so one run produces the artifact. STAGED writes a
+      // DIRECTORY, so it takes two: the dump fills a mounted staging directory, then a second run
+      // tars that directory to stdout and THAT becomes the artifact. Without the second run the
+      // upload reads a stdout the dump never wrote to — an empty artifact under a SUCCEEDED job.
+      const { checksum, sizeBytes } =
+        mode === "STAGED"
+          ? await archiveStagedDump(dumpDescriptor, recipients.recipients, key)
+          : await uploadEncrypted(dumpDescriptor, recipients.recipients, key);
       return {
         bucketKey: key,
         manifestKey: manifestKey(deps.prefix, deps.organizationId, deps.jobId),

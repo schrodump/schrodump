@@ -69,12 +69,12 @@ ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — pa
 valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
 link de setup.
 
-> **`SCHRODUMP_STAGED_THRESHOLD_BYTES` não tem default, e isso é a decisão.** Artefato STAGED não
-> restaura nem passa por `FULL_RESTORE` verify nesta versão, então escolher esse modo POR conta do
-> operador — e primeiro nos bancos maiores — entrega um artefato que ele não pediu e não consegue
-> restaurar. `parallelism > 1` na policy continua sendo o caminho explícito para STAGED. Antes
-> deste ajuste o limiar recebia `SCHRODUMP_SCRATCH_MAX_BYTES`, que é o **teto do volume**, não um
-> limiar de roteamento: o efeito era só estagiar dumps maiores que todo o orçamento de scratch.
+> **`SCHRODUMP_STAGED_THRESHOLD_BYTES` não tem default, e isso é a decisão.** STAGED é mais rápido
+> num banco grande, mas escreve o dump em claro no disco antes de subir e exige o volume de scratch
+> dimensionado para isso — então o modo não é escolhido POR conta do operador com base em tamanho.
+> `parallelism > 1` na policy é o caminho explícito, por policy. Antes deste ajuste o limiar recebia
+> `SCHRODUMP_SCRATCH_MAX_BYTES`, que é o **teto do volume**, não um limiar de roteamento: o efeito
+> era só estagiar dumps maiores que todo o orçamento de scratch.
 
 > **Nota:** `DOCKER_HOST` não passa pelo `env.ts` — o runner (dockerode) o lê direto do ambiente.
 
@@ -105,33 +105,24 @@ link de setup.
 
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
-- **Dump STAGED está desligado, e o motivo importa:** o dump em diretório (`pg_dump -Fd`, mydumper)
-  escreve num diretório, mas o caminho de upload lê o **stdout** do container — ninguém nunca leu
-  aquele diretório de volta. O resultado era um artefato **vazio** (só cabeçalhos de gzip+age, 318
-  bytes) com o job marcado `SUCCEEDED`, verificado contra um banco real de 545 MB. E como restore
-  recusa artefato STAGED e verify o rebaixa para CHECKSUM — que **passa** nesses 318 bytes —, o
-  artefato podia chegar a `VERIFIED`. `resolveExecutionMode` agora degrada para STREAM com aviso.
-  Reabilitar exige pipeline de diretório nos dois lados (tar na ida, untar na volta).
+- **STAGED funciona nos dois sentidos, e três coisas precisaram entrar juntas.** O diretório de
+  staging agora é **montado** no container do dump (antes o `-Fd` escrevia dentro do container e
+  morria com ele), um segundo run faz `tar` daquele diretório para stdout (`buildArchiveStaging`),
+  e o restore desempacota antes de entregar o diretório ao `pg_restore`/`myloader`
+  (`buildExtractStaging`). Sem qualquer uma das três, o backup STAGED subia um artefato **vazio**
+  com o job em `SUCCEEDED` — e como verify rebaixava para CHECKSUM, que passa nos ~318 bytes de
+  cabeçalho, aquele artefato vazio podia chegar a `VERIFIED`. O `tar` vem da própria imagem da
+  engine, não de um executor pinado: menos superfície de supply chain, ao custo de depender do
+  busybox tar continuar lá.
 
-- **Restore roda ponta a ponta para as quatro engines, mas só artefato STREAM:** a rota enfileira,
-  o worker despacha `RESTORE` e roda o pipeline real (download → decrypt in-process → gunzip →
-  arquivo montado → `pg_restore`/`mysql`/`mongorestore`). A tranca é por **`executionMode`, não por
-  engine** — `runRestoreJob` (`jobs/restore.ts`) recusa qualquer artefato `STAGED` (mydumper em
-  diretório, ou `-Fd` do postgres) com erro claro, de qualquer engine, porque falta o pipeline de
-  diretório (untar-to-directory); a UI espelha a mesma tranca de verdade — `toArtifactRecord` expõe
-  `executionMode` no `Artifact` da API e `canRestoreArtifact`
-  (`apps/web/src/lib/domain.ts`) desabilita o botão com o motivo, em vez de enfileirar um job que já
-  se sabe condenado. O servidor segue sendo a tranca que impõe. O que falta: pipeline STAGED
-  e seleção de sub-escopo real para mysql/mongo (hoje sempre restore completo). Verify de
-  `FULL_RESTORE` reusa o mesmo pipeline de restore num sandbox efêmero (`withEphemeralService`) +
-  assert de contagem de tabelas/coleções (`resolveVerifyPlan`/`runFullRestore` em
-  `jobs/worker-wiring.ts`) e roda de verdade para STREAM de qualquer engine, com uma exceção:
-  artefato **não escopado de engine não-postgres** (mysql/mariadb/mongo) degrada para `CHECKSUM` — um
-  archive multi-banco (todo backup de replica set, e mysql sem escopo) não tem um único banco de
-  origem para o assert contar, então FULL_RESTORE emitiria um veredito errado (postgres não sofre: o
-  `-Fc` restaura no banco `verify` fixo e o assert conta todos os schemas não-sistema ali). Smoke
-  gated em `jobs/full-restore-verify.integration.test.ts`
-  (postgres) e `jobs/mysql-mongo-full-restore-verify.integration.test.ts` (mysql/mongo).
+- **Restore roda ponta a ponta para as quatro engines, nos dois modos de execução:** a rota
+  enfileira, o worker despacha `RESTORE` e roda o pipeline real (download → decrypt in-process →
+  gunzip → arquivo montado → `pg_restore`/`mysql`/`mongorestore`). Artefato `STAGED` passa por um
+  passo a mais antes disso: o tar é desempacotado num diretório irmão no scratch, e é o **diretório**
+  que vai montado — nunca o tar. O que falta: seleção de sub-escopo real para mysql/mongo (hoje
+  sempre restore completo), e mongo está limitado a `FULL_CLUSTER` porque `mongorestore` roda com
+  `--drop` sem `--nsInclude`.
+
 - **Backup de mongo exige `SCHRODUMP_SCRATCH_PATH` configurado** — a senha do `mongodump`/
   `mongorestore` só viaja via arquivo `--config` montado (nunca argv/env), e esse arquivo precisa
   viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.

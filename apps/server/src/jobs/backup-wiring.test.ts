@@ -123,6 +123,48 @@ async function makeDeps(
 }
 
 describe("createBackupPorts.executeAndUpload", () => {
+  // STAGED had three independent breaks, all of which had to be fixed at once for the mode to mean
+  // anything: the staging directory was never MOUNTED into the dump container (the directory dump
+  // landed in the container's own filesystem and vanished with it), nothing ever turned that
+  // directory back into a stream, and the upload read stdout that a directory dump never writes.
+  it("runs the dump into a mounted staging directory, then uploads a tar of it", async () => {
+    const capture: RunOptions[] = [];
+    const stagedRunner: Runner = {
+      run: (descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push(opts);
+        // Only the archive step writes to stdout; the dump writes to its mounted directory.
+        if (descriptor.command[0] === "tar") {
+          opts.stdout?.write(Buffer.from("tar-bytes-of-the-directory-dump"));
+        }
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+
+    const { deps, recipient } = await makeDeps(0, { runner: stagedRunner });
+    const ports = createBackupPorts({ ...deps, stagingPath: "/scratch/job-1" });
+    const upload = await ports.executeAndUpload({
+      mode: "STAGED",
+      parallelism: 4,
+      probe: PROBE,
+      recipients: { recipients: [recipient], keyIds: ["k"] },
+    });
+
+    expect(capture).toHaveLength(2);
+    // The dump gets the staging directory mounted read-write, at the same path it was told to
+    // write to — otherwise -Fd writes inside the container and the bytes die with it.
+    expect(capture[0]?.mounts).toContainEqual({
+      source: "/scratch/job-1",
+      target: "/scratch/job-1",
+      readOnly: false,
+    });
+    expect(capture[0]?.stdout).toBeUndefined();
+    // The archive step reads that same directory and is the one whose stdout becomes the artifact.
+    expect(capture[1]?.stdout).toBeDefined();
+    expect(upload.sizeCompressedBytes).toBeGreaterThan(0);
+  });
+
   // A dump tool that exits 0 having written NOTHING is the shape that shipped an empty artifact
   // under a SUCCEEDED job (STAGED wrote to a directory while the upload read stdout). The check is
   // deliberately not a size heuristic: zero bytes is unambiguous, needs no threshold to tune, and

@@ -76,7 +76,10 @@ describe("runVerifyJob", () => {
 
   it("degrades FULL_RESTORE to CHECKSUM on a sealed destination", async () => {
     const h = makeHarness();
-    const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE", sealed: true }, h.ports);
+    const outcome = await runVerifyJob(
+      { ...CTX, verifyLevel: "FULL_RESTORE", sealed: true },
+      h.ports,
+    );
     expect(outcome.effectiveLevel).toBe("CHECKSUM");
     expect(outcome.degraded).toBe(true);
     expect(h.calls).toContain("checksumMatches");

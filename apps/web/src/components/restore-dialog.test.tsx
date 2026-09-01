@@ -63,15 +63,19 @@ describe("RestoreButton", () => {
     },
   );
 
-  // The gate is execution-mode-based, so postgres is disabled here too — an engine check would
-  // have let this through and enqueued a job the server refuses.
+  // STAGED used to be disabled here because the server refused it. The server now unpacks the
+  // directory dump and restores from it, so leaving the button disabled would hide a restore that
+  // works — and the gate being execution-mode-based means every engine moves together.
   it.each(["postgres", "mysql", "mariadb", "mongodb"] as const)(
-    "disables the trigger for a STAGED %s artifact instead of enqueuing a doomed job",
+    "enables the trigger for a STAGED %s artifact, which the server can now restore",
     (engine) => {
       renderWith(
-        <RestoreButton artifact={{ ...artifact, engine, executionMode: "STAGED" }} role="operator" />,
+        <RestoreButton
+          artifact={{ ...artifact, engine, executionMode: "STAGED" }}
+          role="operator"
+        />,
       );
-      expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
     },
   );
 });

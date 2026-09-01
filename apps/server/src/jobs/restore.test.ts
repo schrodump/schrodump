@@ -148,21 +148,16 @@ describe("runRestoreJob", () => {
     expect(h.audits).toEqual([]);
   });
 
-  it("refuses a STAGED artifact of any engine, before any audit or execution", async () => {
-    // The staged-file restore mounts a single file; it cannot handle a STAGED (directory) artifact,
-    // postgres included — this closes a latent gap where a postgres -Fd artifact used to reach the
-    // single-file pipeline and fail confusingly. The gate must fire before the audit and before
-    // runRestore.
-    for (const engine of ["postgres", "mysql", "mongodb"] as const) {
-      const h = makeHarness({
-        loadArtifact: () => Promise.resolve({ ...ARTIFACT, engine, executionMode: "STAGED" }),
-      });
-      const outcome = await runRestoreJob(REQ, h.ports);
-      expect(outcome.ok).toBe(false);
-      expect(outcome.error).toMatch(/STAGED restore is not available/i);
-      expect(h.restoredWithKey).toEqual([]);
-      expect(h.audits).toEqual([]);
-    }
+  it("restores a STAGED artifact now that the directory pipeline exists", async () => {
+    // The refusal here was the second half of the STAGED hole: the backup side uploaded an empty
+    // artifact, and this gate meant nothing could ever try to restore one and notice. Both sides
+    // land together — buildArchiveStaging on the way out, buildExtractStaging on the way back.
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve({ ...ARTIFACT, executionMode: "STAGED" as const }),
+    });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.ok).toBe(true);
+    expect(h.jobStates).toEqual(["RUNNING", "SUCCEEDED"]);
   });
 
   it("refuses to restore over existing data without explicit confirmation", async () => {

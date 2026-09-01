@@ -57,15 +57,6 @@ export async function runRestoreJob(
   try {
     const artifact = await ports.loadArtifact();
 
-    // 0. The staged-file executor mounts the decrypted dump as a SINGLE FILE, which only fits a
-    //    STREAM (single-stream) artifact — a STAGED (directory) artifact, of ANY engine including
-    //    postgres, needs a separate untar-to-directory pipeline that does not exist in v1. Refuse
-    //    loudly rather than let it reach the single-file pipeline and fail confusingly. Follow-up:
-    //    a staged-directory restore pipeline, tracked separately.
-    if (artifact.executionMode !== "STREAM") {
-      return await fail(ports, "STAGED restore is not available in v1 (STREAM artifacts only)");
-    }
-
     // 1. Validate the target against the capability matrix — a single-table restore of an artifact
     //    that lacks that granularity is a clear error, not a partial attempt.
     if (!artifact.supportedRestoreTargets.includes(req.target)) {

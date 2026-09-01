@@ -296,6 +296,39 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     expect(await readdir(stagingDir).catch(() => [])).toEqual([]);
   });
 
+  it("extracts a STAGED artifact and restores from the directory, not the tar", async () => {
+    // A STAGED artifact is a TAR of the directory dump (see buildArchiveStaging). Restoring it
+    // means unpacking first: handing pg_restore/myloader the tar itself would fail, and mounting
+    // the file where a directory is expected is the mirror of the bug that made STAGED backups
+    // upload nothing.
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const capture: RunOptions[] = [];
+
+    const ok = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("tar-bytes", recipient)),
+      runner: capturingRunner(capture),
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      executionMode: "STAGED",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    });
+
+    expect(ok).toBe(true);
+    // Two runs: extract, then restore.
+    expect(capture).toHaveLength(2);
+    // The restore's source mount is a DIRECTORY the extract step filled, never the tar.
+    const restoreMounts = capture[1]?.mounts ?? [];
+    expect(restoreMounts[0]?.source).not.toMatch(/\.tar$/);
+    expect(restoreMounts[0]?.readOnly).toBe(true);
+  });
+
   it("forwards the shutdown signal to the runner, so a run in flight is cancellable", async () => {
     const identity = await generateX25519Identity();
     const recipient = await identityToRecipient(identity);

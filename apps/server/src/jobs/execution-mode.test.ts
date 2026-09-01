@@ -13,17 +13,24 @@ const base: ExecutionModeInput = {
 };
 
 describe("resolveExecutionMode", () => {
-  it("degrades to a single stream instead of producing an empty STAGED artifact", () => {
-    // STAGED writes a DIRECTORY dump, but the upload path reads the container's stdout — so a
-    // STAGED backup uploaded an empty stream (gzip+age headers, ~318 bytes) while pg_dump exited 0.
-    // Verified against a real 545MB database: the job read SUCCEEDED and the artifact held no data,
-    // with the real dump deleted along with the scratch reservation. A CHECKSUM verify would then
-    // mark that empty object VERIFIED, because it does check out against its own manifest.
-    // Until a directory upload pipeline exists, a real single-stream backup beats a fast lie.
+  it("selects STAGED for parallelism > 1, now that a directory dump can be archived", () => {
+    // Only safe because buildArchiveStaging bridges a directory dump back into the single stream
+    // the artifact pipeline moves. Without that bridge this selection produced an empty artifact
+    // under a SUCCEEDED job, which is why the mode was withdrawn until both sides existed.
     const decision = resolveExecutionMode({ ...base, requestedParallelism: 4 });
+    expect(decision.mode).toBe("STAGED");
+    expect(decision.parallelism).toBe(4);
+    expect(decision.warnings).toEqual([]);
+  });
+
+  it("still degrades to STREAM when parallelism is asked for without scratch", () => {
+    const decision = resolveExecutionMode({
+      ...base,
+      requestedParallelism: 4,
+      scratchConfigured: false,
+    });
     expect(decision.mode).toBe("STREAM");
-    expect(decision.parallelism).toBe(1);
-    expect(decision.warnings.join(" ")).toMatch(/staged/i);
+    expect(decision.warnings.join(" ")).toMatch(/scratch/i);
   });
 
   it("precedence 2: no scratch forces STREAM and warns that parallelism is unavailable", () => {
