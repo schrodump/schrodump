@@ -501,3 +501,21 @@ enum SelfBackupState {
   SUCCEEDED
   FAILED
 }
+
+// Better-Auth's rate-limit counters, kept in the database rather than in process memory.
+//
+// Memory is the library default and it is wrong for this deployment shape. The counters would not
+// be shared between replicas — N replicas behind a load balancer means N times the limit — and they
+// would reset on every restart, which is a window an attacker can open at will if a crash loop is
+// reachable. Postgres is already here and already the coordination point for the worker locks.
+//
+// Field names and nullability follow Better-Auth's own generated schema; the library owns the
+// contents. The index is for its background pruning query, which filters on lastRequest.
+model RateLimit {
+  id          String  @id
+  key         String? @unique
+  count       Int?
+  lastRequest BigInt?
+
+  @@index([lastRequest])
+}

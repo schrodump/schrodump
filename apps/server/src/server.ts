@@ -17,7 +17,7 @@ import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/wor
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
 import { dispatchDueJobs, recoverOrphanedJobs } from "./scheduler/scheduler.js";
 import { cronEvaluator, prismaSchedulerStore } from "./scheduler/wiring.js";
-import { betterAuthResolver, createAuth } from "./auth/auth.js";
+import { betterAuthResolver, createAuth, parseTrustedProxies } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
@@ -77,9 +77,18 @@ export async function main(): Promise<void> {
   // Fail the boot if the KEK differs from the one this instance was initialized with.
   await assertKekFingerprint(prisma, kek);
 
+  const trustedProxies = parseTrustedProxies(env.SCHRODUMP_TRUSTED_PROXIES);
+  if (trustedProxies.length === 0) {
+    logger.warn(
+      "SCHRODUMP_TRUSTED_PROXIES is unset: the login rate limit will bucket on X-Forwarded-For as " +
+        "received. If a reverse proxy sits in front of this server, set it to that proxy's CIDR " +
+        "(plus 127.0.0.1/32) — otherwise the limit is either bypassable or shared by every client",
+    );
+  }
   const auth = createAuth(prisma, {
     secret: env.BETTER_AUTH_SECRET ?? deriveAuthSecret(kek),
     baseURL: env.SCHRODUMP_URL,
+    trustedProxies,
   });
 
   await bootstrap(createBootstrapDeps(prisma, auth, env, logger), env);

@@ -7,12 +7,63 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthContext, Role, SessionResolver } from "./rbac.js";
 
-export function createAuth(prisma: PrismaClient, opts: { secret: string; baseURL: string }) {
+// Comma-separated CIDRs (or bare addresses) naming every hop that sits in FRONT of this server.
+// Empty list means "nothing is trusted", which is the correct default and not a placeholder.
+//
+// This is the setting that decides whether the login rate limit is a control or theatre, and it
+// fails in both directions if it is wrong:
+//
+//   - Too permissive, or absent with a single-hop X-Forwarded-For: the header is attacker-supplied.
+//     Rotating it on every request gives every attempt its own bucket and the limit never fires.
+//   - Absent behind a real proxy: X-Forwarded-For arrives with more than one entry, Better-Auth
+//     refuses to guess which is the client, and every request in the deployment shares ONE bucket.
+//     Three sign-ins per ten seconds across all users — an outage wearing a security feature.
+//
+// So it is explicit, and the server says at boot when it is empty.
+export function parseTrustedProxies(raw: string | undefined): string[] {
+  if (raw === undefined) return [];
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+}
+
+export interface AuthOptions {
+  secret: string;
+  baseURL: string;
+  // See parseTrustedProxies. Empty is honest, not broken.
+  trustedProxies: string[];
+}
+
+export function createAuth(prisma: PrismaClient, opts: AuthOptions) {
   return betterAuth({
     database: prismaAdapter(prisma, { provider: "postgresql" }),
     emailAndPassword: { enabled: true },
     secret: opts.secret,
     baseURL: opts.baseURL,
+    rateLimit: {
+      // Explicit rather than inherited. Better-Auth enables this only when NODE_ENV is production,
+      // which makes the security posture depend on a variable set for unrelated reasons.
+      enabled: true,
+      // Database, not memory: the counters must be shared across replicas and survive a restart.
+      // See the RateLimit model for why the default is wrong for this deployment shape.
+      storage: "database",
+      window: 10,
+      max: 100,
+      customRules: {
+        // Tighter than the library's built-in 3-per-10s on /sign-in. Password guessing is a slow
+        // grind, so the window that matters is minutes, not seconds: 5 attempts per five minutes
+        // per address costs a legitimate operator who fat-fingers a password nothing, and costs an
+        // attacker three orders of magnitude.
+        "/sign-in/email": { window: 300, max: 5 },
+        "/sign-up/email": { window: 300, max: 5 },
+      },
+    },
+    advanced: {
+      ipAddress: {
+        trustedProxies: opts.trustedProxies,
+      },
+    },
   });
 }
 

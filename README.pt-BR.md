@@ -78,6 +78,12 @@ docker compose logs schrodump | grep setupUrl
 Abra, crie o admin e siga o fluxo guiado: destino → canary → alvo → teste → política. Passo a passo
 completo em [docs/install.md](docs/install.md).
 
+> **A porta é publicada apenas em loopback.** Alcançar o Schrodump de outra máquina exige um proxy
+> reverso terminando TLS na frente: o cookie de sessão carrega a autoridade inteira do operador, e
+> HTTP puro entrega esse cookie a qualquer um no caminho.
+> [docs/install.md](docs/install.md#put-it-behind-tls-this-is-not-optional) traz as configurações de
+> Caddy e nginx, e a única variável que não pode ser esquecida junto com elas.
+
 ## Suportados
 
 | Bancos | Object storage |
