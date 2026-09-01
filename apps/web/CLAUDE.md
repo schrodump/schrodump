@@ -28,8 +28,8 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   lock, not the only one). A `STAGED` artifact **does** restore now that the directory pipeline
   landed (the server unpacks the tar before handing the directory to `pg_restore`/`myloader`), so
   `canRestoreArtifact` no longer disables by execution mode. The disable-with-a-reason rule still
-  governs what remains refused — a scope the engine does not support, and mongo outside
-  `FULL_CLUSTER`.
+  governs what remains refused — a scope the engine does not support. Mongo now offers
+  `DATABASE` and `COLLECTION` too (never `TABLE`; mongo has none), mirroring the server's matrix.
 - **The dashboard counter comes from the server, never from `.length`.** `GET /artifacts` returns
   `{ items, total, counts }`; `items` is capped at 200 and `counts` is computed over the whole
   table. Counting `items` would report fewer unobserved backups than exist, which is exactly the

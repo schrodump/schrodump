@@ -47,10 +47,11 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   postgres: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
   mysql: ["FULL_CLUSTER", "DATABASE", "TABLE"],
   mariadb: ["FULL_CLUSTER", "DATABASE", "TABLE"],
-  // FULL_CLUSTER only: mongorestore runs with --drop and no --nsInclude, so a sub-scope restore
-  // would drop and overwrite every namespace in the archive. The server refuses it — this list is
-  // the second lock, kept in sync so the UI never offers a target that will be rejected.
-  mongodb: ["FULL_CLUSTER"],
+  // COLLECTION rather than TABLE — mongo has no tables. Sub-scope came back once buildRestore
+  // emitted --nsInclude, which is what scopes mongorestore's --drop to the requested namespace
+  // instead of the whole archive; the server proves that against a real mongod. This list is the
+  // second lock, kept in sync so the UI never offers a target that will be rejected.
+  mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
 // Restore works end-to-end for all four engines, in both execution modes. A STAGED artifact is a

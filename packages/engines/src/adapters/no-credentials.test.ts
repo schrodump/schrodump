@@ -46,7 +46,9 @@ function commandsFor(kind: EngineKind): string[][] {
     connection: CONN,
     serverVersionNum: VERSION[kind],
     target: "DATABASE",
-    scope: EMPTY_SCOPE,
+    // Named, not EMPTY_SCOPE: mongo now refuses a sub-scope restore with nothing to scope by, and
+    // this fixture is about credentials in argv, not about scope.
+    scope: { databases: ["app"], schemas: [], collections: ["events"] },
     executionMode: "STREAM",
     // Restore always stages the decrypted artifact to a mounted file now (no stdin path);
     // mysql/mariadb's STREAM buildRestore requires it (postgres/mongodb ignore or accept it).

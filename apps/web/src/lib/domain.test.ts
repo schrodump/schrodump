@@ -39,11 +39,11 @@ describe("RESTORE_TARGETS_BY_ENGINE", () => {
     expect(RESTORE_TARGETS_BY_ENGINE.mongodb).not.toContain("SCHEMA");
   });
 
-  it("offers mongodb no sub-scope target, matching the server's refusal", () => {
-    // Not a UI preference. mongorestore runs with --drop and no --nsInclude, so a scoped restore
-    // would drop and overwrite every namespace in the archive; the server withdrew those targets
-    // and refuses them. Offering one here would put a button in front of a guaranteed rejection —
-    // and the server is the lock, so a drift in this direction is a UX bug, not a safety one.
-    expect(RESTORE_TARGETS_BY_ENGINE.mongodb).toEqual(["FULL_CLUSTER"]);
+  it("mirrors the server's mongodb targets exactly, in mongo's own vocabulary", () => {
+    // Not a UI preference — a mirror. The server's capability matrix is the lock, and this list
+    // decides what the restore dialog offers; drift in either direction is a bug, but only drift
+    // that offers MORE than the server accepts puts a button in front of a guaranteed rejection.
+    // Sub-scope returned once buildRestore emitted --nsInclude, which is what scopes --drop.
+    expect(RESTORE_TARGETS_BY_ENGINE.mongodb).toEqual(["FULL_CLUSTER", "DATABASE", "COLLECTION"]);
   });
 });

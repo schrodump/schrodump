@@ -36,7 +36,10 @@ function restoreInput(over: Partial<RestoreInput> = {}): RestoreInput {
     connection: CONN,
     serverVersionNum: 80004,
     target: "DATABASE",
-    scope: { databases: [], schemas: [], collections: [] },
+    // A sub-scope restore now REQUIRES something to scope by — a DATABASE target with an empty
+    // scope is refused, because the only other reading is "everything", which is what made this
+    // capability unsafe. Tests about flags unrelated to scope get a valid one by default.
+    scope: { databases: ["app"], schemas: [], collections: [] },
     executionMode: "STREAM",
     ...over,
   };
@@ -169,7 +172,11 @@ describe("mongodbAdapter.buildRestore — oplog replay", () => {
     // target that would write outside the scope the operator asked for.
     for (const target of ["DATABASE", "COLLECTION"] as const) {
       const descriptor = mongodbAdapter.buildRestore(
-        restoreInput({ target, sourceHasOplog: true }),
+        restoreInput({
+          target,
+          sourceHasOplog: true,
+          scope: { databases: ["app"], schemas: [], collections: ["events"] },
+        }),
       );
       expect(descriptor.command).not.toContain("--oplogReplay");
     }
@@ -246,5 +253,76 @@ describe("mongodbAdapter.buildVerifyAssertions", () => {
       "--eval",
       descriptor.command.at(-1),
     ]);
+  });
+});
+
+// Sub-scope restore was withdrawn because buildRestore never read input.scope and drove
+// mongorestore with a bare --drop: a DATABASE request would drop and overwrite EVERY namespace in
+// the archive. These pin the scoping that lets it come back. The proof that neighbours actually
+// survive is an integration test against a real mongo — a descriptor test can only show the flags.
+describe("mongodbAdapter.buildRestore — namespace scoping", () => {
+  it("scopes a DATABASE restore to that database, so --drop cannot reach its neighbours", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({ target: "DATABASE", scope: { databases: ["app"], schemas: [], collections: [] } }),
+    );
+
+    expect(descriptor.command).toContain("--nsInclude=app.*");
+    // --drop is namespace-scoped ONLY through --nsInclude. Keeping one without the other is the
+    // defect this replaces, so both are asserted together.
+    expect(descriptor.command).toContain("--drop");
+  });
+
+  it("scopes a COLLECTION restore to that collection alone", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        target: "COLLECTION",
+        scope: { databases: ["app"], schemas: [], collections: ["events"] },
+      }),
+    );
+
+    expect(descriptor.command).toContain("--nsInclude=app.events");
+    expect(descriptor.command).not.toContain("--nsInclude=app.*");
+  });
+
+  it("emits one --nsInclude per requested database", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({
+        target: "DATABASE",
+        scope: { databases: ["app", "audit"], schemas: [], collections: [] },
+      }),
+    );
+
+    expect(descriptor.command).toContain("--nsInclude=app.*");
+    expect(descriptor.command).toContain("--nsInclude=audit.*");
+  });
+
+  it("leaves FULL_CLUSTER unscoped — the whole archive is the scope", () => {
+    const descriptor = mongodbAdapter.buildRestore(
+      restoreInput({ target: "FULL_CLUSTER", scope: { databases: ["app"], schemas: [], collections: [] } }),
+    );
+
+    expect(descriptor.command.some((a) => a.startsWith("--nsInclude"))).toBe(false);
+  });
+
+  // The failure mode that made this unsafe: a sub-scope request with nothing to scope BY would
+  // emit no --nsInclude, leaving a bare --drop across the whole archive. Refusing is the only
+  // answer that cannot lose data.
+  it("refuses a sub-scope restore that names no database", () => {
+    expect(() =>
+      mongodbAdapter.buildRestore(
+        restoreInput({ target: "DATABASE", scope: { databases: [], schemas: [], collections: [] } }),
+      ),
+    ).toThrow(EngineDescriptorError);
+  });
+
+  it("refuses a COLLECTION restore that names no collection", () => {
+    expect(() =>
+      mongodbAdapter.buildRestore(
+        restoreInput({
+          target: "COLLECTION",
+          scope: { databases: ["app"], schemas: [], collections: [] },
+        }),
+      ),
+    ).toThrow(EngineDescriptorError);
   });
 });

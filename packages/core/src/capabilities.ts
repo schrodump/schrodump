@@ -60,13 +60,16 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   mongodb: {
     engine: "mongodb",
     serverVersionRange: { min: 60000, max: null },
-    // FULL_CLUSTER only, and this is a safety gate rather than a missing feature. mongorestore is
-    // driven with --drop and NO --nsInclude — buildRestore never reads input.scope — so a DATABASE
-    // or COLLECTION restore would drop and overwrite EVERY namespace in the archive instead of the
-    // one asked for. runRestoreJob validates the requested target against this list, so advertising
-    // sub-scope here is precisely what made that reachable. They return together with --nsInclude
-    // scoping; until then, refusing is the same call already made for STAGED restore.
-    supportedRestoreTargets: ["FULL_CLUSTER"],
+    // Sub-scope restore is back, under the condition it was withdrawn on: buildRestore now emits
+    // --nsInclude for a DATABASE or COLLECTION target, which is what scopes --drop to the requested
+    // namespace instead of the whole archive. Proven against a real mongod by
+    // mongodb-restore-scope.integration.test.ts, which modifies a NEIGHBOUR after the dump and
+    // asserts the modification survives the restore — removing --nsInclude turns that assertion red
+    // with a document count of 1 where 2 was expected, which is the data loss this gate existed for.
+    //
+    // TABLE is absent because mongo has no such thing; COLLECTION is the equivalent, and the
+    // descriptor refuses one that names no collection rather than widening to the database.
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
     // --archive is a stream, and parallelism stays at 1 until someone proves it is safe on top of
     // one. mongodump accepts --numParallelCollections alongside --archive, but "accepts" is not the
     // claim that matters: what has to be shown is that an archive written by parallel collection
