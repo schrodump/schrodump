@@ -106,18 +106,63 @@ export const mongodbAdapter: EngineAdapter = {
     // consistent, but not sharing one dump-end instant.
     const oplogArgs =
       input.sourceHasOplog === true && input.target === "FULL_CLUSTER" ? ["--oplogReplay"] : [];
+
+    // Namespace scoping, and the reason --drop below is safe to keep. mongorestore's --drop drops
+    // the collections it is about to restore; with --nsInclude that set is exactly the requested
+    // scope, and without it the set is the WHOLE archive. So the two are one decision, not two
+    // flags: a sub-scope restore that emitted --drop with no --nsInclude would drop every namespace
+    // in the archive to write one of them back. That is why this capability was withdrawn, and
+    // scoping is what brings it back.
+    //
+    // FULL_CLUSTER stays unscoped on purpose — there the archive IS the scope.
+    const nsArgs: string[] = [];
+    if (input.target !== "FULL_CLUSTER") {
+      const databases = input.scope.databases;
+      // Refusing beats guessing. A sub-scope request with nothing to scope by has no safe
+      // interpretation: the only one available would be "everything", which is the opposite of
+      // what was asked for and destroys data outside it.
+      if (databases.length === 0) {
+        throw new EngineDescriptorError(
+          "MONGODB_RESTORE_SCOPE_REQUIRED",
+          "a DATABASE or COLLECTION restore must name at least one database to scope by; without it " +
+            "--drop would reach every namespace in the archive",
+        );
+      }
+      if (input.target === "COLLECTION") {
+        if (databases.length !== 1) {
+          throw new EngineDescriptorError(
+            "MONGODB_RESTORE_COLLECTION_AMBIGUOUS",
+            "a COLLECTION restore must name exactly one database, so each collection has an " +
+              "unambiguous namespace",
+          );
+        }
+        if (input.scope.collections.length === 0) {
+          throw new EngineDescriptorError(
+            "MONGODB_RESTORE_COLLECTION_REQUIRED",
+            "a COLLECTION restore must name at least one collection",
+          );
+        }
+        const database = databases[0] as string;
+        for (const collection of input.scope.collections) {
+          nsArgs.push(`--nsInclude=${database}.${collection}`);
+        }
+      } else {
+        for (const database of databases) nsArgs.push(`--nsInclude=${database}.*`);
+      }
+    }
+
     const command = [
       "mongorestore",
       ...mongoConnArgs(connection),
       "--config",
       MONGO_CONFIG_PATH,
       ...(connection.tls ? ["--tls"] : []),
-      // --drop drops each collection in the ARCHIVE before restoring it (mongo's --clean). It is NOT
-      // namespace-scoped: it never reads input.scope. Today the only caller is FULL_RESTORE verify,
-      // which restores a full archive into a fresh throwaway sandbox — safe. WARNING: when sub-scope
-      // restore (DATABASE/COLLECTION into a real, possibly-non-empty target) lands, --drop would drop
-      // every namespace present in the archive, not just the scoped one — add --nsInclude scoping then.
+      // --drop drops the collections mongorestore is about to restore. Scoped by the --nsInclude
+      // args above, so a DATABASE or COLLECTION restore drops only inside the requested namespace;
+      // unscoped for FULL_CLUSTER, where the archive is the scope. Never emit one without the
+      // other for a sub-scope target — see the block above.
       "--drop",
+      ...nsArgs,
       ...oplogArgs,
     ];
 

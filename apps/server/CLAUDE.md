@@ -333,8 +333,12 @@ an admin-creation link, and an old log line stops working after an hour.
   gunzip → mounted file → `pg_restore`/`mysql`/`mongorestore`). A `STAGED` artifact goes through
   one extra step first: the tar is unpacked into a sibling directory in scratch, and it is the
   **directory** that gets mounted — never the tar. What is missing: real sub-scope selection for
-  mysql/mongo (today it is always a full restore), and mongo is limited to `FULL_CLUSTER` because
-  `mongorestore` runs with `--drop` and without `--nsInclude`.
+  **mysql/mariadb**, which still restore the whole dump regardless of the requested scope. Mongo no
+  longer is: `buildRestore` emits `--nsInclude`, which is what scopes `mongorestore`'s `--drop` to
+  the requested namespace rather than the whole archive, and a request that names nothing to scope
+  by is refused rather than widened. The proof is `mongodb-restore-scope.integration.test.ts`
+  against a real mongod — it modifies a neighbour *after* the dump and asserts the modification
+  survives, which is an assertion a descriptor test cannot make.
 
 - **Mongo backup requires `SCHRODUMP_SCRATCH_PATH` to be configured** — the `mongodump`/
   `mongorestore` password travels only via a mounted `--config` file (never argv/env), and that file

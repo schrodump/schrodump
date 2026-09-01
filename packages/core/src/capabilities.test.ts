@@ -49,13 +49,16 @@ describe("resolveCapabilities", () => {
     }
   });
 
-  it("does not advertise sub-scope restore for mongodb, which cannot scope one", () => {
-    // mongorestore is driven with --drop and NO --nsInclude: buildRestore never reads input.scope.
-    // So a DATABASE or COLLECTION restore would drop and overwrite EVERY namespace in the archive,
-    // not the one that was asked for — and runRestoreJob validates the requested target against
-    // exactly this list, so advertising them here is what makes that reachable. They come back with
-    // --nsInclude scoping, not before: refusing is the same choice already made for STAGED restore.
+  it("advertises mongodb sub-scope restore in the shape mongo actually has", () => {
+    // This list is what runRestoreJob validates a request against, so it is the gate that made
+    // sub-scope reachable — and it was deliberately empty of sub-scope until buildRestore emitted
+    // --nsInclude, which is what scopes mongorestore's --drop to the requested namespace rather
+    // than the whole archive. The proof is an integration test against a real mongod, not this.
     const caps = resolveCapabilities("mongodb", 80004);
-    expect(caps.supportedRestoreTargets).toEqual(["FULL_CLUSTER"]);
+    expect(caps.supportedRestoreTargets).toEqual(["FULL_CLUSTER", "DATABASE", "COLLECTION"]);
+    // COLLECTION, never TABLE: mongo has no tables, and advertising one would be a target the
+    // descriptor cannot build.
+    expect(caps.supportedRestoreTargets).not.toContain("TABLE");
+    expect(caps.supportedRestoreTargets).not.toContain("SCHEMA");
   });
 });
