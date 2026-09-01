@@ -109,7 +109,9 @@ environment set — otherwise they are `describe.skipIf`:
 - CI: `ci.yml` (dco, readme-sync, check, integration, image build/smoke), `security.yml`
   (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the
   executor images, on a `v*` tag). `release.yml` re-runs the full gate on the tagged commit and
-  every publishing job `needs:` it — a tag on a red commit must not become a signed image.
+  every publishing job `needs:` it — a tag on a red commit must not become a signed image. A
+  `preflight` job checks the Docker Hub secrets exist and fails in seconds naming the missing one,
+  rather than letting a `docker/login-action` error surface a minute deep in buildx.
   `latest` is applied only when the tag parses as `X.Y.Z`, so a `-rc.N` publishes without moving it.
 - **Contributions are certified by DCO, not a CLA.** Every commit in a pull request needs a
   `Signed-off-by` trailer (`git commit -s`); the `dco` job enforces it over `base..head` only, so
