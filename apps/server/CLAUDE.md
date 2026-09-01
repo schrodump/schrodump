@@ -125,7 +125,10 @@ link de setup.
   real com o descritor de produção → `encryptStream` para escrow apenas → `decryptStream` →
   `pg_restore` num banco vazio → a organização volta. E assere que a identidade **operacional não
   abre**. É o único teste do projeto que tira um artefato de `UNOBSERVED`; o que ele não cobre é o
-  executor alcançando o banco pela rede interna e o ida-e-volta pelo bucket.
+  executor alcançando o banco pela rede interna e o ida-e-volta pelo bucket — cobertos, por sua vez,
+  por `self-backup-e2e.integration.test.ts`, que dirige o próprio tick do scheduler contra executor
+  real, rede real e bucket real. Apontar o executor para a rede errada derruba os quatro asserts
+  dele; era exatamente esse o defeito que teria embarcado.
 - **A linha na tabela nasce ANTES de resolver a configuração.** Destino apagado ou escrow ausente
   vira `SelfBackup` `FAILED` com motivo legível, visível em `GET /self-backups`, não só um log.
 
