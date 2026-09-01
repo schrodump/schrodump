@@ -4,7 +4,9 @@
 "use client";
 
 import { AppShell } from "@/components/app-shell";
+import { EncryptionKeysPanel } from "@/components/encryption-keys";
 import { SelfBackupPanel } from "@/components/self-backup-panel";
+import { useCurrentRole } from "@/hooks/use-current-role";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
@@ -12,20 +14,21 @@ import { useT } from "@/i18n/provider";
 // Self-backup is real and has an endpoint. The three below still need one (keys, members, instance
 // config); the page states that plainly instead of inventing data.
 const PANELS: { title: MessageKey; description: MessageKey }[] = [
-  { title: "settings.keys", description: "settings.keys.description" },
   { title: "settings.members", description: "settings.members.description" },
   { title: "settings.instance", description: "settings.instance.description" },
 ];
 
 export default function SettingsPage() {
   const t = useT();
+  const role = useCurrentRole();
   return (
     <AppShell>
       <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
-      <div className="mt-6">
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <EncryptionKeysPanel canEdit={role === "admin"} />
         <SelfBackupPanel />
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
         {PANELS.map((panel) => (
           <Card key={panel.title}>
             <CardHeader>

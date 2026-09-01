@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ArtifactList, Destination, JobList, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
+import type { ArtifactList, Destination, EncryptionKey, JobList, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
 
 export function useArtifacts() {
   return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<ArtifactList>("/artifacts") });
@@ -42,5 +42,12 @@ export function useSelfBackups() {
     // Admin-only endpoint: a viewer or operator gets 403, and retrying a 403 forever just burns
     // requests to be told the same thing.
     retry: false,
+  });
+}
+
+export function useEncryptionKeys() {
+  return useQuery({
+    queryKey: ["encryption-keys"],
+    queryFn: () => api.get<EncryptionKey[]>("/encryption-keys"),
   });
 }

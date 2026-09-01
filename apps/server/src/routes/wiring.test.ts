@@ -4,7 +4,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { LIST_PAGE_SIZE } from "./jobs.js";
-import { createJobsService, toArtifactRecord } from "./wiring.js";
+import { generateAgeKeyPair } from "../crypto/artifact.js";
+import { createEncryptionKeyService, createJobsService, toArtifactRecord } from "./wiring.js";
 
 // A full Artifact row as Prisma returns it — sizes are BigInt, plus internal columns the API must
 // not expose.
@@ -111,5 +112,67 @@ describe("createJobsService list bounds", () => {
     const call = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
+  });
+});
+
+describe("createEncryptionKeyService.provision", () => {
+  function txPrisma() {
+    const created: { data: Record<string, unknown> }[] = [];
+    const prisma = {
+      encryptionKey: {
+        create: (args: { data: Record<string, unknown> }) => {
+          created.push(args);
+          return args;
+        },
+      },
+      $transaction: (ops: unknown[]) => Promise.resolve(ops),
+    } as unknown as PrismaClient;
+    return { created, prisma };
+  }
+
+  // The single most important claim in this feature. If the escrow identity were persisted, losing
+  // the metadata database would lose BOTH keys at once and a self-backup could never be recovered —
+  // which is the entire reason the self-backup seals to escrow in the first place.
+  it("stores the operational identity and never the escrow one", async () => {
+    const t = txPrisma();
+    const result = await createEncryptionKeyService(t.prisma, Buffer.alloc(32)).provision("org-1", {
+      mode: "generate",
+    });
+
+    const operational = t.created.find((c) => c.data["type"] === "operational");
+    const escrow = t.created.find((c) => c.data["type"] === "escrow");
+    expect(operational?.data["encryptedIdentity"]).toBeDefined();
+    expect(escrow?.data["encryptedIdentity"]).toBeUndefined();
+
+    // It is returned to the caller exactly once instead, which is the only copy that will exist.
+    expect(result.escrowIdentity).toMatch(/^AGE-SECRET-KEY-/);
+    // And it is nowhere in what was written.
+    expect(JSON.stringify(t.created)).not.toContain(result.escrowIdentity ?? "unreachable");
+  });
+
+  it("stores an operator-supplied recipient without ever holding a private half", async () => {
+    const t = txPrisma();
+    const mine = (await generateAgeKeyPair()).recipient;
+    const result = await createEncryptionKeyService(t.prisma, Buffer.alloc(32)).provision("org-1", {
+      mode: "recipient",
+      publicRecipient: mine,
+    });
+
+    const escrow = t.created.find((c) => c.data["type"] === "escrow");
+    expect(escrow?.data["publicRecipient"]).toBe(mine);
+    expect(escrow?.data["encryptedIdentity"]).toBeUndefined();
+    // Null, not a generated one: the server never saw a private key, and saying otherwise would
+    // invite the operator to think there is something to save.
+    expect(result.escrowIdentity).toBeNull();
+  });
+
+  // Both rows in one transaction. An organization left holding only an operational key would fail
+  // every backup at resolveRecipients, and provisioningBlockers would then refuse to fix it.
+  it("writes both keys as a single transaction", async () => {
+    const t = txPrisma();
+    await createEncryptionKeyService(t.prisma, Buffer.alloc(32)).provision("org-1", {
+      mode: "generate",
+    });
+    expect(t.created).toHaveLength(2);
   });
 });

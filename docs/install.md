@@ -152,6 +152,31 @@ after this upgrade. That is the point — see the section below — and the fix 
 proxy in front. To defer it, set `PUBLISH_ADDR=0.0.0.0` in `.env` and understand that the session
 cookie crosses the network in clear.
 
+### Generate the encryption keys. Nothing works before this.
+
+Every artefact is sealed to **two** recipients, and a backup will not run until both exist. Settings
+-> Encryption keys, as an admin, before creating anything else — the guided setup puts it first for
+this reason.
+
+| | Who holds the private half | What it is for |
+| --- | --- | --- |
+| **Operational** | The server, wrapped with the KEK | Verify and restore, without fetching anything from a safe |
+| **Escrow** | **You, offline** | The key that survives losing the metadata database |
+
+The escrow private identity is shown **exactly once**, in the response to its own creation, and is
+stored nowhere — not on the server, not in the browser. Save it somewhere that is not this host
+before dismissing the screen. Without it a self-backup can never be recovered, and a self-backup is
+precisely the thing you reach for after the metadata database is gone.
+
+If you already keep age keys offline, use the second option and paste your own **public recipient**
+(`age1…`) instead. The private half then never reaches the server at all, which is the stronger
+posture. The recipient is validated by age itself, checksum included, so a transposed character is
+refused here rather than discovered later as an artefact nobody can open.
+
+Both keys are provisioned once. There is no rotation yet — retiring a key while old artefacts stay
+readable is a separate operation and is not implemented, so the request is refused rather than
+quietly issuing a second active key.
+
 ### Put it behind TLS. This is not optional.
 
 Schrodump serves plain HTTP on port 8080 and authenticates with a **session cookie**. Published

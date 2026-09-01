@@ -9,7 +9,7 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
-import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { decryptCredential, encryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
 import {
   testTargetConnection,
   type EngineName,
@@ -18,6 +18,8 @@ import {
 import type { DestinationStore } from "./destinations.js";
 import type { ChannelStore } from "./notifications.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
+import { generateAgeKeyPair, recipientFingerprint } from "../crypto/artifact.js";
+import type { EncryptionKeyRoutesDeps } from "./encryption-keys.js";
 import { LIST_PAGE_SIZE } from "./jobs.js";
 import type { ArtifactRecord, JobsService } from "./jobs.js";
 
@@ -373,6 +375,83 @@ export function prismaNotificationChannelStore(
         where: { id, organizationId },
       });
       return count > 0;
+    },
+  };
+}
+
+// EncryptionKey provisioning. The operational identity is KEK-wrapped and stored; the escrow
+// identity is returned to the caller and DELIBERATELY NOT persisted — `encryptedIdentity` stays
+// null, which is what makes it escrow. If it were stored, losing the metadata database would lose
+// both keys at once and a self-backup could never be recovered.
+export function createEncryptionKeyService(
+  prisma: PrismaClient,
+  kek: Buffer,
+): Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision"> {
+  return {
+    list: async (organizationId) =>
+      (
+        await scopedPrisma(prisma, organizationId).encryptionKey.findMany({
+          orderBy: { createdAt: "asc" },
+        })
+      ).map((row) => ({
+        keyId: row.keyId,
+        type: row.type,
+        state: row.state,
+        publicRecipient: row.publicRecipient,
+        // Derived, never a stored flag: the server can decrypt exactly when it holds an identity.
+        serverCanDecrypt: row.encryptedIdentity !== null,
+        createdAt: row.createdAt.toISOString(),
+      })),
+
+    existing: async (organizationId) =>
+      (
+        await scopedPrisma(prisma, organizationId).encryptionKey.findMany({
+          select: { keyId: true, type: true, publicRecipient: true, state: true },
+        })
+      ).map((row) => ({
+        keyId: row.keyId,
+        type: row.type,
+        publicRecipient: row.publicRecipient,
+        state: row.state,
+      })),
+
+    provision: async (organizationId, escrow) => {
+      const operational = await generateAgeKeyPair();
+      // Generated even in "recipient" mode and then discarded with the function scope: the server
+      // must never hold this identity, and the cleanest way to guarantee that is never to have it.
+      const generatedEscrow = escrow.mode === "generate" ? await generateAgeKeyPair() : null;
+      const escrowRecipient =
+        generatedEscrow?.recipient ?? (escrow as { publicRecipient: string }).publicRecipient;
+      const escrowKeyId = generatedEscrow?.keyId ?? recipientFingerprint(escrowRecipient);
+
+      await prisma.$transaction([
+        prisma.encryptionKey.create({
+          data: {
+            organizationId,
+            keyId: operational.keyId,
+            type: "operational",
+            publicRecipient: operational.recipient,
+            encryptedIdentity: encryptCredential(kek, operational.identity),
+            state: "active",
+          },
+        }),
+        prisma.encryptionKey.create({
+          data: {
+            organizationId,
+            keyId: escrowKeyId,
+            type: "escrow",
+            publicRecipient: escrowRecipient,
+            // No encryptedIdentity. Not an oversight — see the note above this function.
+            state: "active",
+          },
+        }),
+      ]);
+
+      return {
+        operationalKeyId: operational.keyId,
+        escrowKeyId,
+        escrowIdentity: generatedEscrow?.identity ?? null,
+      };
     },
   };
 }

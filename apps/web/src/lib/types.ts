@@ -152,3 +152,24 @@ export interface ArtifactList {
   total: number;
   counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
 }
+
+// Public recipients only — an identity never appears in this payload, which is what makes the
+// escrow key escrow. `serverCanDecrypt` is derived server-side from whether an identity is stored.
+export interface EncryptionKey {
+  keyId: string;
+  type: "operational" | "escrow";
+  state: "active" | "retired";
+  publicRecipient: string;
+  serverCanDecrypt: boolean;
+  createdAt: string;
+}
+
+// The escrow identity is present exactly once, in the response to its own creation, and is never
+// retrievable again. Null when the operator supplied their own recipient — then the server never
+// saw a private key at all.
+export interface ProvisionedKeys {
+  operationalKeyId: string;
+  escrowKeyId: string;
+  escrowIdentity: string | null;
+  escrowIdentityWarning: string | null;
+}

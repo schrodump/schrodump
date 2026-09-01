@@ -160,6 +160,23 @@ Credentials are write-only from the interface's perspective. Once stored, they a
 decrypted for display and never sent back to the browser — the UI can replace a credential, never
 reveal one.
 
+## The two keys, and why only one of them can save you
+
+Provisioning creates an operational key whose identity the server holds (KEK-wrapped, in the
+metadata database) and an escrow key whose identity it never sees. That asymmetry is the design, not
+an implementation shortcut.
+
+The operational key is convenience: it lets the server verify and restore without an operator
+fetching anything. It also lives inside the database it protects, so it dies with it.
+
+The escrow key is the guarantee. Its identity is returned once, at creation, and persisted nowhere —
+`encryptedIdentity` stays null by construction, and a test asserts the row written contains no trace
+of it. An operator who prefers can supply their own public recipient instead, in which case the
+server never generates a private half at all.
+
+Losing the escrow identity is unrecoverable, and it is the failure that only shows up on the day it
+matters. Store it the way you store the KEK: off this host, in a place that survives it.
+
 ## Sealed mode: real custody separation
 
 A destination can be marked **operational** or **sealed**.
