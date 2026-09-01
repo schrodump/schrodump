@@ -23,9 +23,11 @@ describe("canRestoreArtifact", () => {
   // pipeline (untar-to-directory, myloader / pg_restore -Fd) that v1 does not have, so the server
   // refuses it regardless of engine — postgres -Fd included. Offering the button anyway enqueues a
   // job that is certain to fail.
-  it("refuses a STAGED artifact of every engine, mirroring the server's gate", () => {
+  it("allows a STAGED artifact of every engine, mirroring the server's directory pipeline", () => {
+    // The gate lifted on the server once a STAGED dump could be archived on the way out and
+    // unpacked on the way back. Leaving the button hidden here would hide a restore that works.
     for (const engine of ENGINE_KINDS) {
-      expect(canRestoreArtifact({ engine, executionMode: "STAGED" })).toBe(false);
+      expect(canRestoreArtifact({ engine, executionMode: "STAGED" })).toBe(true);
     }
   });
 });

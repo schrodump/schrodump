@@ -222,13 +222,6 @@ export function resolveVerifyPlan(
   scopedDatabases: string[],
 ): VerifyPlan {
   const requested: VerifyLevel = policyLevel ?? "CHECKSUM";
-  if (requested === "FULL_RESTORE" && executionMode === "STAGED") {
-    return {
-      effectiveLevel: "CHECKSUM",
-      downgradeReason:
-        "STAGED artifacts cannot be FULL_RESTORE-verified in v1: downgraded to CHECKSUM",
-    };
-  }
   // An empty-string db name is not a real scope entry: the route rejects it (targets.ts .min(1)).
   // "Scoped" is judged EXACTLY as originDatabaseFor resolves the origin db — the FIRST entry, non-
   // empty — so the two can never disagree over what a legacy/malformed [""] (or [""].concat(...))
@@ -496,6 +489,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       timeoutMs: DUMP_TIMEOUT_MS,
       // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
       ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
+      // Where a STAGED dump writes its directory. Mounted into the dump container by
+      // createBackupPorts at this same path — the descriptor's -f/-d argument is only meaningful
+      // if the daemon can resolve it too.
+      ...(stagingPathFor() !== undefined ? { stagingPath: stagingPathFor() as string } : {}),
       ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
       setState: (state, reason) => setJobState(job.id, state, reason),
       probe: () => Promise.resolve(backupProbe),
@@ -803,6 +800,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
                 timeoutMs: DUMP_TIMEOUT_MS,
                 correlationId: job.id,
+                executionMode: artifact.executionMode,
                 ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
                 buildRestoreDescriptor: (sourcePath) =>
                   adapter.buildRestore({
@@ -1083,6 +1081,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           network: deps.env.SCHRODUMP_EXECUTOR_NETWORK,
           timeoutMs: DUMP_TIMEOUT_MS,
           correlationId: job.id,
+          executionMode: artifact.executionMode,
           ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
           buildRestoreDescriptor: (sourcePath) =>
             adapter.buildRestore({

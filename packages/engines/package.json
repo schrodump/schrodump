@@ -4,6 +4,11 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./staging": {
+      "@schrodump/source": "./src/staging.ts",
+      "types": "./dist/staging.d.ts",
+      "import": "./dist/staging.js"
+    },
     "./descriptor": {
       "@schrodump/source": "./src/descriptor.ts",
       "types": "./dist/descriptor.d.ts",
@@ -40,7 +45,9 @@
       "import": "./dist/probe/mongodb.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",

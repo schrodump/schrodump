@@ -4,7 +4,9 @@
 import { describe, expect, it } from "vitest";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 
-function deps(over: Partial<Awaited<ReturnType<RestoreWiringDeps["loadArtifactRow"]>>> = {}): RestoreWiringDeps {
+function deps(
+  over: Partial<Awaited<ReturnType<RestoreWiringDeps["loadArtifactRow"]>>> = {},
+): RestoreWiringDeps {
   const unused = (): never => {
     throw new Error("not used in this test");
   };

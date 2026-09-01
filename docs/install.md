@@ -121,12 +121,11 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 | `SCHRODUMP_ADMIN_EMAIL`            | no       | Provision the first admin without the setup link                                                   |
 | `SCHRODUMP_ADMIN_PASSWORD`         | no       | Same                                                                                               |
 
-> **On `SCHRODUMP_STAGED_THRESHOLD_BYTES` and `parallelism`.** Both are inert in this version.
-> STAGED (directory) dumps are disabled: the dump writes a directory, but the upload path reads the
-> dump tool's standard output, so a staged backup produced an **empty artifact** while the job
-> reported success. A policy with `parallelism > 1` therefore runs as a single stream and records a
-> warning saying so — you get a real, restorable backup, just not a parallel one. Re-enabling
-> STAGED needs a directory pipeline on both the backup and restore sides.
+> **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** It has no default, and that is deliberate rather
+> than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the
+> scratch volume sized for it and it writes the dump to disk in clear before uploading. Setting a
+> threshold opts every database above that size into it silently; `parallelism > 1` on a policy is
+> the explicit, per-policy way in, and the one to reach for first.
 
 ### Reaching your databases
 

@@ -25,16 +25,17 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
 - **Restore tem atrito de propósito.** Escopos que a engine não suporta ficam desabilitados com o
   motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
   Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).
-  A tranca de artefato é por **`executionMode`, não por engine**: `canRestoreArtifact` desabilita o
-  botão de um artefato `STAGED` de qualquer engine (postgres `-Fd` incluso), porque o v1 não tem
-  pipeline de diretório. Desabilitar com motivo, nunca esconder — o artefato existe, e por que ele
-  ainda não restaura é a parte útil.
+  Artefato `STAGED` **restaura** desde que o pipeline de diretório entrou (o servidor desempacota o
+  tar antes de entregar o diretório ao `pg_restore`/`myloader`), então `canRestoreArtifact` não
+  desabilita mais por modo de execução. A regra de desabilitar-com-motivo em vez de esconder segue
+  valendo para o que continua recusado — escopo que a engine não suporta, e mongo fora de
+  `FULL_CLUSTER`.
 - **Verify desligado numa policy é aviso persistente**, não toast.
 - **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
   chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
   faltando quebra o typecheck. Adicionar locale: novo dicionário + entrada em `Locale`/`LOCALES`/
   `dictionaries` no `provider.tsx`. Chaves dinâmicas usam template literal
-  (`` t(`job.state.${state}`) ``), que o TS estreita para o subconjunto válido.
+  (``t(`job.state.${state}`)``), que o TS estreita para o subconjunto válido.
 - **Sessão é cookie**, nunca localStorage. Só a preferência de idioma vai pro localStorage.
 
 ## Como fala com o servidor

@@ -12,14 +12,32 @@ import {
 } from "./worker.js";
 
 const backupJob: ClaimedJob = {
-  id: "j1", organizationId: "o1", kind: "BACKUP", policyId: "p1", artifactId: null, correlationId: "backup:p1", restoreParams: null,
+  id: "j1",
+  organizationId: "o1",
+  kind: "BACKUP",
+  policyId: "p1",
+  artifactId: null,
+  correlationId: "backup:p1",
+  restoreParams: null,
 };
 const verifyJob: ClaimedJob = {
-  id: "j2", organizationId: "o1", kind: "VERIFY", policyId: null, artifactId: "a1", correlationId: "verify:a1", restoreParams: null,
+  id: "j2",
+  organizationId: "o1",
+  kind: "VERIFY",
+  policyId: null,
+  artifactId: "a1",
+  correlationId: "verify:a1",
+  restoreParams: null,
 };
 
 const retentionJob: ClaimedJob = {
-  id: "j3", organizationId: "o1", kind: "RETENTION", policyId: "p1", artifactId: null, correlationId: "retention:p1", restoreParams: null,
+  id: "j3",
+  organizationId: "o1",
+  kind: "RETENTION",
+  policyId: "p1",
+  artifactId: null,
+  correlationId: "retention:p1",
+  restoreParams: null,
 };
 
 function makeDeps(over: {
@@ -45,7 +63,8 @@ function makeDeps(over: {
   const enqueueRetention = vi.fn(over.enqueueRetention ?? (() => Promise.resolve("r1")));
   const failJob = vi.fn(() => Promise.resolve());
   const store: WorkerStore = {
-    claimNextJob: () => Promise.resolve(queue.length > 0 ? (queue.shift() as ClaimedJob | null) : null),
+    claimNextJob: () =>
+      Promise.resolve(queue.length > 0 ? (queue.shift() as ClaimedJob | null) : null),
     failJob,
     enqueueVerify,
     enqueueRetention,
@@ -55,7 +74,12 @@ function makeDeps(over: {
     runBackup:
       over.backup ??
       (() =>
-        Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "CHECKSUM", retentionConfigured: true })),
+        Promise.resolve({
+          ok: true,
+          artifactId: "a1",
+          verifyLevel: "CHECKSUM",
+          retentionConfigured: true,
+        })),
     runVerify: over.verify ?? (() => Promise.resolve()),
     runRestore: over.restore ?? (() => Promise.resolve()),
     runRetention,
@@ -100,7 +124,12 @@ describe("runWorkerOnce", () => {
     const { deps, store } = makeDeps({
       jobs: [backupJob],
       backup: () =>
-        Promise.resolve({ ok: false, artifactId: null, verifyLevel: "CHECKSUM", retentionConfigured: true }),
+        Promise.resolve({
+          ok: false,
+          artifactId: null,
+          verifyLevel: "CHECKSUM",
+          retentionConfigured: true,
+        }),
     });
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(store.enqueueRetention).not.toHaveBeenCalled();
@@ -113,7 +142,12 @@ describe("runWorkerOnce", () => {
     const { deps, store } = makeDeps({
       jobs: [backupJob],
       backup: () =>
-        Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "CHECKSUM", retentionConfigured: false }),
+        Promise.resolve({
+          ok: true,
+          artifactId: "a1",
+          verifyLevel: "CHECKSUM",
+          retentionConfigured: false,
+        }),
     });
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(store.enqueueRetention).not.toHaveBeenCalled();
@@ -142,7 +176,12 @@ describe("runWorkerOnce", () => {
     const { deps, store } = makeDeps({
       jobs: [backupJob],
       backup: () =>
-        Promise.resolve({ ok: true, artifactId: "a1", verifyLevel: "NONE", retentionConfigured: true }),
+        Promise.resolve({
+          ok: true,
+          artifactId: "a1",
+          verifyLevel: "NONE",
+          retentionConfigured: true,
+        }),
     });
     await runWorkerOnce(deps);
     expect(store.enqueueVerify).not.toHaveBeenCalled();
@@ -152,7 +191,12 @@ describe("runWorkerOnce", () => {
     const { deps, store } = makeDeps({
       jobs: [backupJob],
       backup: () =>
-        Promise.resolve({ ok: false, artifactId: null, verifyLevel: "CHECKSUM", retentionConfigured: true }),
+        Promise.resolve({
+          ok: false,
+          artifactId: null,
+          verifyLevel: "CHECKSUM",
+          retentionConfigured: true,
+        }),
     });
     await runWorkerOnce(deps);
     expect(store.enqueueVerify).not.toHaveBeenCalled();
@@ -163,7 +207,12 @@ describe("runWorkerOnce", () => {
     const { deps, store } = makeDeps({
       jobs: [backupJob],
       backup: () =>
-        Promise.resolve({ ok: false, artifactId: "a1", verifyLevel: "CHECKSUM", retentionConfigured: true }),
+        Promise.resolve({
+          ok: false,
+          artifactId: "a1",
+          verifyLevel: "CHECKSUM",
+          retentionConfigured: true,
+        }),
     });
     await runWorkerOnce(deps);
     expect(store.enqueueVerify).not.toHaveBeenCalled();
@@ -194,8 +243,17 @@ describe("runWorkerOnce", () => {
   it("dispatches a RESTORE job to runRestore and chains nothing", async () => {
     const runRestore = vi.fn(() => Promise.resolve());
     const restoreJob: ClaimedJob = {
-      id: "j4", organizationId: "o1", kind: "RESTORE", policyId: null, artifactId: "a1", correlationId: "restore:a1",
-      restoreParams: { target: "DATABASE", confirmExistingDatabase: false, triggeredByUserId: "u1" },
+      id: "j4",
+      organizationId: "o1",
+      kind: "RESTORE",
+      policyId: null,
+      artifactId: "a1",
+      correlationId: "restore:a1",
+      restoreParams: {
+        target: "DATABASE",
+        confirmExistingDatabase: false,
+        triggeredByUserId: "u1",
+      },
     };
     const { deps, store } = makeDeps({ jobs: [restoreJob], restore: runRestore });
     expect(await runWorkerOnce(deps)).toBe("ran");
@@ -211,7 +269,11 @@ describe("runWorkerOnce", () => {
   });
 
   it("fails an unsupported kind", async () => {
-    const unknownJob: ClaimedJob = { ...verifyJob, id: "j3", kind: "UNKNOWN" as unknown as ClaimedJob["kind"] };
+    const unknownJob: ClaimedJob = {
+      ...verifyJob,
+      id: "j3",
+      kind: "UNKNOWN" as unknown as ClaimedJob["kind"],
+    };
     const { deps, store } = makeDeps({ jobs: [unknownJob] });
     expect(await runWorkerOnce(deps)).toBe("ran");
     expect(store.failJob).toHaveBeenCalledWith("j3", expect.stringContaining("UNKNOWN"));

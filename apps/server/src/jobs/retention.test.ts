@@ -41,7 +41,10 @@ function policy(over: Partial<RetentionPolicy> = {}): RetentionPolicy {
   };
 }
 
-function ports(manifests: Manifest[], unreadable: string[] = []): RetentionPorts & { deleted: string[] } {
+function ports(
+  manifests: Manifest[],
+  unreadable: string[] = [],
+): RetentionPorts & { deleted: string[] } {
   const deleted: string[] = [];
   return {
     deleted,

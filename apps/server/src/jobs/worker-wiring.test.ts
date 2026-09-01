@@ -63,12 +63,14 @@ describe("resolveVerifyPlan", () => {
     }
   });
 
-  it("downgrades FULL_RESTORE to CHECKSUM for a STAGED artifact, for any engine including postgres", () => {
-    for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
-      const plan = resolveVerifyPlan("FULL_RESTORE", engine, "STAGED", []);
-      expect(plan.effectiveLevel).toBe("CHECKSUM");
-      expect(plan.downgradeReason).toMatch(/STAGED artifacts cannot be FULL_RESTORE-verified/i);
-    }
+  it("keeps FULL_RESTORE for a STAGED artifact, which can now be unpacked and restored", () => {
+    // Downgrading STAGED to CHECKSUM used to be correct AND dangerous: correct because nothing
+    // could restore a directory artifact, dangerous because a CHECKSUM verify passes on the empty
+    // artifact STAGED was producing — so an artifact holding no data could reach VERIFIED. With the
+    // directory pipeline on both sides, FULL_RESTORE is the honest level again.
+    const plan = resolveVerifyPlan("FULL_RESTORE", "postgres", "STAGED", ["app"]);
+    expect(plan.effectiveLevel).toBe("FULL_RESTORE");
+    expect(plan.downgradeReason).toBeNull();
   });
 
   it("downgrades an UNSCOPED mysql/mariadb FULL_RESTORE (STREAM) to CHECKSUM — guards the system-db false VERIFIED", () => {

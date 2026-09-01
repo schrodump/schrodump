@@ -74,11 +74,15 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
   ): Promise<{ rows: Set<string>; ports: ReturnType<typeof createRetentionPorts> }> {
     const rows = new Set<string>();
     for (const m of manifests) {
-      await driver.put(artifactKey(PREFIX, ORG, m.jobId), Readable.from([Buffer.from("DUMPDATA")]), {
-        contentType: "application/octet-stream",
-        partSize: 5 * 1024 * 1024,
-        metadata: {},
-      });
+      await driver.put(
+        artifactKey(PREFIX, ORG, m.jobId),
+        Readable.from([Buffer.from("DUMPDATA")]),
+        {
+          contentType: "application/octet-stream",
+          partSize: 5 * 1024 * 1024,
+          metadata: {},
+        },
+      );
       await writeManifest(driver, PREFIX, m);
       rows.add(m.jobId);
     }
@@ -132,7 +136,10 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
     expect(await driver.head(manifestKey(PREFIX, ORG, fresh.jobId))).not.toBeNull();
     expect(rows.has(fresh.jobId)).toBe(true);
 
-    await driver.delete([artifactKey(PREFIX, ORG, fresh.jobId), manifestKey(PREFIX, ORG, fresh.jobId)]);
+    await driver.delete([
+      artifactKey(PREFIX, ORG, fresh.jobId),
+      manifestKey(PREFIX, ORG, fresh.jobId),
+    ]);
   });
 
   // The landmine: every keep* counter defaults to 0. Against a real bucket, an unguarded run here
@@ -154,7 +161,10 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
     }
 
     await driver.delete(
-      [one, two].flatMap((m) => [artifactKey(PREFIX, ORG, m.jobId), manifestKey(PREFIX, ORG, m.jobId)]),
+      [one, two].flatMap((m) => [
+        artifactKey(PREFIX, ORG, m.jobId),
+        manifestKey(PREFIX, ORG, m.jobId),
+      ]),
     );
   });
 
@@ -178,7 +188,10 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
     expect(rows.size).toBe(2);
 
     await driver.delete(
-      [intact, stale].flatMap((m) => [artifactKey(PREFIX, ORG, m.jobId), manifestKey(PREFIX, ORG, m.jobId)]),
+      [intact, stale].flatMap((m) => [
+        artifactKey(PREFIX, ORG, m.jobId),
+        manifestKey(PREFIX, ORG, m.jobId),
+      ]),
     );
   });
 
@@ -196,7 +209,10 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
     expect(rows.size).toBe(2);
 
     await driver.delete(
-      [full, inc].flatMap((m) => [artifactKey(PREFIX, ORG, m.jobId), manifestKey(PREFIX, ORG, m.jobId)]),
+      [full, inc].flatMap((m) => [
+        artifactKey(PREFIX, ORG, m.jobId),
+        manifestKey(PREFIX, ORG, m.jobId),
+      ]),
     );
   });
 });

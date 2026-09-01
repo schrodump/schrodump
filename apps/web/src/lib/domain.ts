@@ -53,17 +53,16 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER"],
 };
 
-// Restore works end-to-end for all four engines, but only for a STREAM artifact. The gate is
-// execution-mode-based, not engine-based: a STAGED artifact of ANY engine — mydumper's directory
-// output, or postgres `-Fd` — needs a directory restore pipeline (untar-to-directory,
-// `myloader` / `pg_restore -Fd`) that v1 does not have, so runRestoreJob refuses it.
-//
-// This mirrors that gate; it does not replace it. The server stays the enforcing lock.
+// Restore works end-to-end for all four engines, in both execution modes. A STAGED artifact is a
+// tar of a directory dump; the server unpacks it before handing the directory to
+// `pg_restore` / `myloader`. This mirrors that; it does not replace it — the server stays the lock.
 export function canRestoreArtifact(artifact: {
   engine: EngineKind;
   executionMode: ExecutionMode;
 }): boolean {
-  return artifact.executionMode === "STREAM";
+  // Kept as a function rather than inlined `true`: the per-artifact question is real (a future
+  // engine or mode may not restore), and the call sites already ask it.
+  return artifact.engine !== undefined && artifact.executionMode !== undefined;
 }
 
 // Why the server answers with a code and not a message: driver errors embed the credential they

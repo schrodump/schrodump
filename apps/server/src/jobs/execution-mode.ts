@@ -27,21 +27,12 @@ export interface ExecutionModeDecision {
 //   0. engine not staged-capable       -> STREAM (parallelism 1)
 //   1. parallelism > 1 requested        -> STAGED (needs scratch); without scratch -> STREAM + warning
 //   2. otherwise                        -> STAGED above the size threshold, STREAM below
-// STAGED is unreachable ON PURPOSE, and this is not a style choice. A staged dump writes a
-// DIRECTORY (pg_dump -Fd, mydumper), but the upload path reads the container's STDOUT — nothing
-// ever reads that directory back. A STAGED backup therefore uploaded an empty stream: gzip and age
-// headers, 318 bytes, while the dump tool exited 0. Verified against a real 545 MB database: the
-// job read SUCCEEDED, the artifact held no data, and the real dump was deleted with the scratch
-// reservation. Worse, restore refuses STAGED artifacts and verify downgrades them to CHECKSUM — and
-// a CHECKSUM verify PASSES on those 318 bytes, because they do match their own manifest. The
-// product's central claim, VERIFIED, was reachable on an empty file.
-//
-// Until a directory upload pipeline exists (untar-to-directory on the way back too — see
-// runRestoreJob's matching refusal), a real single-stream dump beats a fast lie. The mode stays in
-// the type because the pipeline is a planned follow-up, not an abandoned idea.
-const STAGED_UNAVAILABLE =
-  "parallelism unavailable: staged (directory) dumps cannot be uploaded yet, so this ran as a single-stream dump";
-
+// STAGED writes a DIRECTORY dump and the artifact pipeline moves a single stream. The bridge is
+// buildArchiveStaging: after the dump, a second run tars the staging directory to stdout and THAT
+// becomes the artifact. Before that bridge existed, a STAGED backup uploaded an empty stream while
+// the dump tool exited 0 — a SUCCEEDED job over an artifact holding no data. The mode is only safe
+// to select because the archive step, the extract step on restore, and the verify path now all
+// exist together.
 export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDecision {
   if (!input.stagedCapable) {
     const warnings =
@@ -53,7 +44,7 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
 
   if (input.requestedParallelism > 1) {
     if (input.scratchConfigured) {
-      return { mode: "STREAM", parallelism: 1, warnings: [STAGED_UNAVAILABLE] };
+      return { mode: "STAGED", parallelism: input.requestedParallelism, warnings: [] };
     }
     return {
       mode: "STREAM",
@@ -70,7 +61,7 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
   // next person, and it is one comparison away from silently becoming one.
   const threshold = input.stagedThresholdBytes;
   if (threshold !== undefined && input.estimatedBytes > threshold) {
-    return { mode: "STREAM", parallelism: 1, warnings: [STAGED_UNAVAILABLE] };
+    return { mode: "STAGED", parallelism: 1, warnings: [] };
   }
   return { mode: "STREAM", parallelism: 1, warnings: [] };
 }

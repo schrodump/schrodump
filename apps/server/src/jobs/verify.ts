@@ -57,13 +57,24 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       if (proof === "INCONCLUSIVE") {
         // Our own infra failed to run the restore — say nothing about the artifact. It stays
         // UNOBSERVED, exactly as if verify had never run.
-        await ports.setJobState("FAILED", "verify inconclusive: the sandbox could not run — artifact unchanged");
-        return { finalState: "UNOBSERVED", effectiveLevel: level, degraded: degradedReason !== null };
+        await ports.setJobState(
+          "FAILED",
+          "verify inconclusive: the sandbox could not run — artifact unchanged",
+        );
+        return {
+          finalState: "UNOBSERVED",
+          effectiveLevel: level,
+          degraded: degradedReason !== null,
+        };
       }
       const ok = proof === "VERIFIED";
       await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
       await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degradedReason ?? undefined);
-      return { finalState: ok ? "VERIFIED" : "FAILED", effectiveLevel: level, degraded: degradedReason !== null };
+      return {
+        finalState: ok ? "VERIFIED" : "FAILED",
+        effectiveLevel: level,
+        degraded: degradedReason !== null,
+      };
     }
 
     const ok = await ports.checksumMatches();

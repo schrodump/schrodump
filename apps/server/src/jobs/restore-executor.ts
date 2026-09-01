@@ -26,7 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, open, rm } from "node:fs/promises";
+import { chmod, mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -37,6 +37,7 @@ import { resolveCapabilities } from "@schrodump/core/capabilities";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { EngineKind } from "@schrodump/core/types";
+import { buildExtractStaging } from "@schrodump/engines/staging";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import type { RestoreTarget } from "./restore.js";
@@ -196,6 +197,9 @@ export interface RestorePipelineDeps {
   // Isolated executor network; never inherited.
   network: string;
   timeoutMs: number;
+  // A STAGED artifact is a TAR of a directory dump and must be unpacked before the engine restore
+  // can read it. STREAM artifacts are a single file and are mounted as-is.
+  executionMode?: "STREAM" | "STAGED";
   // Threaded into every run for log correlation and the runner's typed errors.
   correlationId: string;
   // Engine restore descriptor (pg_restore / mysql / mongorestore) built for the mount path the
@@ -377,7 +381,43 @@ async function restoreOne(
 
     // Mount the decrypted dump read-only; the engine restore reads the file, NOT stdin. Any
     // credential mount (mongo `--config`) rides alongside it — [] for the other engines.
-    const dumpMount: RunMount = { source: dumpPath, target: RESTORE_DUMP_PATH, readOnly: true };
+    // A STAGED artifact is a tar: unpack it into a sibling directory and restore from THAT.
+    // pg_restore reads a directory-format dump when handed a directory, and myloader takes -d, so
+    // the engine descriptors need no change — only the thing mounted at RESTORE_DUMP_PATH does.
+    let sourcePath = dumpPath;
+    if (deps.executionMode === "STAGED") {
+      const extractedPath = `${dumpPath}-extracted`;
+      await mkdir(extractedPath, { recursive: true, mode: 0o700 });
+      // Same image as the restore itself: every engine image ships tar, so unpacking introduces no
+      // executor image and no digest to pin.
+      const restoreImage = step.buildDescriptor(RESTORE_DUMP_PATH).image;
+      const extract = await deps.runner.run(
+        buildExtractStaging({
+          image: restoreImage,
+          sourcePath: `${RESTORE_DUMP_PATH}.tar`,
+          targetPath: RESTORE_DUMP_PATH,
+        }),
+        {
+          network: deps.network,
+          mounts: [
+            { source: dumpPath, target: `${RESTORE_DUMP_PATH}.tar`, readOnly: true },
+            { source: extractedPath, target: RESTORE_DUMP_PATH, readOnly: false },
+          ],
+          timeoutMs: deps.timeoutMs,
+          correlationId: deps.correlationId,
+          ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
+        },
+      );
+      if (extract.exitCode !== 0) {
+        throw new SchrodumpError(`restore extract failed (exit code ${extract.exitCode})`, {
+          code: "RESTORE_EXTRACT_FAILED",
+          correlationId: deps.correlationId,
+        });
+      }
+      sourcePath = extractedPath;
+    }
+
+    const dumpMount: RunMount = { source: sourcePath, target: RESTORE_DUMP_PATH, readOnly: true };
     const restoreResult = await deps.runner.run(step.buildDescriptor(RESTORE_DUMP_PATH), {
       network: deps.network,
       mounts: [dumpMount, ...extraMounts],
@@ -397,6 +437,8 @@ async function restoreOne(
     // of stranding it until GC. destroy() with no arg emits no 'error'.
     source.destroy();
     // The decrypted dump is cleartext on the scratch volume — always remove it (success and throw).
+    // For a STAGED artifact the UNPACKED directory beside it is cleartext too, and larger.
     await rm(dumpPath, { force: true });
+    await rm(`${dumpPath}-extracted`, { recursive: true, force: true });
   }
 }
