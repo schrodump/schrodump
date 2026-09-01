@@ -108,18 +108,19 @@ Then trigger a backup and wait for the verify job. A backup that has been verifi
 
 Everything lives in `.env`. The defaults are in `.env.example`.
 
-| Variable                           | Required | What it does                                                                                       |
-| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
-| `DB_PASSWORD`                      | yes      | Password for Schrodump's own metadata database                                                     |
-| `SCHRODUMP_KEK`                    | yes      | Key-encryption key. See step 2                                                                     |
-| `SCHRODUMP_URL`                    | no       | Public URL, used to build the setup link                                                           |
-| `PORT`                             | no       | Host port for the web UI (default 8080)                                                            |
-| `SCRATCH_MAX_BYTES`                | no       | Ceiling for the scratch volume (default 100 GiB)                                                   |
-| `SCHRODUMP_STAGED_THRESHOLD_BYTES` | no       | Dumps estimated above this run STAGED. Unset by default, and read the note below before setting it |
-| `MAX_STAGED`                       | no       | How many staged backups may run at once                                                            |
-| `EXECUTOR_NETWORK`                 | no       | Docker network the executors join to reach your databases                                          |
-| `SCHRODUMP_ADMIN_EMAIL`            | no       | Provision the first admin without the setup link                                                   |
-| `SCHRODUMP_ADMIN_PASSWORD`         | no       | Same                                                                                               |
+| Variable                           | Required | What it does                                                                                                                     |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `DB_PASSWORD`                      | yes      | Password for Schrodump's own metadata database                                                                                   |
+| `SCHRODUMP_KEK`                    | yes      | Key-encryption key. See step 2                                                                                                   |
+| `SCHRODUMP_URL`                    | no       | Public URL, used to build the setup link                                                                                         |
+| `PORT`                             | no       | Host port for the web UI (default 8080)                                                                                          |
+| `SCRATCH_MAX_BYTES`                | no       | Ceiling for the scratch volume (default 100 GiB)                                                                                 |
+| `SCHRODUMP_STAGED_THRESHOLD_BYTES` | no       | Dumps estimated above this run STAGED. Unset by default, and read the note below before setting it                               |
+| `MAX_STAGED`                       | no       | How many staged backups may run at once                                                                                          |
+| `SCHRODUMP_NOTIFY_MIN_GAP_MS`      | no       | How old the previous notification snapshot must be before it anchors the "verification is falling behind" check (default 15 min) |
+| `EXECUTOR_NETWORK`                 | no       | Docker network the executors join to reach your databases                                                                        |
+| `SCHRODUMP_ADMIN_EMAIL`            | no       | Provision the first admin without the setup link                                                                                 |
+| `SCHRODUMP_ADMIN_PASSWORD`         | no       | Same                                                                                                                             |
 
 > **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** It has no default, and that is deliberate rather
 > than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the

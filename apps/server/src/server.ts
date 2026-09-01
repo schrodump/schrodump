@@ -10,6 +10,7 @@ import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
 import { startLoop, installShutdown } from "./jobs/loop.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
+import { runNotifications } from "./notifications/wiring.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
 import { dispatchDueJobs, recoverOrphanedJobs } from "./scheduler/scheduler.js";
@@ -106,8 +107,11 @@ export async function main(): Promise<void> {
   //    booting mid rolling-restart could otherwise mark another LIVE replica's RUNNING job FAILED.
   //    null means another holder has the lock — a live replica, so recovery is correctly skipped.
   const schedulerStore = prismaSchedulerStore(prisma);
-  const recovered = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () => recoverOrphanedJobs(schedulerStore));
-  if (recovered !== null && recovered > 0) logger.info({ count: recovered }, "recovered orphaned jobs");
+  const recovered = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () =>
+    recoverOrphanedJobs(schedulerStore),
+  );
+  if (recovered !== null && recovered > 0)
+    logger.info({ count: recovered }, "recovered orphaned jobs");
 
   // 2. Single-flight worker (same advisory lock keeps one replica draining).
   const shutdownController = new AbortController();
@@ -136,11 +140,31 @@ export async function main(): Promise<void> {
   //    single-flight across replicas. currentWindow looks back, so a window missed while the
   //    process was down is still created on the next tick — idempotent by (policyId, scheduledAt).
   const SCHEDULER_LOCK_KEY = 0x5343_4852_444d_5032n; // "SCHRDMP2"
-  const schedulerDeps = { store: schedulerStore, cron: cronEvaluator(), now: () => new Date(), newCorrelationId };
+  const schedulerDeps = {
+    store: schedulerStore,
+    cron: cronEvaluator(),
+    now: () => new Date(),
+    newCorrelationId,
+  };
   const schedulerHandle = startLoop({
     intervalMs: env.SCHRODUMP_SCHEDULER_TICK_MS,
     tick: () =>
-      withAdvisoryLock(lock, SCHEDULER_LOCK_KEY, () => dispatchDueJobs(schedulerDeps)).catch((err) => {
+      withAdvisoryLock(lock, SCHEDULER_LOCK_KEY, async () => {
+        await dispatchDueJobs(schedulerDeps);
+        // Same tick, same single-flight lock: notifications read committed state after the fact and
+        // are not in any job's path, so a failure here can never fail a backup. Caught separately
+        // so a broken notifier cannot stop the scheduler from dispatching.
+        await runNotifications({
+          prisma,
+          kek,
+          now: () => new Date(),
+          fetch,
+          log: logger,
+          minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
+        }).catch((err) => {
+          logger.error({ err }, "notification pass failed");
+        });
+      }).catch((err) => {
         logger.error({ err }, "scheduler dispatch tick failed");
       }),
   });

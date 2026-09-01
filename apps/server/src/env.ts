@@ -21,6 +21,11 @@ const EnvSchema = z.object({
   // cannot be restored or FULL_RESTORE-verified in v1, so the mode is never chosen for an operator
   // by size — only by an explicit parallelism > 1 on the policy. Set it to opt in.
   SCHRODUMP_STAGED_THRESHOLD_BYTES: z.coerce.number().int().positive().optional(),
+  // Minimum age of the previous notification snapshot before it is allowed to anchor the
+  // "verification is falling behind" comparison. Below this, the previous point is ignored: every
+  // healthy backup is briefly UNOBSERVED between finishing and its chained verify, so comparing two
+  // evaluations seconds apart would alert on success. Default 15 minutes.
+  SCHRODUMP_NOTIFY_MIN_GAP_MS: z.coerce.number().int().positive().default(900000),
   SCHRODUMP_EXECUTOR_NETWORK: z.string().default("schrodump_targets"),
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.
