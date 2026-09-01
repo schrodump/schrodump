@@ -69,21 +69,27 @@ which sets out the position to design against.
 Shipping it half-right would be worse than not shipping it: a retention policy the operator
 believes is running, silently failing against a lock they configured elsewhere.
 
-### Notifications: SMTP and webhooks
+### Notifications: webhooks now, SMTP still outstanding
 
-There is no email and there is no webhook in v1. A backup tool that cannot tell you it is failing
-is a backup tool you will stop looking at.
+Webhook notifications ship. The trigger is what the position below always said it had to be — a
+change in what the fleet has and has not proven, never a job result:
 
-The reason for the delay is that notification design decides whether the tool is useful or
-ignored. Alert on every job and it becomes noise that gets filtered within a week; alert only on
-failure and the worst case — **jobs succeeding, nothing being verified** — stays silent, which is
-exactly the state the whole project exists to make visible.
+- an artifact a verify proved bad (immediate, no hysteresis: it is a claim about data, not a
+  process complaining);
+- verification falling behind, which needs the unobserved count to fail to come down between two
+  evaluations at least `SCHRODUMP_NOTIFY_MIN_GAP_MS` apart — without that gap the trigger fires on
+  every healthy backup, since each is briefly unobserved between finishing and its chained verify;
+- a policy that has gone quiet for more than twice its cron interval, which no failure-based alert
+  can see, because a job that never runs never fails.
 
-The right trigger is a change in the unobserved count, not a job result. That deserves to be
-designed rather than bolted on, and it is the first thing after v1.
+Notifications fire on TRANSITION and resolve with a closing message, so a condition that stays true
+is not re-sent every tick. A channel that cannot be reached records the failure on itself rather
+than failing silently — a notifier nobody can tell is broken is worse than none.
 
-In the meantime the dashboard leads with the number of unobserved backups, and `/health` is
-available to whatever monitoring you already run.
+**SMTP is still outstanding.** It needs a mail dependency and its own configuration surface, and
+the webhook covers the roadmap's own stopgap ("whatever monitoring you already run") without
+either. Routing rules and per-user preferences remain deliberately out: one channel set per
+organization.
 
 ## Known limitations shipping in v1
 

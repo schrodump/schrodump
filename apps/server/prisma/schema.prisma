@@ -90,16 +90,16 @@ enum DestinationSealMode {
 // ---------------------------------------------------------------------------
 
 model User {
-  id            String  @id
-  name          String
-  email         String  @unique
-  emailVerified Boolean @default(false)
-  image         String?
+  id                 String   @id
+  name               String
+  email              String   @unique
+  emailVerified      Boolean  @default(false)
+  image              String?
   // The bootstrap admin's password comes from env (visible in `docker inspect`), so it must
   // be rotated on first login.
-  mustChangePassword Boolean @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   sessions    Session[]
   accounts    Account[]
@@ -183,14 +183,17 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships         Membership[]
-  databaseTargets     DatabaseTarget[]
-  storageDestinations StorageDestination[]
-  backupPolicies      BackupPolicy[]
-  backupJobs          BackupJob[]
-  artifacts           Artifact[]
-  encryptionKeys      EncryptionKey[]
-  auditLogs           AuditLog[]
+  memberships          Membership[]
+  databaseTargets      DatabaseTarget[]
+  storageDestinations  StorageDestination[]
+  backupPolicies       BackupPolicy[]
+  backupJobs           BackupJob[]
+  artifacts            Artifact[]
+  encryptionKeys       EncryptionKey[]
+  auditLogs            AuditLog[]
+  notificationChannels NotificationChannel[]
+  notificationStates   NotificationState[]
+  notificationSnapshot NotificationSnapshot?
 }
 
 model Membership {
@@ -207,20 +210,20 @@ model Membership {
 }
 
 model DatabaseTarget {
-  id             String     @id @default(cuid())
-  organizationId String
-  name           String
-  engine         EngineKind
-  host           String
-  port           Int
-  username       String
+  id                  String     @id @default(cuid())
+  organizationId      String
+  name                String
+  engine              EngineKind
+  host                String
+  port                Int
+  username            String
   // Envelope-encrypted credential blob. Write-only from the user's perspective — never
   // decrypted for display.
   encryptedCredential Json
-  tls            Boolean    @default(true)
-  scope          Json       // { databases, schemas, collections }
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  tls                 Boolean    @default(true)
+  scope               Json // { databases, schemas, collections }
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   backupPolicies BackupPolicy[]
@@ -230,22 +233,22 @@ model DatabaseTarget {
 }
 
 model StorageDestination {
-  id             String  @id @default(cuid())
-  organizationId String
-  name           String
-  endpoint       String?
-  region         String
-  bucket         String
-  prefix         String
+  id                       String              @id @default(cuid())
+  organizationId           String
+  name                     String
+  endpoint                 String?
+  region                   String
+  bucket                   String
+  prefix                   String
   // The access key id is an identifier, not the secret; the secret is envelope-encrypted.
-  accessKeyId    String
+  accessKeyId              String
   encryptedSecretAccessKey Json
-  forcePathStyle Boolean @default(false)
+  forcePathStyle           Boolean             @default(false)
   // operational: server holds the identity (full verify). sealed: server holds only the
   // public recipient (verify degrades to checksum; restore needs an operator-supplied identity).
-  sealMode       DestinationSealMode @default(operational)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  sealMode                 DestinationSealMode @default(operational)
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
 
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   backupPolicies BackupPolicy[]
@@ -255,19 +258,19 @@ model StorageDestination {
 }
 
 model BackupPolicy {
-  id             String @id @default(cuid())
-  organizationId String
-  name           String
-  targetId       String
-  destinationId  String
-  cron           String
+  id                   String               @id @default(cuid())
+  organizationId       String
+  name                 String
+  targetId             String
+  destinationId        String
+  cron                 String
   // GFS retention (see @schrodump/core RetentionPolicy).
-  keepLast             Int    @default(0)
-  keepDaily            Int    @default(0)
-  keepWeekly           Int    @default(0)
-  keepMonthly          Int    @default(0)
-  keepYearly           Int    @default(0)
-  minAgeBeforeDeleteMs BigInt @default(0)
+  keepLast             Int                  @default(0)
+  keepDaily            Int                  @default(0)
+  keepWeekly           Int                  @default(0)
+  keepMonthly          Int                  @default(0)
+  keepYearly           Int                  @default(0)
+  minAgeBeforeDeleteMs BigInt               @default(0)
   verifyLevel          VerifyLevel          @default(CHECKSUM)
   executionMode        ExecutionMode        @default(STREAM)
   parallelism          Int                  @default(1)
@@ -320,16 +323,64 @@ model BackupJob {
   @@index([organizationId, state])
 }
 
+// Where an organization's notifications go. One channel set per organization, deliberately: routing
+// rules and per-user preferences are the kind of surface that turns a notifier into a config
+// product, and the roadmap's stopgap was always "whatever monitoring you already run".
+model NotificationChannel {
+  id              String    @id @default(cuid())
+  organizationId  String
+  url             String
+  // HMAC signing key, envelope-encrypted with the KEK like every other credential. A notification
+  // crosses the trust boundary; nothing about it is exempt from the crypto rules.
+  encryptedSecret String
+  enabled         Boolean   @default(true)
+  // Set when a delivery fails, so a notifier that cannot reach its channel is visible rather than
+  // silently useless — which would be worse than having no notifications at all.
+  lastFailureAt   DateTime?
+  lastFailure     String?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// A condition currently reported as open. Notifications fire on TRANSITION, so this is what keeps a
+// condition that stays true from being re-sent every tick until someone mutes the channel.
+model NotificationState {
+  id             String   @id @default(cuid())
+  organizationId String
+  trigger        String
+  // Artifact id, policy id, or "" for a fleet-wide condition.
+  key            String
+  since          DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, trigger, key])
+  @@index([organizationId])
+}
+
+// The previous evaluation, which the "verification is falling behind" trigger compares against. One
+// row per organization: the hysteresis needs exactly one prior point, not a history.
+model NotificationSnapshot {
+  organizationId String   @id
+  at             DateTime
+  unobserved     Int
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
 model Artifact {
-  id                  String        @id @default(cuid())
+  id                  String               @id @default(cuid())
   organizationId      String
-  jobId               String        @unique
+  jobId               String               @unique
   destinationId       String
-  state               ArtifactState @default(UNOBSERVED)
+  state               ArtifactState        @default(UNOBSERVED)
   bucketKey           String
   manifestKey         String
   engine              EngineKind
-  executionMode       ExecutionMode @default(STREAM)
+  executionMode       ExecutionMode        @default(STREAM)
   serverVersionNum    Int
   sizeRawBytes        BigInt
   sizeCompressedBytes BigInt
@@ -345,8 +396,8 @@ model Artifact {
   sourceHasOplog      Boolean?
   // jobIds this artifact depends on (full/incremental chain).
   dependsOn           String[]
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   job          BackupJob          @relation("ProducedBy", fields: [jobId], references: [id], onDelete: Cascade)
@@ -358,19 +409,19 @@ model Artifact {
 }
 
 model EncryptionKey {
-  id             String   @id @default(cuid())
-  organizationId String
+  id                String    @id @default(cuid())
+  organizationId    String
   // Fingerprint of the public recipient.
-  keyId          String
-  type           KeyType
+  keyId             String
+  type              KeyType
   // age recipient (public), e.g. age1...
-  publicRecipient String
+  publicRecipient   String
   // Envelope-encrypted identity (secret) — present only for operational keys the server holds;
   // null for escrow keys (identity kept offline).
   encryptedIdentity Json?
-  state          KeyState @default(active)
-  createdAt      DateTime @default(now())
-  retiredAt      DateTime?
+  state             KeyState  @default(active)
+  createdAt         DateTime  @default(now())
+  retiredAt         DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 

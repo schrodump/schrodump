@@ -278,6 +278,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
       SCHRODUMP_EXECUTOR_NETWORK: EXECUTOR_NETWORK,
       WORKER_POLL_MS: 2000,
       SCHRODUMP_SCHEDULER_TICK_MS: 30000,
+      SCHRODUMP_NOTIFY_MIN_GAP_MS: 900000,
       SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
     };
   }, 300_000);
@@ -593,6 +594,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
       SCHRODUMP_EXECUTOR_NETWORK: EXECUTOR_NETWORK,
       WORKER_POLL_MS: 2000,
       SCHRODUMP_SCHEDULER_TICK_MS: 30000,
+      SCHRODUMP_NOTIFY_MIN_GAP_MS: 900000,
       SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
     };
   }, 300_000);

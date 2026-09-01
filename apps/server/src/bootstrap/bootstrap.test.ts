@@ -19,6 +19,7 @@ function baseEnv(over: Partial<Env> = {}): Env {
     SCHRODUMP_EXECUTOR_NETWORK: "schrodump_targets",
     WORKER_POLL_MS: 2000,
     SCHRODUMP_SCHEDULER_TICK_MS: 30000,
+    SCHRODUMP_NOTIFY_MIN_GAP_MS: 900000,
     SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
     ...over,
   };
