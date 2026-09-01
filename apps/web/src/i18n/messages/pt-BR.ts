@@ -272,4 +272,13 @@ export const ptBR: Record<MessageKey, string> = {
   "selfBackup.state.FAILED": "Falhou",
   "selfBackup.escrow": "Selado com a chave de custódia offline. Recuperar exige essa identidade — a operacional está dentro do banco que este backup salva.",
   "selfBackup.forbidden": "Apenas um admin pode ver o histórico do autobackup.",
+  "rotate.title": "Rotacione a senha de bootstrap",
+  "rotate.why": "Esta conta ainda usa a senha vinda de SCHRODUMP_ADMIN_PASSWORD. Esse valor é legível com `docker inspect` e está no .env em disco, então até ser trocado ele é um segredo compartilhado, não uma credencial. Toda ação é recusada até lá.",
+  "rotate.current": "Senha atual",
+  "rotate.new": "Nova senha",
+  "rotate.confirm": "Confirme a nova senha",
+  "rotate.submit": "Trocar a senha",
+  "rotate.mismatch": "As duas senhas não conferem.",
+  "rotate.tooShort": "Use pelo menos 12 caracteres.",
+  "rotate.failed": "A senha não foi trocada. Confira a senha atual e tente de novo.",
 };

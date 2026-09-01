@@ -40,6 +40,11 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   faltando quebra o typecheck. Adicionar locale: novo dicionário + entrada em `Locale`/`LOCALES`/
   `dictionaries` no `provider.tsx`. Chaves dinâmicas usam template literal
   (``t(`job.state.${state}`)``), que o TS estreita para o subconjunto válido.
+- **Rotação de senha substitui o app inteiro, não é um banner.** Enquanto `mustChangePassword` está
+  de pé o servidor recusa toda ação, então renderizar o painel atrás de um aviso seria uma tela
+  cheia de controles que falham — o operador leria como produto quebrado, não como uma coisa sendo
+  pedida a ele. E o texto nomeia `SCHRODUMP_ADMIN_PASSWORD` e o `docker inspect`: "troque sua senha"
+  sem motivo vira burocracia, e a pessoa escolhe algo igualmente displicente.
 - **Sessão é cookie**, nunca localStorage. Só a preferência de idioma vai pro localStorage.
 
 ## Como fala com o servidor

@@ -271,6 +271,15 @@ export const en = {
   "selfBackup.state.FAILED": "Failed",
   "selfBackup.escrow": "Sealed to the offline escrow key. Recovering it needs that identity — the operational one is stored inside the database this backs up.",
   "selfBackup.forbidden": "Only an admin can see the self-backup history.",
+  "rotate.title": "Rotate the bootstrap password",
+  "rotate.why": "This account still uses the password from SCHRODUMP_ADMIN_PASSWORD. That value is readable with `docker inspect` and sits in .env on disk, so until it is changed it is a shared secret rather than a credential. Every action is refused until then.",
+  "rotate.current": "Current password",
+  "rotate.new": "New password",
+  "rotate.confirm": "Confirm new password",
+  "rotate.submit": "Change password",
+  "rotate.mismatch": "The two passwords do not match.",
+  "rotate.tooShort": "Use at least 12 characters.",
+  "rotate.failed": "The password was not changed. Check the current password and try again.",
 } as const;
 
 export type MessageKey = keyof typeof en;

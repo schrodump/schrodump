@@ -8,7 +8,7 @@ import { catalogRoutes } from "./catalog.js";
 
 async function appWith(role: Role | null) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
     catalogRoutes({
       resolver: () => Promise.resolve(ctx),

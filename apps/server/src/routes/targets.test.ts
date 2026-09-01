@@ -31,7 +31,7 @@ const STORE: TargetStore = {
 
 async function appWith(role: Role | null, over: Partial<TargetStore> = {}) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
     targetRoutes({
       resolver: () => Promise.resolve(ctx),

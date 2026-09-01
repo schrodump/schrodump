@@ -24,7 +24,7 @@ const ROW = {
 
 async function appWith(role: Role | null, opts: { configured?: boolean; rows?: unknown[] } = {}) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
     selfBackupRoutes({
       resolver: () => Promise.resolve(ctx),
