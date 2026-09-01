@@ -46,6 +46,11 @@ const EnvSchema = z.object({
   // network would expose it to every executor that talks to a customer database. So the one dump
   // that must reach it joins `internal` instead, for the length of that dump and nothing else.
   SCHRODUMP_SELF_BACKUP_NETWORK: z.string().default("schrodump_internal"),
+  // Comma-separated CIDRs for every hop in front of this server (your TLS-terminating reverse
+  // proxy, plus 127.0.0.1/32 for the UI's internal rewrite in the shipped image). Decides whether
+  // the login rate limit buckets on the real client address or on something an attacker controls.
+  // See auth.ts. Unset -> nothing trusted, and the server warns at boot.
+  SCHRODUMP_TRUSTED_PROXIES: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

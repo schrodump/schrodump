@@ -93,6 +93,36 @@ Schrodump sweeps abandoned scratch directories at boot and periodically.
 > `RUNNING`. Measured both ways on the same build: a single signal completed the shutdown in 86ms;
 > two never completed it at all.
 
+## The session cookie is the operator, and HTTP gives it away
+
+Schrodump authenticates with a session cookie and serves plain HTTP. That is a deliberate split of
+responsibility — TLS termination belongs to the reverse proxy an operator already runs — but it
+means an installation published straight to the network hands the cookie to anyone on the path.
+
+The cookie is not a partial credential. Whoever holds it can read every target's host, port and
+username, change a policy, and start a restore over a live database. There is no second factor
+behind it. [install.md](install.md#put-it-behind-tls-this-is-not-optional) has the proxy configs;
+publish 8080 to loopback only.
+
+### The login rate limit depends on knowing who is asking
+
+Sign-in is limited to 5 attempts per address per five minutes, counted in Postgres so the limit is
+shared across replicas and survives a restart. Which address it counts is decided by
+`SCHRODUMP_TRUSTED_PROXIES`, and both ways of getting it wrong are real:
+
+- **Unset, with a proxy in front.** `X-Forwarded-For` has several entries, none of them trusted,
+  and the server refuses to guess. Every request in the deployment falls into one shared bucket, so
+  five bad passwords from one person lock out everyone. A denial of service dressed as a control.
+- **Unset, with nothing in front.** `X-Forwarded-For` is attacker-controlled. Rotating it per
+  request gives each attempt a fresh bucket, and the limit never fires.
+
+Set it to the CIDRs of the hops that are actually in front of the server, and configure the proxy
+to **overwrite** `X-Forwarded-For` with the address it observed rather than appending to whatever
+the client sent. Appending preserves the attacker's chosen prefix.
+
+Rate limiting is a cost multiplier on guessing, not a substitute for a strong password. It does not
+protect a deployment whose admin password is `admin`.
+
 ## The KEK belongs somewhere else
 
 `SCHRODUMP_KEK` encrypts the data keys that encrypt every artefact. Keeping it on the host that

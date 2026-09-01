@@ -26,6 +26,9 @@ services:
       SCHRODUMP_SCRATCH_MAX_BYTES: ${SCRATCH_MAX_BYTES:-107374182400}
       SCHRODUMP_MAX_CONCURRENT_STAGED: ${MAX_STAGED:-2}
       SCHRODUMP_EXECUTOR_NETWORK: ${EXECUTOR_NETWORK:-schrodump_targets}
+      # CIDRs of the hops in front of this server. Decides which address the login rate limit
+      # counts. Unset behind a proxy puts every client in one shared bucket; see docs/security.md.
+      SCHRODUMP_TRUSTED_PROXIES:
       # Documented in docs/install.md and, until now, never passed through: an operator who set
       # either in .env got the server default and no indication the value had been ignored.
       SCHRODUMP_STAGED_THRESHOLD_BYTES:
@@ -41,7 +44,10 @@ services:
     volumes:
       - scratch:/scratch
     ports:
-      - "${PORT:-8080}:8080"
+      # Bound to loopback: the server speaks plain HTTP and authenticates with a session cookie, so
+      # the only supported way to reach it from a network is through a TLS-terminating reverse
+      # proxy. Set PUBLISH_ADDR=0.0.0.0 to override, and read docs/install.md before you do.
+      - "${PUBLISH_ADDR:-127.0.0.1}:${PORT:-8080}:8080"
     networks:
       - internal
       - targets

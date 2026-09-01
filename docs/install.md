@@ -124,12 +124,95 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 | `SCHRODUMP_SELF_BACKUP_DESTINATION_ID` | no   | Destination for the self-backup of Schrodump's own metadata database. Unset -> disabled. See below                               |
 | `SCHRODUMP_SELF_BACKUP_INTERVAL_MS` | no      | How often to self-backup (default 24h), measured from the last successful run                                                    |
 | `SELF_BACKUP_NETWORK`              | no       | Network the self-backup executor joins (default `schrodump_internal`) — not the executor network                                 |
+| `SCHRODUMP_TRUSTED_PROXIES`        | no       | CIDRs of the hops in front of this server. Read the TLS section — unset behind a proxy locks out every user                      |
 
 > **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** It has no default, and that is deliberate rather
 > than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the
 > scratch volume sized for it and it writes the dump to disk in clear before uploading. Setting a
 > threshold opts every database above that size into it silently; `parallelism > 1` on a policy is
 > the explicit, per-policy way in, and the one to reach for first.
+
+### Upgrading
+
+```
+git pull
+docker compose pull
+docker compose up -d
+```
+
+Schema migrations run from the entrypoint on start (`prisma migrate deploy`), so there is no
+separate step. Take a copy of the metadata database first — or, better, configure the self-backup
+below so one already exists.
+
+**Breaking change, unreleased:** the published port now binds to `127.0.0.1` instead of every
+interface. An installation that was reached directly at `http://host:8080` will stop answering
+after this upgrade. That is the point — see the section below — and the fix is to put a reverse
+proxy in front. To defer it, set `PUBLISH_ADDR=0.0.0.0` in `.env` and understand that the session
+cookie crosses the network in clear.
+
+### Put it behind TLS. This is not optional.
+
+Schrodump serves plain HTTP on port 8080 and authenticates with a **session cookie**. Published
+directly, every login and every request after it carries that cookie across the network in clear.
+Anyone positioned in between reads it and becomes the operator — and this particular operator can
+read every target's connection details and start a restore over a live production database.
+
+Do not publish 8080 to anything but loopback. Terminate TLS in front of it.
+
+**Caddy** (obtains a certificate on its own):
+
+```
+schrodump.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+**nginx**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name schrodump.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/schrodump.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/schrodump.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # SET, not append. $proxy_add_x_forwarded_for carries through whatever the client sent in
+        # its own X-Forwarded-For, and a client that writes its own address into that header picks
+        # its own rate-limit bucket. $remote_addr is the one value nginx observed for itself.
+        proxy_set_header X-Forwarded-For   $remote_addr;
+    }
+}
+```
+
+Then bind the published port to loopback in `compose.yaml` — `"127.0.0.1:${PORT:-8080}:8080"` — so
+the proxy is the only way in.
+
+#### Then tell Schrodump about the proxy
+
+```
+SCHRODUMP_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+List every hop in front of the server. `127.0.0.1/32` covers the UI's internal rewrite, which is
+always present in the shipped image; add your proxy's address if it reaches the container from
+anywhere else.
+
+**Leaving this unset behind a proxy fails in the direction you would not guess.** The login rate
+limit buckets by client address. With a proxy in front, `X-Forwarded-For` arrives carrying more
+than one entry, and with nothing trusted the server will not guess which entry is the client — so
+every request in the deployment lands in *one shared bucket*. One operator fat-fingering their
+password five times then locks everybody else out of the login page. That is measured, not
+reasoned: `apps/server/src/auth/rate-limit.integration.test.ts` asserts a second, unrelated client
+address stays in its own bucket, and that assertion fails the moment the setting is removed.
+
+Unset with **no** proxy in front is the opposite failure. `X-Forwarded-For` is then whatever the
+client chose to send, and an attacker who changes it on every request gets a fresh bucket each
+time and is never limited at all.
 
 ### Backing up Schrodump itself
 

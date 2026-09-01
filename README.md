@@ -77,6 +77,12 @@ docker compose logs schrodump | grep setupUrl
 Open it, create the admin, and follow the guided flow: destination → canary → target → test →
 policy. Full walkthrough in [docs/install.md](docs/install.md).
 
+> **The port is published on loopback only.** Reaching Schrodump from another machine means putting
+> a TLS-terminating reverse proxy in front of it: the session cookie carries the operator's full
+> authority, and plain HTTP hands it to anyone on the path.
+> [docs/install.md](docs/install.md#put-it-behind-tls-this-is-not-optional) has the Caddy and nginx
+> configs, and the one setting you must not forget alongside them.
+
 ## Supported
 
 | Databases | Object storage |
