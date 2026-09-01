@@ -263,9 +263,17 @@ production encrypt pipeline to an escrow-only recipient, then decrypts, gunzips 
 it into an empty database and checks the catalog came back. It also asserts the operational
 identity **cannot** open it.
 
-What the drill does not cover, and what your own rehearsal still has to: the executor actually
-reaching the metadata database over the internal network, and the round trip through your bucket.
-Those are the parts that depend on your deployment, not on this code.
+A second drill (`self-backup-e2e.integration.test.ts`) covers steps 1 and 4 as well. It drives the
+scheduler tick itself against a real Postgres on a Docker network, a real ephemeral executor and a
+real S3 bucket, then downloads the object, decrypts it with the escrow identity and restores it —
+and checks that the recovered catalog knows about the self-backup it came from. Pointing the
+executor at the wrong network turns all four of its assertions red, which is the property that
+matters: the metadata database is not reachable from the target network, on purpose.
+
+What neither drill can cover is your own topology — that your reverse proxy, your bucket and your
+`internal` network are wired the way you think they are. **Rehearse the recovery once against a
+spare host before you need it.** That is the step that turns a self-backup from written into
+verified, and nothing in CI can do it for you.
 
 > A self-backup that says **Written** is amber in the UI, not green, and that is not an
 > oversight. It means a `pg_dump` exited without complaining and nobody has restored it. The one
