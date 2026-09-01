@@ -6,7 +6,7 @@
 // integration tests. Pipeline order is fixed: dump -> compress -> encrypt -> upload.
 
 import { createHash } from "node:crypto";
-import { PassThrough, Readable } from "node:stream";
+import { PassThrough, Readable, Transform } from "node:stream";
 import { createGzip } from "node:zlib";
 import { Encrypter } from "age-encryption";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
@@ -101,7 +101,18 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     // a handler. This no-op keeps Node from ever seeing it as unhandled; the real outcome is still
     // read from the same promise via Promise.allSettled below.
     runPromise.catch(() => undefined);
-    const encrypted = await encryptStream(dumpOut.pipe(createGzip()), recipients);
+    // Count the PLAINTEXT bytes the dump actually produced. A Transform rather than a "data"
+    // listener on dumpOut: a listener would switch it to flowing mode before the pipeline below is
+    // attached, and bytes written in that window would be dropped. This one only ever sees what
+    // really flows through.
+    let rawBytes = 0;
+    const countRaw = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        rawBytes += chunk.length;
+        callback(null, chunk);
+      },
+    });
+    const encrypted = await encryptStream(dumpOut.pipe(countRaw).pipe(createGzip()), recipients);
     const hash = createHash("sha256");
     let sizeBytes = 0;
     encrypted.on("data", (chunk: Buffer) => {
@@ -138,6 +149,19 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     }
 
     if (putOutcome.status === "rejected") throw putOutcome.reason;
+
+    // A dump tool that exits 0 having written NOTHING did not back anything up, and the object now
+    // in the bucket is an empty gzip+age envelope — a few hundred bytes that a CHECKSUM verify
+    // would happily confirm against their own manifest, letting an artifact holding no data reach
+    // VERIFIED. That is precisely what STAGED did before it was disabled: it wrote a directory
+    // while this path read stdout. Deliberately zero bytes, not a size heuristic — no threshold to
+    // tune, and no real dump of any engine produces it, since even an empty database emits a
+    // header. Delete the orphan first, exactly as the non-zero-exit path does: persistArtifact is
+    // never reached, so no row would ever exist for retention to reclaim it by.
+    if (rawBytes === 0) {
+      await deps.driver.delete([key]).catch(() => undefined);
+      throw new Error("dump produced no data (the tool exited 0 but wrote nothing)");
+    }
 
     return { checksum: hash.digest("hex"), sizeBytes };
   };
