@@ -10,12 +10,20 @@ import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
-import { testTargetConnection, type EngineName, type TestConnectionResult } from "../probe/test-connection.js";
+import {
+  testTargetConnection,
+  type EngineName,
+  type TestConnectionResult,
+} from "../probe/test-connection.js";
 import type { DestinationStore } from "./destinations.js";
+import type { ChannelStore } from "./notifications.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
 import type { ArtifactRecord, JobsService } from "./jobs.js";
 
-export function prismaDestinationStore(prisma: PrismaClient, organizationId: string): DestinationStore {
+export function prismaDestinationStore(
+  prisma: PrismaClient,
+  organizationId: string,
+): DestinationStore {
   const db = scopedPrisma(prisma, organizationId);
   return {
     create: (data) =>
@@ -36,7 +44,10 @@ export function prismaDestinationStore(prisma: PrismaClient, organizationId: str
     list: () => db.storageDestination.findMany(),
     get: (id) => db.storageDestination.findFirst({ where: { id } }),
     update: async (id, data) => {
-      const { count } = await db.storageDestination.updateMany({ where: { id }, data: definedOnly(data) });
+      const { count } = await db.storageDestination.updateMany({
+        where: { id },
+        data: definedOnly(data),
+      });
       if (count === 0) return null;
       return db.storageDestination.findFirst({ where: { id } });
     },
@@ -185,7 +196,8 @@ async function probeTarget(
   const row = await scopedPrisma(prisma, organizationId).databaseTarget.findFirst({
     where: { id: targetId },
   });
-  if (row === null) return { ok: false, serverVersionNum: null, failure: "UNKNOWN", driverCode: null };
+  if (row === null)
+    return { ok: false, serverVersionNum: null, failure: "UNKNOWN", driverCode: null };
 
   const scope = ScopeSchema.safeParse(row.scope);
   return testTargetConnection({
@@ -268,13 +280,16 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
     listJobs: (organizationId) =>
       scopedPrisma(prisma, organizationId).backupJob.findMany({ orderBy: { createdAt: "desc" } }),
     listArtifacts: async (organizationId) =>
-      (await scopedPrisma(prisma, organizationId).artifact.findMany({ orderBy: { createdAt: "desc" } })).map(
-        toArtifactRecord,
-      ),
+      (
+        await scopedPrisma(prisma, organizationId).artifact.findMany({
+          orderBy: { createdAt: "desc" },
+        })
+      ).map(toArtifactRecord),
     // Real dispatch (probe / descriptor / runner composition) is handled by the worker that picks
     // up the PENDING job; here we only enqueue it.
     enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", { policyId }),
-    enqueueVerify: (organizationId, artifactId) => enqueue(organizationId, "VERIFY", { artifactId }),
+    enqueueVerify: (organizationId, artifactId) =>
+      enqueue(organizationId, "VERIFY", { artifactId }),
     enqueueRestore: async (organizationId, artifactId, params) => {
       const db = scopedPrisma(prisma, organizationId);
       const job = await db.backupJob.create({
@@ -290,6 +305,57 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
       });
       return job.id;
     },
-    testConnection: (organizationId, targetId) => probeTarget(prisma, kek, organizationId, targetId),
+    testConnection: (organizationId, targetId) =>
+      probeTarget(prisma, kek, organizationId, targetId),
+  };
+}
+
+// Notification channels. Organization-scoped like every other store; the secrets are already
+// encrypted by the route before they reach here, and nothing reads them back.
+export function prismaNotificationChannelStore(
+  prisma: PrismaClient,
+  organizationId: string,
+): ChannelStore {
+  return {
+    create: async (data) =>
+      prisma.notificationChannel.create({
+        data: {
+          organizationId,
+          kind: data.kind,
+          ...(data.url !== undefined ? { url: data.url } : {}),
+          ...(data.encryptedSecret !== undefined
+            ? { encryptedSecret: JSON.stringify(data.encryptedSecret) }
+            : {}),
+          ...(data.smtpHost !== undefined ? { smtpHost: data.smtpHost } : {}),
+          ...(data.smtpPort !== undefined ? { smtpPort: data.smtpPort } : {}),
+          ...(data.smtpUsername !== undefined ? { smtpUsername: data.smtpUsername } : {}),
+          ...(data.encryptedSmtpPassword !== undefined
+            ? { encryptedSmtpPassword: JSON.stringify(data.encryptedSmtpPassword) }
+            : {}),
+          ...(data.fromAddress !== undefined ? { fromAddress: data.fromAddress } : {}),
+          ...(data.toAddresses !== undefined ? { toAddresses: data.toAddresses } : {}),
+        },
+      }),
+    list: () =>
+      prisma.notificationChannel.findMany({
+        where: { organizationId },
+        orderBy: { createdAt: "asc" },
+      }),
+    setEnabled: async (id, enabled) => {
+      // updateMany, not update: it takes organizationId in the filter, so a channel belonging to
+      // another organization is a miss rather than a cross-tenant write.
+      const { count } = await prisma.notificationChannel.updateMany({
+        where: { id, organizationId },
+        data: { enabled },
+      });
+      if (count === 0) return null;
+      return prisma.notificationChannel.findFirstOrThrow({ where: { id, organizationId } });
+    },
+    remove: async (id) => {
+      const { count } = await prisma.notificationChannel.deleteMany({
+        where: { id, organizationId },
+      });
+      return count > 0;
+    },
   };
 }
