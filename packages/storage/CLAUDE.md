@@ -1,39 +1,53 @@
 # @schrodump/storage
 
-Driver S3-compatible. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretório.
+S3-compatible driver. Takes precedence over the root `CLAUDE.md` inside this directory.
 
-## Invariantes
+## Invariants
 
-- Importa **apenas** `@schrodump/core`, o AWS SDK (`@aws-sdk/client-s3`,
-  `@aws-sdk/lib-storage`) e `zod` (schema da config). **Nunca** importa `engines` nem
-  `runner`. Não conhece Docker, não conhece banco, não monta pipeline — quem compõe o
-  pipe é o `apps/server`.
-- Destino **S3-compatible apenas** no v1. Alvos: AWS S3, Cloudflare R2, Backblaze B2,
-  MinIO, SeaweedFS, Ceph RGW.
-- **Nenhuma credencial** em log, em mensagem de erro ou em `toString()`/serialização. O
-  driver não retém campo de credencial; use `redactConfig` para descrever o destino.
+- Imports **only** `@schrodump/core`, the AWS SDK (`@aws-sdk/client-s3`, `@aws-sdk/lib-storage`)
+  and `zod` (the config schema). **Never** imports `engines` or `runner`. It knows nothing about
+  Docker, nothing about databases, and assembles no pipeline — composing the pipe is
+  `apps/server`'s job.
+- **S3-compatible destinations only** in v1. Targets: AWS S3, Cloudflare R2, Backblaze B2, MinIO,
+  SeaweedFS, Ceph RGW.
+- **No credential** in a log, in an error message, or in `toString()`/serialisation. The driver
+  retains no credential field; use `redactConfig` to describe a destination.
 
-## Lifecycle rule no bucket é PROIBIDO
+## Object layout, and one reserved name (`manifest-sidecar.ts`)
 
-> Retenção é resolvida pela aplicação (`@schrodump/core`), que conhece a cadeia
-> `dependsOn`. Uma regra de expiração (lifecycle) no bucket **não** conhece essa cadeia
-> e apaga o full deixando incrementais órfãos — perda total de dados.
+```
+<prefix>/<organizationId>/<jobId>/artifact.bin     # artifactKey()
+<prefix>/<organizationId>/<jobId>/manifest.json    # manifestKey()
+```
 
-Não configure expiração no bucket. A deleção é sempre explícita, comandada pela
-aplicação depois de `resolveRetention`.
+`scanManifests(driver, prefix)` sweeps **every** `*/manifest.json` under the prefix and parses it —
+that is how the catalog rebuild reconstructs state from the bucket alone. So `manifest.json` is a
+**reserved suffix in this namespace**: anything else written under the prefix with that name will
+be picked up and parsed as an artifact manifest. This is why the self-backup writes its sidecar as
+`self-backup.json` (`apps/server/src/jobs/self-backup-wiring.ts`) — it describes a dump that is
+deliberately not part of the artifact catalog.
+
+## Lifecycle rules on the bucket are FORBIDDEN
+
+> Retention is resolved by the application (`@schrodump/core`), which knows the `dependsOn` chain.
+> An expiration (lifecycle) rule on the bucket does **not** know that chain: it deletes the full
+> and leaves the incrementals orphaned — total data loss.
+
+Do not configure expiration on the bucket. Deletion is always explicit, commanded by the
+application after `resolveRetention`.
 
 ## Canary (`canary.ts`)
 
-Exercita **PUT → GET → DELETE** contra um objeto descartável sob o prefixo real configurado, e
-reporta qual passo falhou. O DELETE faz parte de propósito: validar só a credencial (ou só
-PUT+GET) deixa passar uma chave com `s3:PutObject` mas sem `s3:DeleteObject` — backups rodam por
-meses e a retenção falha silenciosa. É a mesma tese do verify aplicada ao destino: uma
-credencial que escreve mas não gerencia produz um backup que você não consegue reter.
+Exercises **PUT → GET → DELETE** against a throwaway object under the real configured prefix, and
+reports which step failed. The DELETE is there on purpose: validating only the credential (or only
+PUT+GET) lets through a key that has `s3:PutObject` but not `s3:DeleteObject` — backups then run
+for months and retention fails silently. It is the verify thesis applied to the destination: a
+credential that can write but cannot manage produces backups you are unable to retain.
 
 ## `forcePathStyle`
 
-É configuração **explícita** do usuário, não detecção automática. Obrigatório em MinIO,
-SeaweedFS e Ceph RGW; R2 e B2 aceitam virtual-hosted.
+An **explicit** user setting, not auto-detection. Required on MinIO, SeaweedFS and Ceph RGW; R2 and
+B2 accept virtual-hosted.
 
 ## SPDX
 

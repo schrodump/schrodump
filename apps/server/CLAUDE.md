@@ -1,226 +1,312 @@
 # @schrodump/server
 
-Fastify + Prisma + PostgreSQL. Compõe `@schrodump/core`, `engines`, `runner` e `storage` —
-é o único lugar onde esses quatro se encontram. Prevalece sobre o `CLAUDE.md` da raiz aqui.
+Fastify + Prisma + PostgreSQL. Composes `@schrodump/core`, `engines`, `runner` and `storage` — the
+only place where those four meet. Takes precedence over the root `CLAUDE.md` here.
 
-## Estrutura
+## Structure
 
-- `routes/` — HTTP. Cada rota valida com Zod e chama um store/serviço. `wiring.ts` monta os
-  stores reais (scopedPrisma) e o `JobsService`.
-- `jobs/` — lógica de cada job (backup, verify, restore, retention, catalog-rebuild,
-  self-backup) como funções + o `-wiring.ts` que as liga ao Prisma/runner/storage.
-  A retenção é um `JobKind` (`RETENTION`), não uma varredura de fundo: apagar backup é desfecho que
-  o operador precisa conseguir ler depois — inclusive quando o ciclo se recusou a rodar. Ela é
-  encadeada pelo worker após um BACKUP **SUCCEEDED** da mesma policy (`jobs/worker.ts`), nunca por
-  cron próprio; backup que falhou jamais custa uma cópia antiga.
-- `scheduler/` — avalia policies e cria jobs. É **processo de sistema**, não requisição de
-  tenant: lê policies cross-organization e escreve jobs `organizationId`-scoped. Idempotente por
-  `(policyId, scheduledAt)`; recuperação de órfãos marca `RUNNING → FAILED` no boot. O worker
-  (`jobs/claim.ts` + `jobs/worker-wiring.ts`) é o outro processo de sistema com o mesmo status.
-- `crypto/` — os três domínios de cripto (abaixo). `probe/` — teste de conexão real.
-- `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — o `scopedPrisma`.
+- `routes/` — HTTP. Every route validates with Zod and calls a store/service. `wiring.ts` builds
+  the real stores (`scopedPrisma`), the `JobsService` and the encryption-key service.
+- `jobs/` — the logic of each job (backup, verify, restore, retention, catalog-rebuild,
+  self-backup) as functions, plus the `-wiring.ts` that binds them to Prisma/runner/storage.
+  Retention is a `JobKind` (`RETENTION`), not a background sweep: deleting a backup is an outcome
+  the operator has to be able to read afterwards — including when the cycle refused to run. It is
+  chained by the worker after a **SUCCEEDED** BACKUP of the same policy (`jobs/worker.ts`), never
+  by a cron of its own; a failed backup never costs an old copy.
+- `scheduler/` — evaluates policies and creates jobs. It is a **system process**, not a tenant
+  request: it reads policies cross-organization and writes `organizationId`-scoped jobs. Idempotent
+  per `(policyId, scheduledAt)`; orphan recovery marks `RUNNING → FAILED` at boot. The worker
+  (`jobs/claim.ts` + `jobs/worker-wiring.ts`) is the other system process with the same status.
+- `crypto/` — the three crypto domains (below) plus key provisioning. `probe/` — real connection
+  testing.
+- `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — `scopedPrisma`;
+  `data/patch.ts` — the shared `PATCH` semantics.
+- `notifications/` — a pure evaluator plus webhook and SMTP delivery (below).
+- `observability/` — `pino.ts` (logging with redaction) and `audit.ts` (the art. 37 trail, below).
+- `bootstrap/` — first-boot admin creation and the setup-token flow.
 
-## Invariantes
+## Invariants
 
-- **Todo modelo de domínio carrega `organizationId`.** Sem exceção, inclusive em rota interna.
-  O acesso é sempre via `scopedPrisma(orgId)` (client extension que injeta `organizationId`);
-  esquecer o filtro é impossível, não só difícil. As exceções são os processos de sistema — o
-  scheduler e o worker (`jobs/claim.ts`, `jobs/worker-wiring.ts`) —, que usam prisma cru e filtram
-  `organizationId` explicitamente em cada query.
-- **Toda entrada de rota passa por Zod antes do Prisma.** O vetor é objeto não validado indo
-  para `where` — `express-mongo-sanitize` e afins NÃO protegem o Prisma.
-- **Credencial é write-only da perspectiva do usuário.** Nunca é decriptada para **exibir**.
-  Ver a exceção deliberada em "Probe", abaixo: decriptar para **usar** é outra coisa.
-- **Nenhum segredo em log, em nenhum nível** (inclusive `debug`). `observability/pino.ts` faz
-  redaction de `password`/`secret`/`secretAccessKey` (e `*.` deles); a convenção reforça.
-- `viewer` **não** dispara restore — requisito de auditoria. A rota exige `operator+`; a UI
-  esconder o botão é a segunda tranca, não a única.
-- **Retenção nunca apaga por omissão.** Todo contador `keep*` tem default 0 — no Zod e na coluna —
-  então "não configurei retenção" e "quero guardar zero cópias" chegam idênticos ao
-  `resolveRetention`, que responde a segunda: apagar tudo. `retentionIsConfigured` (core) é a
-  guarda obrigatória antes de agir sobre essa resposta, e `runRetention` a aplica antes de qualquer
-  I/O. Silêncio não é instrução. Mesma regra para visão incompleta: manifesto ilegível ou órfão
-  aborta o ciclo inteiro em vez de podar contra um retrato que já se sabe parcial.
+- **Every domain model carries `organizationId`.** No exceptions, internal routes included. Access
+  is always through `scopedPrisma(orgId)` (a client extension that injects `organizationId`);
+  forgetting the filter is impossible, not merely difficult. The exceptions are the system
+  processes — the scheduler and the worker (`jobs/claim.ts`, `jobs/worker-wiring.ts`) — which use
+  the raw client and filter `organizationId` explicitly in every query.
+- **Every route input goes through Zod before Prisma.** The vector is an unvalidated object
+  reaching a `where` clause — `express-mongo-sanitize` and friends do NOT protect Prisma.
+- **A credential is write-only from the user's perspective.** It is never decrypted in order to be
+  **displayed**. See the deliberate exception under "Probe": decrypting in order to **use** it is a
+  different thing.
+- **No secret in any log, at any level** (including `debug`). `observability/pino.ts` redacts
+  `password`/`secret`/`secretAccessKey` (and `*.` variants); the convention reinforces it.
+- A `viewer` **cannot** trigger a restore — an audit requirement. The route demands `operator+`;
+  the UI hiding the button is the second lock, not the only one.
+- **Retention never deletes by omission.** Every `keep*` counter defaults to 0 — in the Zod schema
+  and in the column — so "I did not configure retention" and "I want to keep zero copies" arrive
+  identically at `resolveRetention`, which answers the second: delete everything.
+  `retentionIsConfigured` (core) is the mandatory guard before acting on that answer, and
+  `runRetention` applies it before any I/O. Silence is not an instruction. The same rule covers an
+  incomplete view: an unreadable or orphaned manifest aborts the whole cycle rather than pruning
+  against a picture already known to be partial.
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 
-- **É o único lugar que decripta a credencial de um alvo** — e decripta para **usar** (entregar
-  a um driver que abre socket), nunca para exibir. O texto claro não sai da chamada da função;
-  nada derivado dele entra na resposta nem no log.
-- **Classifica pelo CÓDIGO do erro do driver, nunca pela mensagem.** Erro de driver embute a
-  credencial que falhou (o driver do Mongo põe a URI inteira, senha inclusa, no texto). O que
-  sai é uma das constantes `ProbeFailureCode`. A única exceção: quando a classificação desiste
-  (`UNKNOWN`), o resultado carrega `driverCode` — só classe + código do erro (`ERROR/18`),
-  que não têm como carregar segredo — para o `UNKNOWN` não ser um beco sem saída.
-- Ler a mensagem para desempatar é permitido (o driver do Mongo reporta falha de conexão sem
-  código); **emitir** a mensagem não é. A distinção está comentada no arquivo.
-- `serverVersionNum` é inteiro codificado (`major*10000 + minor*100 + patch`) — chave de
-  comparação, não texto. Formatar para exibição é do `apps/web`.
+- **The only place that decrypts a target's credential** — and it decrypts in order to **use** it
+  (hand it to a driver that opens a socket), never to display it. The clear text does not leave the
+  function call; nothing derived from it enters the response or the log.
+- **Classifies by the driver error's CODE, never by its message.** A driver error embeds the
+  credential that failed (the Mongo driver puts the whole URI, password included, in the text).
+  What comes out is one of the `ProbeFailureCode` constants. The single exception: when
+  classification gives up (`UNKNOWN`), the result carries `driverCode` — class plus code only
+  (`ERROR/18`), which cannot carry a secret — so that `UNKNOWN` is not a dead end.
+- Reading the message to break a tie is allowed (the Mongo driver reports connection failure
+  without a code); **emitting** the message is not. The distinction is commented in the file.
+- `serverVersionNum` is an encoded integer (`major*10000 + minor*100 + patch`) — a comparison key,
+  not text. Formatting it for display belongs to `apps/web`.
 
-## Env (o que o server realmente lê)
+## Env (what the server actually reads)
 
-`env.ts` valida com Zod. Além de `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,
-`SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (e `BETTER_AUTH_SECRET`/`LOG_LEVEL`), agora lê
-a config de worker/executor: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
+`env.ts` validates with Zod. Beyond `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,
+`SCHRODUMP_ADMIN_EMAIL`/`SCHRODUMP_ADMIN_PASSWORD` (and `BETTER_AUTH_SECRET`/`LOG_LEVEL`), it reads
+the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_MAX_BYTES`,
 `SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
 `SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS`,
-`SCHRODUMP_STAGED_THRESHOLD_BYTES` e o trio do self-backup
-(`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`, `_NETWORK`). Scratch path
-ausente ⇒ STREAM-only (sem staged/parallel). Os `ADMIN_*` são `min(1)` — passar string vazia é
-valor **inválido**, não "não setado", e derruba o boot; deixe-os ausentes para criar o admin pelo
-link de setup.
+`SCHRODUMP_STAGED_THRESHOLD_BYTES`, `SCHRODUMP_NOTIFY_MIN_GAP_MS`, `SCHRODUMP_TRUSTED_PROXIES`,
+and the self-backup trio (`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`, `_NETWORK`).
+An absent scratch path ⇒ STREAM-only (no staged/parallel).
 
-> **`SCHRODUMP_STAGED_THRESHOLD_BYTES` não tem default, e isso é a decisão.** STAGED é mais rápido
-> num banco grande, mas escreve o dump em claro no disco antes de subir e exige o volume de scratch
-> dimensionado para isso — então o modo não é escolhido POR conta do operador com base em tamanho.
-> `parallelism > 1` na policy é o caminho explícito, por policy. Antes deste ajuste o limiar recebia
-> `SCHRODUMP_SCRATCH_MAX_BYTES`, que é o **teto do volume**, não um limiar de roteamento: o efeito
-> era só estagiar dumps maiores que todo o orçamento de scratch.
+> **`SCHRODUMP_ADMIN_EMAIL` is `z.email()` and `SCHRODUMP_ADMIN_PASSWORD` is `min(12)`,** the same
+> floor as `minPasswordLength` in `auth.ts`. Validating it here means a too-short value is a legible
+> boot failure that names the variable, instead of a Better-Auth error surfacing from wherever the
+> bootstrap happened to be. Both are optional, but an empty string is an **invalid** value, not
+> "unset", and it stops the boot — leave them absent to create the admin through the setup link.
 
-> **Nota:** `DOCKER_HOST` não passa pelo `env.ts` — o runner (dockerode) o lê direto do ambiente.
+> **`SCHRODUMP_STAGED_THRESHOLD_BYTES` has no default, and that is the decision.** STAGED is faster
+> on a large database, but it writes the clear-text dump to disk before uploading and requires the
+> scratch volume to be sized for it — so the mode is never chosen FOR the operator on the basis of
+> size. `parallelism > 1` on the policy is the explicit, per-policy path. Before this was fixed the
+> threshold defaulted to `SCHRODUMP_SCRATCH_MAX_BYTES`, which is the **volume ceiling**, not a
+> routing threshold: the effect was to stage only dumps larger than the entire scratch budget.
+
+> **`SCHRODUMP_TRUSTED_PROXIES` decides whether the login rate limit is real.** It is the
+> comma-separated list of CIDRs for every hop in front of this server (the TLS-terminating reverse
+> proxy, plus `127.0.0.1/32` for the shipped image's internal UI rewrite). Unset, nothing is
+> trusted and the server warns at boot — because the alternative, trusting a forwarded header by
+> default, buckets the limit on a value the attacker sets.
+
+> **Note:** `DOCKER_HOST` does not go through `env.ts` — the runner (dockerode) reads it straight
+> from the environment.
 
 ## Prisma
 
-- **Prisma 6** (o 7 exige driver adapter + `prisma.config.ts`; adiado). Generator
-  `prisma-client-js`, client em `@prisma/client`.
-- `prisma generate` roda nos scripts `typecheck`/`test` (não precisa de DB).
-- Migrações reversíveis, revisadas antes de aplicar; `prisma migrate diff` limpo. Em produção,
-  o entrypoint da imagem roda `prisma migrate deploy` antes de o server escutar.
-- **BigInt e JSON:** o Prisma devolve `BigInt` para colunas como `sizeRawBytes` e
-  `minAgeBeforeDeleteMs`. O Fastify não serializa `BigInt` por padrão, e aritmética de `BigInt`
-  contra `number` estoura em runtime. Mapear antes de serializar (ou antes de entregar ao `core`)
-  é obrigatório: `policies` via `toPolicyRecord`, `GET /artifacts` via `toArtifactRecord`
-  (`routes/wiring.ts`), retenção via `toRetentionPolicy` (`jobs/worker-wiring.ts`).
+- **Prisma 6** (7 requires a driver adapter + `prisma.config.ts`; deferred). Generator
+  `prisma-client-js`, client from `@prisma/client`.
+- `prisma generate` runs in the `typecheck`/`test`/`build` scripts (it needs no database).
+- Migrations reversible and reviewed before applying; `prisma migrate diff` clean. In production
+  the image entrypoint runs `prisma migrate deploy` before the server listens.
+- **BigInt and JSON:** Prisma returns `BigInt` for columns such as `sizeRawBytes` and
+  `minAgeBeforeDeleteMs`. Fastify does not serialise `BigInt` by default, and `BigInt` arithmetic
+  against `number` throws at runtime. Mapping before serialising (or before handing values to
+  `core`) is mandatory: policies through `toPolicyRecord`, `GET /artifacts` through
+  `toArtifactRecord` (`routes/wiring.ts`), retention through `toRetentionPolicy`
+  (`jobs/worker-wiring.ts`).
 
-## Criptografia (3 domínios, não misturar)
+## Cryptography (3 domains, do not mix them)
 
-1. **Credenciais de metadados** — envelope: DEK por credencial, envelopada pela KEK
-   (`SCHRODUMP_KEK`). Decriptação em `crypto/envelope.ts`.
-2. **Fingerprint da KEK** — SHA-256 de material derivado (nunca a chave), gravado no `AppConfig`
-   no 1º boot; boot falha se divergir. É por isso que trocar a KEK contra um banco existente
-   recusa o boot em vez de gerar artefatos que ninguém abre.
-3. **Artefatos** — `age` **in-process** via a lib `age-encryption` (`Encrypter` no backup,
-   `Decrypter` no restore; keygen pela mesma lib), sempre 2 recipients (operacional + escrow). Não
-   há executor `age`: cifrar/decifrar num container exigia stdin sobre attach hijacked, cujo demux
-   corrompia o stream. Pipeline: dump → compressão → criptografia (nunca inverter).
+1. **Metadata credentials** — envelope: a DEK per credential, wrapped by the KEK
+   (`SCHRODUMP_KEK`). Decryption in `crypto/envelope.ts`.
+2. **KEK fingerprint** — SHA-256 of derived material (never the key), written to `AppConfig` on
+   first boot; boot fails if it diverges. That is why swapping the KEK against an existing database
+   refuses to boot rather than producing artifacts nobody can open.
+3. **Artifacts** — `age` **in-process** through the `age-encryption` library (`Encrypter` on
+   backup, `Decrypter` on restore; keygen from the same library), always 2 recipients (operational
+   + escrow). There is **no `age` executor**: encrypting inside a container required stdin over a
+   hijacked attach, whose demux corrupted the stream. Pipeline: dump → compression → encryption
+   (never invert it). Both stream helpers live in `crypto/artifact.ts`.
+
+## Audit trail (`observability/audit.ts`)
+
+- **One `onResponse` hook, not a call per route.** The per-call-site approach is what produced the
+  gap this replaced: `docs/lgpd.md` claimed a trail covering targets and destinations while the
+  codebase emitted exactly one action, from the restore path. A per-route audit call is something a
+  new route forgets, and a missing audit row is indistinguishable from an action that never
+  happened. This hook cannot be forgotten — it covers routes that do not exist yet.
+- **It records WHAT and WHO, never the payload.** Request bodies here carry database passwords and
+  S3 secret keys; an audit trail that captured them would turn the compliance feature into the
+  largest credential leak in the product. What is written: the action, `targetType`/`targetId`,
+  the `correlationId` (the same id in `x-correlation-id` and every log line for that request), and
+  `metadata` of method/route/status.
+- **Only mutating requests that got past `authenticate` and answered < 400.** No auth context means
+  nothing to attribute; a 4xx means nothing changed.
+- **The action name is derived from the route PATTERN, never the concrete URL**, so an id can never
+  land in it. Depluralisation has two rules (`-ies` → `y`, then trailing `-s`), which covers every
+  route here — an irregular plural would come out wrong rather than fail, so keep route names
+  regular.
+- **A write failure is logged, never thrown.** The request has already been answered, so failing it
+  is not an option; going quiet is not one either, which is the lesson of the file.
+- **Known gap: `credential.read` is not recorded.** Decryption happens inside job execution across
+  several call sites. That is written down in `docs/lgpd.md` rather than partially implemented.
+
+## Notifications (`notifications/`)
+
+- **The unit is the fleet, not the job.** Alert on every job and it is filtered within a week;
+  alert only on failure and the worst case — jobs succeeding while nothing is verified — stays
+  silent. `evaluate.ts` compares two fleet snapshots and emits three triggers: `ARTIFACT_FAILED`,
+  `VERIFICATION_BEHIND`, `POLICY_QUIET`, each as `opened` or `resolved`.
+- **`evaluate.ts` is pure**: a snapshot, the previous snapshot and what has already been delivered
+  go in; notifications come out. No database, no clock, no delivery — all three belong to
+  `wiring.ts`, and keeping them out is what makes every trigger *and every non-trigger* testable.
+- **`SCHRODUMP_NOTIFY_MIN_GAP_MS` (default 15 min) is hysteresis, not throttling.** Every healthy
+  backup is briefly `UNOBSERVED` between finishing and its chained verify, so a previous snapshot
+  younger than this is treated as absent — otherwise "the count did not come down" fires on
+  success.
+- **Delivery reads committed state after the fact and is never in a job's path.** A notification
+  that fails must never fail a backup. The last delivery failure is stored and shown in the UI: a
+  notifier that stopped delivering is indistinguishable from a healthy one unless the interface
+  says so.
 
 ## Self-backup (`jobs/self-backup*.ts`)
 
-- **Selado com a chave de ESCROW, e recusa rodar sem uma ativa.** A identidade da chave
-  **operacional** mora, embrulhada pela KEK, **dentro do banco que o dump salva** — no desastre em
-  que o self-backup seria usado, ela sumiu junto. Um artefato selado só para ela é chamariz: parece
-  proteção e ninguém consegue abrir. `selectSelfBackupRecipients` lança em vez de escrever isso.
-- **`SUCCEEDED` é `UNOBSERVED`, e a UI pinta âmbar.** Um `pg_dump` que saiu 0 é um processo que não
-  reclamou. Verde aqui seria o único lugar do produto afirmando que um backup presta porque um job
-  disse que sim.
-- **O executor entra na rede `internal`, não na `SCHRODUMP_EXECUTOR_NETWORK`.** O banco de
-  metadados é deliberadamente inalcançável a partir da rede onde correm os executores que falam com
-  banco de cliente; esse é o único dump que precisa cruzar a linha, e cruza pela duração dele.
-- **Vencimento é calculado pelo último run `SUCCEEDED`, nunca por timer de processo.** Um timer
-  seria zerado a cada restart, e um self-backup diário num servidor reimplantado de hora em hora
-  não rodaria nunca.
-- **Loop e advisory lock próprios (`SCHRDMP3`).** Um dump de metadados leva minutos e o `startLoop`
-  é single-flight — dobrá-lo dentro do tick do scheduler pararia o dispatch por esse tempo todo.
-- **O ensaio de recuperação roda no CI** (`self-backup-recovery.integration.test.ts`): `pg_dump`
-  real com o descritor de produção → `encryptStream` para escrow apenas → `decryptStream` →
-  `pg_restore` num banco vazio → a organização volta. E assere que a identidade **operacional não
-  abre**. É o único teste do projeto que tira um artefato de `UNOBSERVED`; o que ele não cobre é o
-  executor alcançando o banco pela rede interna e o ida-e-volta pelo bucket — cobertos, por sua vez,
-  por `self-backup-e2e.integration.test.ts`, que dirige o próprio tick do scheduler contra executor
-  real, rede real e bucket real. Apontar o executor para a rede errada derruba os quatro asserts
-  dele; era exatamente esse o defeito que teria embarcado.
-- **A linha na tabela nasce ANTES de resolver a configuração.** Destino apagado ou escrow ausente
-  vira `SelfBackup` `FAILED` com motivo legível, visível em `GET /self-backups`, não só um log.
+- **Sealed with the ESCROW key, and it refuses to run without an active one.** The **operational**
+  key's identity lives, KEK-wrapped, **inside the database the dump saves** — in the disaster where
+  a self-backup would be used, it is gone with it. An artifact sealed only to that key is a decoy:
+  it looks like protection and nobody can open it. `selectSelfBackupRecipients` throws rather than
+  write one.
+- **`SUCCEEDED` is `UNOBSERVED`, and the UI paints it amber.** A `pg_dump` that exited 0 is a
+  process that did not complain. Green here would be the one place in the product asserting that a
+  backup is good because a job said so.
+- **The executor joins the `internal` network, not `SCHRODUMP_EXECUTOR_NETWORK`.** The metadata
+  database is deliberately unreachable from the network where executors that talk to customer
+  databases run; this is the one dump that must cross the line, and it crosses for its duration
+  only.
+- **Due-ness is computed from the last `SUCCEEDED` run, never from a process timer.** A timer would
+  reset on every restart, and a daily self-backup on a server redeployed hourly would never run.
+- **Its own loop and advisory lock (`SCHRDMP3`).** A metadata dump takes minutes and `startLoop` is
+  single-flight — folding it into the scheduler tick would stall dispatch for that whole time. The
+  three locks are `SCHRDMP1` (worker), `SCHRDMP2` (scheduler) and `SCHRDMP3` (self-backup), defined
+  in `server.ts`.
+- **The recovery rehearsal runs in CI** (`self-backup-recovery.integration.test.ts`): a real
+  `pg_dump` with the production descriptor → `encryptStream` to escrow only → `decryptStream` →
+  `pg_restore` into an empty database → the organization comes back. It also asserts that the
+  **operational identity cannot open it**. It is the only test in the project that takes an
+  artifact out of `UNOBSERVED`. What it does not cover — the executor reaching the database over
+  the internal network, and the round trip through the bucket — is covered by
+  `self-backup-e2e.integration.test.ts`, which drives the scheduler's own tick against a real
+  executor, a real network and a real bucket. Pointing the executor at the wrong network fails all
+  four of its assertions; that was exactly the defect that would have shipped.
+- **The row is created BEFORE the configuration is resolved.** A deleted destination or a missing
+  escrow key becomes a `FAILED` `SelfBackup` with a legible reason, visible in `GET /self-backups`,
+  not just a log line.
 
-## Rotação da senha de bootstrap (`auth/rbac.ts`, `auth/auth.ts`)
+## Bootstrap-password rotation (`auth/rbac.ts`, `auth/auth.ts`)
 
-- **`mustChangePassword` é imposto no `requireRole`, antes da checagem de role e para todas elas.**
-  A pergunta não é o que a conta pode fazer — é que a senha que a autoriza ainda é a do ambiente,
-  legível por `docker inspect`. Retorna `403 password_rotation_required`, um código de máquina, não
-  prosa: a UI precisa distinguir isso de negação de permissão comum.
-- **`GET /me` fica de fora do portão** (usa só `authenticate`), senão a UI não teria como explicar
-  por que está bloqueada. O endpoint de troca de senha do Better-Auth vive em `/api/auth/*` e não
-  passa por aqui — sem isso, o portão seria armadilha, não controle.
-- **A flag é limpa por um `hooks.after` em `/change-password`,** e só num 2xx: uma troca recusada
-  (senha atual errada) deixa a exigência de pé.
-- **O resolver lê a flag da linha do `User`, não da sessão.** A sessão é cunhada no sign-in e
-  continuaria dizendo "rotação pendente" pelo resto da vida dela depois da senha já trocada.
+- **`mustChangePassword` is enforced in `requireRole`, before the role check and for every role.**
+  The question is not what the account may do — it is that the password authorising it is still the
+  one from the environment, readable via `docker inspect`. It returns `403
+  password_rotation_required`, a machine code rather than prose: the UI has to tell it apart from
+  an ordinary permission denial.
+- **`GET /me` stays outside the gate** (it uses `authenticate` only), otherwise the UI could not
+  explain why it is blocked. Better-Auth's change-password endpoint lives under `/api/auth/*` and
+  does not pass through here — without that, the gate would be a trap rather than a control.
+- **The flag is cleared by a `hooks.after` on `/change-password`,** and only on a 2xx: a rejected
+  change (wrong current password) leaves the requirement standing.
+- **The resolver reads the flag from the `User` row, not from the session.** The session is minted
+  at sign-in and would keep saying "rotation pending" for the rest of its life after the password
+  had already been changed.
 
-## Listagens são limitadas, contadores não
+## Rate limiting (`auth/auth.ts`)
 
-- **`GET /jobs` e `GET /artifacts` retornam no máximo `LIST_PAGE_SIZE` (200) linhas**, mais recentes
-  primeiro, e mandam `total` junto. Vinte policies diárias com verify encadeado escrevem ~40 linhas
-  de job por dia — ~15 mil por ano — e a tabela de artefato cresce com o que a retenção GFS guardar.
-  Endpoint de lista sem limite degrada em silêncio por um ano e depois para de servir.
-- **`counts` vem de um `groupBy` sobre a tabela inteira, NUNCA de `items`.** O painel lidera com "N
-  backups não observados"; derivar esse número de uma página truncada o reportaria para baixo — e
-  esse é o único número que este produto não pode arredondar. Truncar a lista é decisão de
-  renderização; truncar esse contador seria mentira.
-- **`countByState` foi removido do `apps/web`, não só deixado sem uso.** A função existia para
-  derivar contador de array, que agora é ativamente errado.
-- **O `take` mora no `wiring.ts`, e os testes de rota fazem stub do serviço inteiro** — então
-  `wiring.test.ts` assere a forma da query com um fake que passa pelo wrapper real do
-  `scopedPrisma`, o que de quebra prova que o filtro de `organizationId` continua aplicado.
+Better-Auth's rate limiting is configured explicitly rather than left to its defaults: `storage:
+"database"` (the `RateLimit` model — in-memory counters reset on every restart and are per-process),
+a global 100 requests / 10s, and `customRules` of 5 attempts per 300s on `/sign-in/email` and
+`/sign-up/email`. Credential stuffing is a slow grind, so the window that matters is minutes, not
+seconds. The bucket key depends on `advanced.ipAddress.trustedProxies` — see
+`SCHRODUMP_TRUSTED_PROXIES` above.
 
-## Provisionamento de chaves (`routes/encryption-keys.ts`, `crypto/key-provisioning.ts`)
+## Lists are bounded, counters are not
 
-- **Até isto existir, nada no produto criava `EncryptionKey`.** `generateAgeKeyPair` era chamada só
-  por teste e toda referência de produção era leitura — uma instalação nova falhava o primeiro
-  backup dentro do `resolveRecipients` sem caminho de conserto pela interface.
-- **A identidade de escrow é devolvida UMA vez e não é persistida.** `encryptedIdentity` fica null
-  por construção. Se fosse guardada, perder o banco de metadados perderia as duas chaves de uma vez
-  e o self-backup nunca poderia ser recuperado — que é o motivo inteiro de ele selar para escrow.
-  Coberto por teste que assere que a linha escrita não contém rastro dela.
-- **Recipient trazido pelo operador é validado pelo próprio age** (`isValidAgeRecipient`), checksum
-  bech32 incluído: caractere trocado é recusado agora, não descoberto meses depois como artefato que
-  ninguém abre.
-- **409, não 400, quando já há chave ativa do tipo.** Duas operacionais ativas fariam o `find` do
-  `resolveRecipients` escolher por ordem de linha — decisão que ninguém tomou. Rotação é operação
-  separada e não existe.
+- **`GET /jobs` and `GET /artifacts` return at most `LIST_PAGE_SIZE` (200) rows**, newest first,
+  and send `total` alongside. Twenty daily policies with chained verify write ~40 job rows a day —
+  ~15,000 a year — and the artifact table grows with whatever GFS retention keeps. An unbounded
+  list endpoint degrades silently for a year and then stops serving.
+- **`counts` comes from a `groupBy` over the whole table, NEVER from `items`.** The dashboard leads
+  with "N unobserved backups"; deriving that number from a truncated page would under-report it —
+  and that is the one number this product cannot round. Truncating the list is a rendering
+  decision; truncating that counter would be a lie.
+- **`countByState` was removed from `apps/web`, not merely left unused.** It existed to derive a
+  counter from an array, which is now actively wrong.
+- **The `take` lives in `wiring.ts`, and the route tests stub the whole service** — so
+  `wiring.test.ts` asserts the query shape with a fake that goes through the real `scopedPrisma`
+  wrapper, which incidentally proves the `organizationId` filter is still applied.
 
-## Gaps conhecidos (ver `docs/roadmap.md`)
+## Key provisioning (`routes/encryption-keys.ts`, `crypto/key-provisioning.ts`)
 
-- **STAGED funciona nos dois sentidos, e três coisas precisaram entrar juntas.** O diretório de
-  staging agora é **montado** no container do dump (antes o `-Fd` escrevia dentro do container e
-  morria com ele), um segundo run faz `tar` daquele diretório para stdout (`buildArchiveStaging`),
-  e o restore desempacota antes de entregar o diretório ao `pg_restore`/`myloader`
-  (`buildExtractStaging`). Sem qualquer uma das três, o backup STAGED subia um artefato **vazio**
-  com o job em `SUCCEEDED` — e como verify rebaixava para CHECKSUM, que passa nos ~318 bytes de
-  cabeçalho, aquele artefato vazio podia chegar a `VERIFIED`. O `tar` vem da própria imagem da
-  engine, não de um executor pinado: menos superfície de supply chain, ao custo de depender do
-  busybox tar continuar lá.
+- **Until this existed, nothing in the product created an `EncryptionKey`.** `generateAgeKeyPair`
+  was called only by tests and every production reference was a read — a fresh install failed its
+  first backup inside `resolveRecipients` with no path to fix it through the interface.
+- **The escrow identity is returned ONCE and is not persisted.** `encryptedIdentity` is null by
+  construction. Storing it would mean losing the metadata database loses both keys at once and the
+  self-backup could never be recovered — which is the entire reason it seals to escrow. Covered by
+  a test asserting the written row contains no trace of it.
+- **An operator-supplied recipient is validated by age itself** (`isValidAgeRecipient`), bech32
+  checksum included: a transposed character is refused now, not discovered months later as an
+  artifact nobody can open.
+- **409, not 400, when an active key of that type already exists.** Two active operational keys
+  would make `resolveRecipients`' `find` pick by row order — a decision nobody made. Rotation is a
+  separate operation and does not exist yet.
 
-- **Restore roda ponta a ponta para as quatro engines, nos dois modos de execução:** a rota
-  enfileira, o worker despacha `RESTORE` e roda o pipeline real (download → decrypt in-process →
-  gunzip → arquivo montado → `pg_restore`/`mysql`/`mongorestore`). Artefato `STAGED` passa por um
-  passo a mais antes disso: o tar é desempacotado num diretório irmão no scratch, e é o **diretório**
-  que vai montado — nunca o tar. O que falta: seleção de sub-escopo real para mysql/mongo (hoje
-  sempre restore completo), e mongo está limitado a `FULL_CLUSTER` porque `mongorestore` roda com
-  `--drop` sem `--nsInclude`.
+## Bootstrap and the setup link (`bootstrap/`)
 
-- **Backup de mongo exige `SCHRODUMP_SCRATCH_PATH` configurado** — a senha do `mongodump`/
-  `mongorestore` só viaja via arquivo `--config` montado (nunca argv/env), e esse arquivo precisa
-  viver num caminho que o daemon Docker resolva (`RunMount.source`), i.e., o volume de scratch.
-  Sem scratch configurado, backup de mongo falha alto e cedo (`MONGO_CONFIG_SCRATCH_REQUIRED_
-REASON` em `jobs/worker-wiring.ts`) em vez de travar fundo no executor.
-- **Recursos são editáveis, com campos de identidade retidos.** `/targets`, `/destinations` e
-  `/policies` têm `PATCH` (operator+, schema `.strict()` e `.partial()`, patch vazio é 400). O que
-  **não** se edita, e por quê — cada um invalidaria artefato já existente:
-  `target.engine` (todo artefato registra a engine com que foi tirado), `destination.bucket`/
-  `prefix` (as chaves dos artefatos são relativas a eles; repontar deixa o catálogo inteiro
-  apontando para endereço vazio), `policy.targetId`/`destinationId` (a retenção raciocina por
-  policy — repontar mistura dois bancos numa cadeia GFS e deixa os artefatos do destino antigo
-  fora da retenção para sempre). Trocar isso é policy nova, não edição.
-- **Segredo continua write-only no `PATCH`.** Omitir `password`/`secretAccessKey` mantém o
-  armazenado — é o que torna possível editar host ou região sem reenviar um segredo que a UI nunca
-  consegue ler de volta.
-- **`DELETE` recusa com 409 e motivo quando algo depende da linha**, nunca cascateia. Destino com
-  artefato é o caso afiado: a linha guarda a única credencial que o sistema tem daquele bucket, e
-  apagá-la não apaga os backups — torna-os inalcançáveis. Policy é o caso traiçoeiro:
-  `BackupJob.policy` é relação **opcional**, então o default do Prisma é `SetNull`, não `Restrict` —
-  o banco aceitaria e zeraria `policyId` de todo job que ela rodou, deixando os artefatos
-  inatribuíveis e invisíveis para a retenção sem nada parecer quebrado. Por isso a checagem é
-  explícita, e a mensagem aponta `enabled: false` como a operação certa.
+If `SCHRODUMP_ADMIN_EMAIL`/`_PASSWORD` are absent, the first boot mints a setup token: 32 random
+bytes, **only the SHA-256 hash is persisted**, single-use, 60-minute TTL. The raw token exists in
+the boot log line and in the operator's URL, nowhere else — so a leaked database does not hand over
+an admin-creation link, and an old log line stops working after an hour.
+
+## Known gaps (see `docs/roadmap.md`)
+
+- **STAGED works in both directions, and three things had to land together.** The staging directory
+  is now **mounted** into the dump container (previously `-Fd` wrote inside the container and died
+  with it), a second run `tar`s that directory to stdout (`buildArchiveStaging`), and the restore
+  unpacks before handing the directory to `pg_restore`/`myloader` (`buildExtractStaging`). Without
+  any one of the three, a STAGED backup uploaded an **empty** artifact with the job `SUCCEEDED` —
+  and since verify downgraded to CHECKSUM, which passes on the ~318 bytes of header, that empty
+  artifact could reach `VERIFIED`. The `tar` comes from the engine's own image rather than a pinned
+  executor: less supply-chain surface, at the cost of depending on busybox tar staying there.
+
+- **Restore runs end to end for all four engines, in both execution modes:** the route enqueues,
+  the worker dispatches `RESTORE` and runs the real pipeline (download → in-process decrypt →
+  gunzip → mounted file → `pg_restore`/`mysql`/`mongorestore`). A `STAGED` artifact goes through
+  one extra step first: the tar is unpacked into a sibling directory in scratch, and it is the
+  **directory** that gets mounted — never the tar. What is missing: real sub-scope selection for
+  mysql/mongo (today it is always a full restore), and mongo is limited to `FULL_CLUSTER` because
+  `mongorestore` runs with `--drop` and without `--nsInclude`.
+
+- **Mongo backup requires `SCHRODUMP_SCRATCH_PATH` to be configured** — the `mongodump`/
+  `mongorestore` password travels only via a mounted `--config` file (never argv/env), and that file
+  has to live at a path the Docker daemon can resolve (`RunMount.source`), i.e. the scratch volume.
+  Without scratch configured, a mongo backup fails loudly and early
+  (`MONGO_CONFIG_SCRATCH_REQUIRED_REASON` in `jobs/worker-wiring.ts`) instead of getting stuck deep
+  inside the executor.
+
+- **Resources are editable, with identity fields withheld.** `/targets`, `/destinations` and
+  `/policies` have `PATCH` (operator+, `.strict()` and `.partial()` schemas, an empty patch is 400).
+  What is **not** editable, and why — each would invalidate an existing artifact:
+  `target.engine` (every artifact records the engine it was taken with), `destination.bucket`/
+  `prefix` (artifact keys are relative to them; repointing leaves the whole catalog addressing an
+  empty location), `policy.targetId`/`destinationId` (retention reasons per policy — repointing
+  mixes two databases into one GFS chain and leaves the old destination's artifacts outside
+  retention forever). Changing those means a new policy, not an edit.
+- **Secrets stay write-only under `PATCH`.** Omitting `password`/`secretAccessKey` keeps the stored
+  value — which is what makes it possible to edit a host or a region without resending a secret the
+  UI can never read back.
+- **`DELETE` refuses with 409 and a reason when something depends on the row**, and never cascades.
+  A destination with artifacts is the sharp case: the row holds the only credential the system has
+  for that bucket, and deleting it does not delete the backups — it makes them unreachable. A
+  policy is the treacherous case: `BackupJob.policy` is an **optional** relation, so Prisma's
+  default is `SetNull`, not `Restrict` — the database would accept it and null out `policyId` on
+  every job it ever ran, leaving the artifacts unattributable and invisible to retention with
+  nothing appearing broken. Hence the explicit check, and a message pointing at `enabled: false` as
+  the right operation.
 
 ## SPDX
 

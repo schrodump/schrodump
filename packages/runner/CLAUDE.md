@@ -1,46 +1,55 @@
 # @schrodump/runner
 
-Execução via Docker e gestão de scratch. Prevalece sobre o `CLAUDE.md` da raiz aqui.
+Docker execution and scratch management. Takes precedence over the root `CLAUDE.md` here.
 
-## Invariantes
+## Invariants
 
-- Importa **apenas** `@schrodump/core`. **Nunca** importa `engines` nem `storage`.
-- Divisão de responsabilidade: `engines` diz **o que** executar (imagem, comando, args);
-  o runner diz **onde**. Hoje existe só `DockerRunner`; quando o backup físico entrar,
-  `AgentRunner` implementa a mesma `Runner` sem tocar em `engines`.
-- O runner **não conhece o destino** do stream. Ele expõe a saída; quem conecta ao storage
-  é o `apps/server`. Manter essa fronteira.
+- Imports **only** `@schrodump/core`. **Never** imports `engines` or `storage`.
+- Division of responsibility: `engines` says **what** to execute (image, command, args); the
+  runner says **where**. Today there is only `DockerRunner`; when physical backup arrives,
+  `AgentRunner` implements the same `Runner` without touching `engines`.
+- The runner **does not know the destination** of the stream. It exposes the output; connecting
+  that to storage is `apps/server`'s job. Keep the boundary.
 
-## Execução (docker.ts) — o que quebra em silêncio
+## Execution (`docker.ts`) — what breaks silently
 
-- **Exit code** sempre por `container.wait().StatusCode`, nunca por EOF do stdout. Sucesso
-  só com `StatusCode === 0`.
-- **Sem `AutoRemove`**: remover o container manualmente no `finally`, depois de ler exit code
-  e stderr.
-- **Rede** sempre explícita (`RunOptions.network`), nunca herdada. Rede inexistente → erro
-  claro, nunca roda na default.
-- **Timeout** obrigatório: ao estourar, mata o container e propaga erro tipado. Cancelamento
-  do usuário também mata o container.
-- **stderr** sempre capturado, truncado e **sanitizado** (mensagens de client de banco vazam
-  host/usuário/senha).
+- **Exit code** always from `container.wait().StatusCode`, never from stdout EOF. Success only
+  when `StatusCode === 0`.
+- **No `AutoRemove`**: remove the container by hand in the `finally`, after reading the exit code
+  and stderr.
+- **Network** always explicit (`RunOptions.network`), never inherited. A non-existent network is a
+  clear error, never a run on the default network.
+- **Timeout** mandatory: on expiry, kill the container and propagate a typed error. A user
+  cancellation kills the container too.
+- **stderr** always captured, truncated and **sanitised** (database client messages leak
+  host/user/password).
 
-## Scratch (scratch.ts)
+## Stream composition (`pipeline.ts`)
 
-> O scratch contém **dump em claro**. No modo `directory` quem escreve é o próprio
-> `pg_dump`/`mydumper`, então não dá para cifrar inline. Mitigação: volume dedicado, `0700`,
-> delete no `finally`, e **filesystem cifrado no host** — este último é responsabilidade do
-> operador e precisa estar na documentação de deploy.
+`composeStreamPipeline` uses `node:stream/promises` `pipeline()` rather than chained `.pipe()`,
+and the reason is the project thesis applied to a stream: with `.pipe()`, an error in a middle
+stage is dropped on the floor and the destination still closes cleanly — which is precisely how a
+broken stream ends up reported as a successful backup. `pipeline()` aborts the whole chain and
+rejects. The final `Writable` is supplied by the caller, which is what keeps the storage boundary
+out of this package.
 
-> **`SIGTERM` gracioso:** o server instala o handler (`jobs/shutdown.ts`), não o runner. No sinal:
-> para de reivindicar novos jobs, aborta o `AbortSignal` compartilhado — o que faz o `run()`/
-> `withEphemeralService()` em andamento (Task 1) matar o container à força e rejeitar
-> `RUNNER_ABORTED` — espera o tick assentar (`whenIdle()`, Task 2) sob um budget
-> (`SCHRODUMP_SHUTDOWN_GRACE_MS`, default 8s) e só então desconecta. O `finally` do executor libera
-> a reserva de scratch nesse abort do mesmo jeito que libera num erro comum, então o dump em claro
-> de um job interrompido normalmente **é removido no shutdown**, não só na próxima varredura.
-> Residual: um `SIGKILL` que chega antes do grace expirar (ou antes do handler terminar) pula esse
-> caminho inteiro — aí a varredura de boot (`sweep`, por idade) continua sendo o backstop. Ver
-> `docs/roadmap.md` e `docs/security.md`.
+## Scratch (`scratch.ts`)
+
+> Scratch holds the **dump in clear**. In `directory` mode the writer is `pg_dump`/`mydumper`
+> itself, so there is no way to encrypt inline. Mitigation: a dedicated volume, `0700`, deletion
+> in the `finally`, and **an encrypted filesystem on the host** — that last one is the operator's
+> responsibility and has to be in the deployment documentation.
+
+> **Graceful `SIGTERM`:** the server installs the handler (`jobs/shutdown.ts`), not the runner. On
+> the signal it stops claiming new jobs, aborts the shared `AbortSignal` — which makes the
+> in-flight `run()`/`withEphemeralService()` force-kill its container and reject with
+> `RUNNER_ABORTED` — waits for the tick to settle (`whenIdle()`) under a budget
+> (`SCHRODUMP_SHUTDOWN_GRACE_MS`, default 8s) and only then disconnects. The executor's `finally`
+> releases the scratch reservation on that abort exactly as it would on an ordinary error, so the
+> clear-text dump of an interrupted job is normally **removed during shutdown**, not left for the
+> next sweep. Residual risk: a `SIGKILL` arriving before the grace expires (or before the handler
+> finishes) skips that path entirely — there the boot-time sweep (`sweep`, by age) is still the
+> backstop. See `docs/roadmap.md` and `docs/security.md`.
 
 ## SPDX
 

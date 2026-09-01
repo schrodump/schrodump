@@ -1,45 +1,56 @@
 # @schrodump/engines
 
-Descritores e probe por engine. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretório.
+Per-engine descriptors and probes. Takes precedence over the root `CLAUDE.md` inside this
+directory.
 
-## Invariantes
+## Invariants
 
-- Importa **apenas** `@schrodump/core` e os drivers de banco usados no probe (`pg`, `mysql2`,
-  `mongodb`). **Nunca** importa `storage` nem `runner`.
-- Responsabilidade: dizer **o que** executar (descritores). **Não executa nada** — quem
-  executa é o `runner`.
-- **Regra de ouro:** adicionar uma engine (MariaDB separado, futuros) é uma **entrada de
-  tabela** no `registry.ts`, nunca um `if (engine === ...)` novo espalhado. O único dispatch
-  por engine é o `Record<EngineKind, EngineAdapter>` do registry; `if`/`switch` por engine só
-  dentro de um adapter.
+- Imports **only** `@schrodump/core` and the database drivers the probe uses (`pg`, `mysql2`,
+  `mongodb`). **Never** imports `storage` or `runner`.
+- Responsibility: say **what** to execute (descriptors). It **executes nothing** — the `runner`
+  does that.
+- **The golden rule:** adding an engine (MariaDB split out, anything future) is a **table entry**
+  in `registry.ts`, never a new `if (engine === ...)` scattered around. The only per-engine
+  dispatch is the `Record<EngineKind, EngineAdapter>` in the registry; `if`/`switch` on the engine
+  belongs inside an adapter.
 
-## Credenciais
+## Credentials
 
-- **Jamais** em `command` — argv é visível para qualquer processo do host. Vai só em `env`
-  (`PGPASSWORD`, `MYSQL_PWD`) ou arquivo de config montado (mongo, via `--config`).
-- Probe: `tls: true` (require) por padrão; desligar TLS é **opção explícita** do alvo, nunca
-  fallback silencioso. Timeout de conexão é obrigatório em todo probe.
+- **Never** in `command` — argv is visible to any process on the host. It goes in `env`
+  (`PGPASSWORD`, `MYSQL_PWD`) or in a mounted config file (mongo, via `--config`).
+- Probe: `tls: true` (require) by default; disabling TLS is an **explicit** option on the target,
+  never a silent fallback. A connection timeout is mandatory in every probe.
 
-## Probe — o que não é óbvio
+## Probe — what is not obvious
 
-- No MongoDB, o campo `database` da `ProbeConnection` é o **authSource** (`admin`), não o banco
-  a copiar. Passar o escopo ali autentica contra o banco errado e falha com credencial correta.
-- O `probeMongodb` chama `listDatabases()`, que exige **privilégio de cluster**. Um usuário de
-  backup comum autentica e leva `Unauthorized` (código 13). Tensão de design registrada: testar
-  conexão hoje pede mais privilégio do que o backup de um banco único precisaria.
-- **Classificar erro de driver é responsabilidade do `apps/server`** (`probe/test-connection.ts`),
-  não daqui. O probe pode propagar o erro cru — o server é que traduz para código sem vazar
-  credencial. Não engula nem reescreva o erro aqui.
+- On MongoDB the `database` field of `ProbeConnection` is the **authSource** (`admin`), not the
+  database to copy. Passing the scope there authenticates against the wrong database and fails
+  with a correct credential.
+- `probeMongodb` calls `listDatabases()`, which requires a **cluster-level privilege**. An ordinary
+  backup user authenticates and then gets `Unauthorized` (code 13). The design tension is recorded:
+  testing a connection today asks for more privilege than backing up a single database would need.
+- **Classifying a driver error is `apps/server`'s job** (`probe/test-connection.ts`), not this
+  package's. The probe may propagate the raw error — the server translates it into a code without
+  leaking the credential. Do not swallow or rewrite the error here.
 
-## Imagens executoras
+## Staging descriptors (`staging.ts`)
 
-- postgres: `postgres:<major>-alpine` (13–18); `pg_dump` ≥ versão do servidor.
-- mysql/mariadb: `mysql:<maj.min>` / `mariadb:<maj.min>`; STAGED usa `schrodump/mydumper` (própria).
-- mongodb: `mongo:<major>` **oficial** — verificado que já embarca `mongodump`/`mongorestore`.
+`buildArchiveStaging` / `buildExtractStaging` bridge a directory dump (`pg_dump -Fd`, `mydumper`)
+and the single-stream artifact pipeline. They are engine-independent on purpose and are
+deliberately **not** a new executor image: `tar` already exists in every image the adapters
+resolve, so the caller passes the image its own adapter picked. A dedicated tar image would add
+another tag and another digest to pin, to run a command that is already there. Both descriptors
+carry an **empty env** — neither step has any reason to travel with a target's password.
 
-As imagens `schrodump/*` referenciadas por tag flutuante aqui (`schrodump/mydumper:1`) são
-construídas com versão **e digest** pinados em `docker/executors/` e publicadas pelo `release.yml`.
-Mudar a referência da tag é código de aplicação, não de infra.
+## Executor images
+
+- postgres: `postgres:<major>-alpine` (13–18); `pg_dump` must be ≥ the server version.
+- mysql/mariadb: `mysql:<maj.min>` / `mariadb:<maj.min>`; STAGED uses `schrodump/mydumper` (ours).
+- mongodb: the **official** `mongo:<major>` — verified to already ship `mongodump`/`mongorestore`.
+
+The `schrodump/*` images referenced here by floating tag (`schrodump/mydumper:1`) are built with
+the version **and digest** pinned in `docker/executors/` and published by the `executors` job in
+`release.yml`. Changing the tag reference is application code, not infrastructure.
 
 ## SPDX
 
