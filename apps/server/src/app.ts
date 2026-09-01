@@ -6,6 +6,7 @@ import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
 import type { SessionResolver } from "./auth/rbac.js";
+import { registerAuditTrail } from "./observability/audit.js";
 import { newCorrelationId } from "./observability/pino.js";
 import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js";
 import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
@@ -61,6 +62,8 @@ export function buildApp(deps: AppDeps) {
     request.log.error({ err: error }, "request failed");
     return reply.status(500).send({ error: "internal error", correlationId: request.id });
   });
+
+  registerAuditTrail(app, deps.prisma);
 
   app.get("/health", () => ({ status: "ok" }));
 

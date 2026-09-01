@@ -61,12 +61,32 @@ Four things to get right:
 
 ### Audit trail (art. 37)
 
-Schrodump records who did what: backups triggered, verifications run, restores performed, targets
-and destinations created or changed. Restores in particular record the operator, the artefact,
-the scope and the time.
+Art. 37 requires the controller to keep records of processing operations. Be precise about what
+this trail does and does not contain, because the gap is the part you would have to explain.
 
-Art. 37 requires the controller to keep records of processing operations. The trail also answers
-the question that follows any incident — "did anyone read the backups, and who".
+**Recorded:**
+
+- **Every successful mutating request through the API** — a target, destination, policy or
+  notification channel created, changed or deleted; a backup or restore triggered by hand; a
+  catalogue rebuild. Each row carries the user, the organization, the action, the resource id, the
+  time and the request's correlation id, so it joins to the server logs for that request.
+- **Restore execution** (`restore.execute`), which additionally records the artefact and the
+  encryption key used.
+
+**Not recorded, and this is the honest limit:**
+
+- **Credential reads.** Schrodump decrypts a target's password to hand it to an executor, and an
+  age identity to decrypt an artefact. Those decryptions happen inside job execution and leave no
+  audit row. If your answer to "did anyone read the backups, and who" has to cover the server
+  reading them on a schedule, this trail does not give you that — it covers what a *person*
+  asked for.
+- **Request payloads.** Deliberately. Bodies here carry database passwords and S3 secret keys, and
+  a trail that captured them would be the largest credential leak in the product. You get what
+  changed and by whom, never the values.
+- **Scheduled work.** A backup or verification the scheduler dispatched has no user attached, and
+  is not written to the audit trail at all — it lives in the job history instead. The trail answers
+  "who did this", and for scheduled work the answer is "nobody, it was configured earlier". The
+  configuration change *is* recorded.
 
 ### Right to information and portability (art. 18)
 

@@ -451,7 +451,13 @@ model AuditLog {
   id             String   @id @default(cuid())
   organizationId String
   userId         String?
-  // e.g. "restore.trigger", "credential.read" — restore and credential reads are mandatory.
+  // Derived from the route: "target.create", "destination.update", "policy.delete", plus
+  // "restore.execute" written by the restore path itself. Written by ONE onResponse hook
+  // (observability/audit.ts) rather than per route, because a per-route call is a thing a new route
+  // forgets and a missing audit row is indistinguishable from an action that never happened.
+  //
+  // NOT "credential.read": decryption happens inside job execution and is not recorded. That gap is
+  // written down in docs/lgpd.md rather than papered over here.
   action         String
   targetType     String?
   targetId       String?
