@@ -25,7 +25,12 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   postgres: {
     engine: "postgres",
     serverVersionRange: { min: 130000, max: null },
-    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
+    // No TABLE. pg_restore can scope with -t, but buildRestore never emits it — it emits -n for
+    // SCHEMA and nothing for TABLE, so a TABLE request ran --clean over the WHOLE dump and dropped
+    // every table in the database to restore one. runRestoreJob validates against this list, which
+    // made that reachable. Same withdrawal, and the same return condition, as mongo's: the flag,
+    // plus an integration test proving a neighbouring table survives.
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "SCHEMA"],
     // directory format (-Fd -j N) is the only parallel path and requires staging;
     // custom format (-Fc) is a single-threaded stream.
     maxParallelism: 8,
@@ -38,7 +43,24 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   mysql: {
     engine: "mysql",
     serverVersionRange: { min: 80000, max: null },
-    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "TABLE"],
+    // No TABLE: buildRestore emits no table-scoping flag at all, so a TABLE request restored the
+    // whole dump — dropping and replacing every table in the database to write one of them.
+    //
+    // DATABASE stays, and the distinction is the artifact. buildRestore pipes the script into the
+    // client with connection.database as the target, which scopes correctly for a single-database
+    // dump (no USE statements in it). An artifact dumped with --databases — which buildDump emits
+    // whenever the target names databases — carries CREATE DATABASE, USE and DROP TABLE for EVERY
+    // database in it, and the client then writes into all of them regardless of which was asked
+    // for. Measured on mysql 8.4.10, not inferred: two databases dumped together, a row added to
+    // the second AFTER the dump, the script restored "into" the first — the second went from two
+    // rows to one, the new row was gone, and the client exited 0.
+    //
+    // That hazard is a property of the ARTIFACT, which this per-engine table cannot see; it is
+    // written down in docs/roadmap.md and surfaced to the operator instead of being encoded here.
+    // TABLE comes back with a mechanism that provably filters and an integration test proving a
+    // neighbouring table survives — `mysql --one-database` is not it, MySQL's own documentation
+    // calls that rudimentary and based only on USE.
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE"],
     // mysqldump is a single-threaded stream; mydumper is parallel and requires staging.
     maxParallelism: 8,
     streamCapable: true,
@@ -49,7 +71,24 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   mariadb: {
     engine: "mariadb",
     serverVersionRange: { min: 100600, max: null },
-    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "TABLE"],
+    // No TABLE: buildRestore emits no table-scoping flag at all, so a TABLE request restored the
+    // whole dump — dropping and replacing every table in the database to write one of them.
+    //
+    // DATABASE stays, and the distinction is the artifact. buildRestore pipes the script into the
+    // client with connection.database as the target, which scopes correctly for a single-database
+    // dump (no USE statements in it). An artifact dumped with --databases — which buildDump emits
+    // whenever the target names databases — carries CREATE DATABASE, USE and DROP TABLE for EVERY
+    // database in it, and the client then writes into all of them regardless of which was asked
+    // for. Measured on mysql 8.4.10, not inferred: two databases dumped together, a row added to
+    // the second AFTER the dump, the script restored "into" the first — the second went from two
+    // rows to one, the new row was gone, and the client exited 0.
+    //
+    // That hazard is a property of the ARTIFACT, which this per-engine table cannot see; it is
+    // written down in docs/roadmap.md and surfaced to the operator instead of being encoded here.
+    // TABLE comes back with a mechanism that provably filters and an integration test proving a
+    // neighbouring table survives — `mysql --one-database` is not it, MySQL's own documentation
+    // calls that rudimentary and based only on USE.
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE"],
     // Same dump paths as mysql: single-threaded stream vs. parallel mydumper (staged).
     maxParallelism: 8,
     streamCapable: true,
