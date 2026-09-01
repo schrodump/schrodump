@@ -70,6 +70,22 @@ Watch it come up:
 docker compose logs -f schrodump
 ```
 
+### Is it actually up?
+
+`docker compose ps` reports the `schrodump` container's health, and that health means something:
+the container's healthcheck asks the API, and the API asks PostgreSQL. A container marked
+`(unhealthy)` is one whose metadata database it cannot reach — which is also the state in which
+every backup job will fail, so it is worth alerting on.
+
+```sh
+curl -i http://127.0.0.1:8080/health     # 200 {"status":"ok"} — or 503 {"status":"degraded"}
+```
+
+The container is deliberately **not** restarted when this goes red. A restart would abort whatever
+backup is running — and with it the cleartext scratch directory that the shutdown handler would
+otherwise clean up — to fix a condition that is usually a brief database blip and is not Schrodump's
+to fix. The failure is reported, with a reason in the logs, and left for you.
+
 ## 4. Create the first administrator
 
 There is no default account and no default password. On first boot Schrodump prints a one-time
