@@ -44,11 +44,35 @@ Allowed types: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `ci`, `build`
 `perf`. Keep the title in short English; the body may add detail. One logical change
 per commit.
 
-## Contributor License Agreement
+## Sign your work: the Developer Certificate of Origin
 
-Signing the CLA is **mandatory** and must happen before any contribution is merged.
+Schrodump uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO)
+rather than a Contributor License Agreement. There is nothing to sign up for and no separate
+document to accept: you certify the origin of your contribution by adding a `Signed-off-by` line
+to each commit, which git does for you:
 
-<!-- TODO: texto do CLA pendente de revisão jurídica -->
+```sh
+git commit -s -m "fix(runner): ..."
+```
+
+That appends a trailer matching your git identity:
+
+```
+Signed-off-by: Your Name <you@example.com>
+```
+
+By adding it you state that you wrote the patch, or otherwise have the right to submit it under
+this project's licence — the full text is at <https://developercertificate.org/>. Use your real
+name and a real email address.
+
+The `dco` job in `ci.yml` checks every commit in a pull request. If you forget, the fix is
+`git rebase --signoff origin/main` followed by a force-push; nothing needs to be re-submitted.
+
+**Why DCO and not a CLA.** A CLA asks contributors to grant the project rights beyond the licence,
+which for an AGPL-3.0-or-later project mainly serves relicensing later. Schrodump has no plan to
+relicense, and a CLA is friction that turns a one-line fix into a legal review. The DCO is what the
+Linux kernel, GitLab and Docker use, and it is enough for what this project actually needs:
+a record that each contributor had the right to contribute what they sent.
 
 ## Reporting security issues
 

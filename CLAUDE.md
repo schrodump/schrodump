@@ -41,7 +41,7 @@ apps/web            # Next.js 16 + React 19. Consumes the server API.
 docker/             # production Dockerfile, entrypoint.sh, prune-store.mjs, executors/
 docs/               # install, security, backup-restore, lgpd, roadmap + superpowers/
 scripts/            # operator tools that must work WITHOUT Schrodump (recovery rehearsal)
-.github/workflows/  # ci, security, release, cla
+.github/workflows/  # ci, security, release
 compose.yaml        # deployment stack (server + postgres + docker-socket-proxy)
 ```
 
@@ -106,10 +106,13 @@ environment set — otherwise they are `describe.skipIf`:
 - `docker/executors/` holds **one** file: `mydumper.Dockerfile` (STAGED mysql/mariadb), with the
   version **and digest** pinned. There is **no `age` executor** — artifact encryption is
   in-process via the `age-encryption` library. See `apps/server/CLAUDE.md` for why.
-- CI: `ci.yml` (readme-sync, check, integration, image build/smoke), `security.yml` (dependency
-  audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the executor
-  images, on a `v*` tag), `cla.yml` (**not enabled** — it is `workflow_dispatch` only until the CLA
-  text stops being `TODO` in `CONTRIBUTING.md`).
+- CI: `ci.yml` (dco, readme-sync, check, integration, image build/smoke), `security.yml`
+  (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the
+  executor images, on a `v*` tag).
+- **Contributions are certified by DCO, not a CLA.** Every commit in a pull request needs a
+  `Signed-off-by` trailer (`git commit -s`); the `dco` job enforces it over `base..head` only, so
+  existing history is untouched. It fails closed — an unreadable range or an empty one is a
+  failure, because the first version of that check reported success when `git rev-list` failed.
 
 ## READMEs — synchronisation is mandatory
 
