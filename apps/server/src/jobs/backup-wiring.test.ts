@@ -32,6 +32,10 @@ const DESCRIPTOR: ExecutionDescriptor = {
 function fakeRunner(exitCode: number): Runner {
   return {
     run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+      // Writes real bytes before ending. It used to only end the stream, which modelled a dump that
+      // produced NOTHING as a success — the very shape that shipped an empty artifact under a
+      // SUCCEEDED job. A fixture that cannot tell those apart cannot catch them.
+      opts.stdout?.write(Buffer.from("-- pg_dump fixture payload\n"));
       opts.stdout?.end();
       return Promise.resolve({ exitCode, stderr: "", durationMs: 1 });
     },
@@ -119,6 +123,37 @@ async function makeDeps(
 }
 
 describe("createBackupPorts.executeAndUpload", () => {
+  // A dump tool that exits 0 having written NOTHING is the shape that shipped an empty artifact
+  // under a SUCCEEDED job (STAGED wrote to a directory while the upload read stdout). The check is
+  // deliberately not a size heuristic: zero bytes is unambiguous, needs no threshold to tune, and
+  // no real dump of any engine produces it — even an empty database emits a header.
+  it("rejects a dump that exits 0 without producing a single byte", async () => {
+    const emptyRunner: Runner = {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        opts.stdout?.end(); // exits clean, writes nothing
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+    const deletedKeys: string[] = [];
+    const { deps, recipient } = await makeDeps(0, {
+      runner: emptyRunner,
+      driver: fakeDriver({ deletedKeys }),
+    });
+    const ports = createBackupPorts(deps);
+    await expect(
+      ports.executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow(/no data/i);
+    // And the empty object it already wrote must not outlive the job as an orphan, exactly as the
+    // non-zero-exit path does.
+    expect(deletedKeys).toEqual(["backups/org-1/job-1/artifact.bin"]);
+  });
+
   it("rejects when the dump exits non-zero (no VERIFIED artifact can result)", async () => {
     const deletedKeys: string[] = [];
     const { deps, recipient } = await makeDeps(1, { driver: fakeDriver({ deletedKeys }) });
@@ -234,6 +269,7 @@ describe("createBackupPorts.executeAndUpload", () => {
     const capturingRunner: Runner = {
       run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
         capture.push(opts);
+        opts.stdout?.write(Buffer.from("-- fixture payload\n"));
         opts.stdout?.end();
         return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
       },
@@ -307,6 +343,7 @@ describe("createBackupPorts.executeAndUpload", () => {
     const capturingRunner: Runner = {
       run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
         capture.push(opts);
+        opts.stdout?.write(Buffer.from("-- fixture payload\n"));
         opts.stdout?.end();
         return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
       },
