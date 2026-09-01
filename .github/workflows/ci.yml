@@ -126,11 +126,13 @@ jobs:
       # The engine probes and the Docker runner provision their own containers through
       # testcontainers/dockerode, so they need Docker on the runner rather than a declared service.
       #
-      # COVERAGE GAP, deliberate and tracked: probe.integration.test.ts pins postgres:16-alpine,
-      # mysql:8.0 and mongo:8 inside the test file. The supported-range edges (PostgreSQL 13 and
-      # 18), MariaDB and a MongoDB replica set are therefore NOT exercised here. Closing that needs
-      # the test parameterised by environment — a change to test code, which belongs in its own
-      # change rather than in the CI wiring.
+      # A MongoDB REPLICA SET is now exercised by default: probe.integration.test.ts stands one up
+      # with a keyfile and asserts isReplicaSet, which is the single fact the whole oplog chain
+      # hangs from (it decides whether buildDump emits --oplog, whether that is recorded on the
+      # artifact, and whether a FULL_CLUSTER restore replays it). It was unit-tested only until the
+      # test could reach a real one.
+      #
+      # The engine images are overridable by environment, which is what the edges step below uses.
       - name: Integration tests
         env:
           SCHRODUMP_TEST_INTEGRATION: "1"
@@ -140,6 +142,22 @@ jobs:
           SCHRODUMP_TEST_S3_ACCESS_KEY: minio
           SCHRODUMP_TEST_S3_SECRET_KEY: minio123
         run: pnpm test
+
+      # The supported-range edges and MariaDB, in a probe-only pass. Cheap because it runs one test
+      # file rather than the whole suite, and it closes the half of the old coverage gap that
+      # parameterisation alone only made reachable: reachable is not the same as run.
+      - name: Integration tests (engine edges)
+        env:
+          SCHRODUMP_TEST_INTEGRATION: "1"
+          SCHRODUMP_TEST_POSTGRES_IMAGE: postgres:13-alpine
+          SCHRODUMP_TEST_MYSQL_IMAGE: mariadb:11
+        run: pnpm --filter @schrodump/engines test -- src/probe/probe.integration.test.ts
+
+      - name: Integration tests (postgres 18)
+        env:
+          SCHRODUMP_TEST_INTEGRATION: "1"
+          SCHRODUMP_TEST_POSTGRES_IMAGE: postgres:18-alpine
+        run: pnpm --filter @schrodump/engines test -- src/probe/probe.integration.test.ts
 
   image:
     name: image (build and smoke test)
