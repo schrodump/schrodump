@@ -25,12 +25,15 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   postgres: {
     engine: "postgres",
     serverVersionRange: { min: 130000, max: null },
-    // No TABLE. pg_restore can scope with -t, but buildRestore never emits it — it emits -n for
-    // SCHEMA and nothing for TABLE, so a TABLE request ran --clean over the WHOLE dump and dropped
-    // every table in the database to restore one. runRestoreJob validates against this list, which
-    // made that reachable. Same withdrawal, and the same return condition, as mongo's: the flag,
-    // plus an integration test proving a neighbouring table survives.
-    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "SCHEMA"],
+    // TABLE is back, under the condition it was withdrawn on. buildRestore emits -t per requested
+    // table, which is what confines --clean to them instead of the whole dump, and refuses a TABLE
+    // request that names none. Proven against a real server by
+    // postgres-restore-scope.integration.test.ts: a NEIGHBOURING table is modified after the dump
+    // and asserted to survive; dropping -t turns that red at 1 row where 2 was expected.
+    //
+    // mysql/mariadb keep no TABLE, and that is not the same decision deferred — postgres provides
+    // -t and MySQL provides nothing equivalent for replaying a dump script.
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
     // directory format (-Fd -j N) is the only parallel path and requires staging;
     // custom format (-Fc) is a single-threaded stream.
     maxParallelism: 8,

@@ -94,15 +94,13 @@ describe("RestoreDialog", () => {
 
   it("disables scopes the engine cannot restore, with a reason", async () => {
     await openDialog();
-    // PostgreSQL restores cluster/database/schema. Never collection — it has none — and no longer
-    // table: no adapter emits a table-scoping flag, so a TABLE restore ran --clean over the WHOLE
-    // dump and dropped every table in the database to write one. Withdrawn server-side; offering
-    // it here would put a button in front of a guaranteed rejection.
+    // PostgreSQL restores cluster/database/schema/table — table via pg_restore -t, which confines
+    // --clean to the requested tables. Never collection: it has none.
     expect(screen.getByLabelText("Database")).toBeEnabled();
     expect(screen.getByLabelText("Schema")).toBeEnabled();
-    expect(screen.getByLabelText("Table")).toBeDisabled();
+    expect(screen.getByLabelText("Table")).toBeEnabled();
     expect(screen.getByLabelText("Collection")).toBeDisabled();
-    expect(screen.getAllByText("Not supported for PostgreSQL")).toHaveLength(2);
+    expect(screen.getAllByText("Not supported for PostgreSQL")).toHaveLength(1);
   });
 
   it("blocks restore over an existing database until the name is typed exactly", async () => {

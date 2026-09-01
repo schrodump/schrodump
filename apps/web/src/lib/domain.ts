@@ -44,9 +44,10 @@ export type RestoreTarget = (typeof RESTORE_TARGETS)[number];
 // Mirror of the core capability matrix: which restore targets each engine supports. The restore
 // flow disables unsupported options instead of letting the user attempt them.
 export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarget[]> = {
-  postgres: ["FULL_CLUSTER", "DATABASE", "SCHEMA"],
-  // No TABLE for any engine: no adapter emits a table-scoping flag, so a TABLE restore ran over
-  // the whole dump. Withdrawn server-side; this mirror follows so the dialog never offers it.
+  postgres: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
+  // No TABLE for mysql/mariadb: postgres got it back with pg_restore -t, and MySQL offers nothing
+  // equivalent for replaying a dump script — `--one-database` is documented as rudimentary. So a
+  // TABLE restore here would run over the whole dump. Withdrawn server-side; this mirror follows.
   mysql: ["FULL_CLUSTER", "DATABASE"],
   mariadb: ["FULL_CLUSTER", "DATABASE"],
   // COLLECTION rather than TABLE — mongo has no tables. Sub-scope came back once buildRestore
