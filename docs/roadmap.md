@@ -86,10 +86,13 @@ Notifications fire on TRANSITION and resolve with a closing message, so a condit
 is not re-sent every tick. A channel that cannot be reached records the failure on itself rather
 than failing silently — a notifier nobody can tell is broken is worse than none.
 
-**SMTP is still outstanding.** It needs a mail dependency and its own configuration surface, and
-the webhook covers the roadmap's own stopgap ("whatever monitoring you already run") without
-either. Routing rules and per-user preferences remain deliberately out: one channel set per
-organization.
+**SMTP ships too**, over an explicitly TLS-required transport — a notification carries the fleet's
+state across someone else's network, which is not a tradeoff worth a config flag. A channel is one
+kind or the other, discriminated, so the code cannot read the half that does not belong to it.
+
+Routing rules and per-user preferences remain deliberately out: one channel set per organization.
+**There is still no UI for channels** — they are rows, created by hand. That is the next increment,
+and worth saying plainly rather than leaving someone to discover it.
 
 ## Known limitations shipping in v1
 

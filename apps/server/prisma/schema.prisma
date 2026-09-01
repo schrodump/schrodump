@@ -326,19 +326,36 @@ model BackupJob {
 // Where an organization's notifications go. One channel set per organization, deliberately: routing
 // rules and per-user preferences are the kind of surface that turns a notifier into a config
 // product, and the roadmap's stopgap was always "whatever monitoring you already run".
+enum NotificationChannelKind {
+  WEBHOOK
+  SMTP
+}
+
 model NotificationChannel {
-  id              String    @id @default(cuid())
-  organizationId  String
-  url             String
+  id                    String                  @id @default(cuid())
+  organizationId        String
+  kind                  NotificationChannelKind @default(WEBHOOK)
+  // WEBHOOK only.
+  url                   String?
   // HMAC signing key, envelope-encrypted with the KEK like every other credential. A notification
   // crosses the trust boundary; nothing about it is exempt from the crypto rules.
-  encryptedSecret String
-  enabled         Boolean   @default(true)
+  encryptedSecret       String?
+  // SMTP only. The password is envelope-encrypted like every other credential; the rest is plain
+  // configuration. Nullable columns with a discriminator rather than a table per kind — the shape
+  // this schema already uses for a variant — and the domain type is discriminated so code cannot
+  // read the wrong half.
+  smtpHost              String?
+  smtpPort              Int?
+  smtpUsername          String?
+  encryptedSmtpPassword String?
+  fromAddress           String?
+  toAddresses           String[]
+  enabled               Boolean                 @default(true)
   // Set when a delivery fails, so a notifier that cannot reach its channel is visible rather than
   // silently useless — which would be worse than having no notifications at all.
-  lastFailureAt   DateTime?
-  lastFailure     String?
-  createdAt       DateTime  @default(now())
+  lastFailureAt         DateTime?
+  lastFailure           String?
+  createdAt             DateTime                @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 

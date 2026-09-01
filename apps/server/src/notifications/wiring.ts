@@ -10,6 +10,7 @@ import { cronEvaluator } from "../scheduler/wiring.js";
 import type { PrismaClient } from "../db.js";
 import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
 import { evaluateNotifications, type DeliveredState, type FleetSnapshot } from "./evaluate.js";
+import { deliverEmail, type SmtpDeps } from "./smtp.js";
 import { deliverWebhook } from "./webhook.js";
 
 export interface NotificationDeps {
@@ -17,6 +18,7 @@ export interface NotificationDeps {
   kek: Buffer;
   now: () => Date;
   fetch: typeof fetch;
+  smtp: SmtpDeps;
   log: {
     info(o: Record<string, unknown>, m: string): void;
     error(o: Record<string, unknown>, m: string): void;
@@ -104,23 +106,59 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
     for (const notification of notifications) {
       for (const channel of channels) {
         try {
-          await deliverWebhook(
-            { fetch: deps.fetch },
-            {
-              url: channel.url,
-              secret: decryptCredential(
-                deps.kek,
-                parseEncryptedCredential(channel.encryptedSecret),
-              ),
-            },
-            notification,
-          );
+          // Dispatch on the discriminator, and read only the half that belongs to it. The columns
+          // are nullable because one row is one kind; a channel missing the fields its own kind
+          // needs is a broken row, and saying so beats sending nothing and calling it delivered.
+          if (channel.kind === "SMTP") {
+            const { smtpHost, smtpPort, smtpUsername, encryptedSmtpPassword, fromAddress } =
+              channel;
+            if (
+              smtpHost === null ||
+              smtpPort === null ||
+              smtpUsername === null ||
+              encryptedSmtpPassword === null ||
+              fromAddress === null ||
+              channel.toAddresses.length === 0
+            ) {
+              throw new Error(
+                "SMTP channel is missing host, port, credentials, sender or recipients",
+              );
+            }
+            await deliverEmail(
+              deps.smtp,
+              {
+                host: smtpHost,
+                port: smtpPort,
+                username: smtpUsername,
+                password: decryptCredential(
+                  deps.kek,
+                  parseEncryptedCredential(encryptedSmtpPassword),
+                ),
+                from: fromAddress,
+                to: channel.toAddresses,
+              },
+              notification,
+            );
+          } else {
+            const { url, encryptedSecret } = channel;
+            if (url === null || encryptedSecret === null) {
+              throw new Error("webhook channel is missing its url or signing secret");
+            }
+            await deliverWebhook(
+              { fetch: deps.fetch },
+              {
+                url,
+                secret: decryptCredential(deps.kek, parseEncryptedCredential(encryptedSecret)),
+              },
+              notification,
+            );
+          }
           delivered += 1;
         } catch (err) {
           // Recorded, never thrown onward: one unreachable channel must not stop the others, and
           // must not take the scheduler tick down with it. A notifier that is failing needs to be
           // visible, which is what these columns are for.
-          const reason = err instanceof Error ? err.message : "webhook delivery failed";
+          const reason = err instanceof Error ? err.message : "notification delivery failed";
           deps.log.error({ channelId: channel.id, reason }, "notification delivery failed");
           await deps.prisma.notificationChannel.update({
             where: { id: channel.id },
