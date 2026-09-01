@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import Fastify, { type FastifyBaseLogger } from "fastify";
+import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
 import type { SessionResolver } from "./auth/rbac.js";
@@ -12,6 +13,7 @@ import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { restoreRoutes } from "./routes/restore.js";
+import { selfBackupRoutes } from "./routes/self-backups.js";
 import { sessionRoutes } from "./routes/session.js";
 import { setupRoutes, type SetupDeps } from "./routes/setup.js";
 import { targetRoutes, type TargetStore } from "./routes/targets.js";
@@ -31,6 +33,10 @@ export interface AppDeps {
   notificationChannelStore(organizationId: string): ChannelStore;
   jobsService: JobsService;
   catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
+  prisma: PrismaClient;
+  // Null when self-backup is unconfigured; surfaced by GET /self-backups so the UI can distinguish
+  // "not configured" from "configured and never ran".
+  selfBackupDestinationId: string | null;
   kek: Buffer;
 }
 
@@ -103,6 +109,11 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     catalogRoutes({ resolver: deps.resolver, rebuild: deps.catalogRebuild })(instance);
+    selfBackupRoutes({
+      resolver: deps.resolver,
+      prisma: deps.prisma,
+      configuredDestinationId: deps.selfBackupDestinationId,
+    })(instance);
     return Promise.resolve();
   });
 

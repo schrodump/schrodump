@@ -349,7 +349,7 @@ model NotificationChannel {
   smtpUsername          String?
   encryptedSmtpPassword String?
   fromAddress           String?
-  toAddresses           String[]
+  toAddresses           String[]      @default([])
   enabled               Boolean                 @default(true)
   // Set when a delivery fails, so a notifier that cannot reach its channel is visible rather than
   // silently useless — which would be worse than having no notifications at all.
@@ -464,4 +464,40 @@ model AuditLog {
 
   @@index([organizationId])
   @@index([organizationId, createdAt])
+}
+
+// A dump of Schrodump's OWN metadata database. Instance-scoped, not organization-scoped: there is
+// one metadata database per deployment regardless of how many organizations it holds.
+//
+// It is encrypted to the destination organization's recipients, and the ESCROW recipient is the one
+// that matters. The operational key's identity is stored (KEK-wrapped) inside this very database —
+// in the disaster this feature exists for, that identity is gone with it. Only the offline escrow
+// identity can open a self-backup. Wiring refuses to run without an active escrow key rather than
+// writing a decoy nobody can decrypt.
+model SelfBackup {
+  id             String          @id @default(cuid())
+  state          SelfBackupState @default(RUNNING)
+  // Which destination it was written to, and the organization whose keys sealed it. Kept as plain
+  // strings, not relations: this row is forensic evidence and must survive the destination or the
+  // organization being deleted. `organizationId` is null when the run failed before resolving the
+  // destination at all — a misconfiguration has to be visible in the product, not only in a log.
+  organizationId String?
+  destinationId  String
+  bucketKey      String?
+  manifestKey    String?
+  sizeBytes      BigInt?
+  checksum       String?
+  keyIds         String[]
+  // Failure reason, already sanitized. Null while RUNNING and on success.
+  reason         String?
+  startedAt      DateTime        @default(now())
+  finishedAt     DateTime?
+
+  @@index([startedAt])
+}
+
+enum SelfBackupState {
+  RUNNING
+  SUCCEEDED
+  FAILED
 }

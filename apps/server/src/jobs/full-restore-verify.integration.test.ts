@@ -246,6 +246,8 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
       SCHRODUMP_SCHEDULER_TICK_MS: 30000,
       SCHRODUMP_NOTIFY_MIN_GAP_MS: 900000,
       SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
+      SCHRODUMP_SELF_BACKUP_INTERVAL_MS: 86400000,
+      SCHRODUMP_SELF_BACKUP_NETWORK: "schrodump_internal",
     };
   }, 300_000);
 

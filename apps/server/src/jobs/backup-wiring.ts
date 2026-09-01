@@ -6,9 +6,8 @@
 // integration tests. Pipeline order is fixed: dump -> compress -> encrypt -> upload.
 
 import { createHash } from "node:crypto";
-import { PassThrough, Readable, Transform } from "node:stream";
+import { PassThrough, Transform } from "node:stream";
 import { createGzip } from "node:zlib";
-import { Encrypter } from "age-encryption";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
 import type { EngineKind } from "@schrodump/core/types";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
@@ -17,6 +16,7 @@ import type { Manifest } from "@schrodump/core/manifest";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { manifestKey, writeManifest } from "@schrodump/storage/manifest-sidecar";
+import { encryptStream } from "../crypto/artifact.js";
 import type { ExecutionMode } from "./execution-mode.js";
 import type { BackupPorts, ProbeResult, Recipients, Reservation, UploadResult } from "./backup.js";
 
@@ -68,15 +68,6 @@ export interface BackupWiringDeps {
     recipients: Recipients;
     upload: UploadResult;
   }): Promise<string>;
-}
-
-// Encrypts a compressed Node stream for the recipients using age's STREAM construction (chunked,
-// per-chunk authenticated, truncation-detecting), returning a Node Readable of the ciphertext.
-async function encryptStream(compressed: Readable, recipients: string[]): Promise<Readable> {
-  const encrypter = new Encrypter();
-  for (const recipient of recipients) encrypter.addRecipient(recipient);
-  const source = Readable.toWeb(compressed) as ReadableStream<Uint8Array>;
-  return Readable.fromWeb(await encrypter.encrypt(source));
 }
 
 export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {

@@ -34,6 +34,18 @@ const EnvSchema = z.object({
   // scratch cleanup finish before SIGKILL. The abort itself is sub-second; this only caps a wedged
   // Docker teardown from holding the process past the window.
   SCHRODUMP_SHUTDOWN_GRACE_MS: z.coerce.number().int().default(8000),
+  // Self-backup: dumps THIS deployment's metadata database to a destination the operator names.
+  // Deliberately has NO default. The metadata database holds every target's wrapped credential, so
+  // where it lands is a placement decision an operator makes on purpose, not one inferred from
+  // whichever destination happens to be first. Unset -> no self-backup, and the server says so at
+  // boot rather than staying quiet about it.
+  SCHRODUMP_SELF_BACKUP_DESTINATION_ID: z.string().min(1).optional(),
+  SCHRODUMP_SELF_BACKUP_INTERVAL_MS: z.coerce.number().int().positive().default(86400000), // 24h
+  // The self-backup executor joins THIS network, not SCHRODUMP_EXECUTOR_NETWORK. In compose.yaml
+  // the metadata database sits on `internal` only, and deliberately so — putting it on the target
+  // network would expose it to every executor that talks to a customer database. So the one dump
+  // that must reach it joins `internal` instead, for the length of that dump and nothing else.
+  SCHRODUMP_SELF_BACKUP_NETWORK: z.string().default("schrodump_internal"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

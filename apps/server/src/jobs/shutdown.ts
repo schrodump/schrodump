@@ -4,6 +4,10 @@
 export interface GracefulShutdownDeps {
   handle: { stop(): void; whenIdle(): Promise<void> };
   scheduler: { stop(): void };
+  // Present only when self-backup is configured. Unlike the scheduler — whose tick is a short
+  // dispatch — a self-backup tick holds an executor container and a multipart upload, so it is
+  // awaited alongside the worker drain rather than merely stopped.
+  selfBackup?: { stop(): void; whenIdle(): Promise<void> };
   controller: { abort(reason?: unknown): void };
   disconnect(): Promise<void>;
   graceMs: number;
@@ -24,6 +28,7 @@ export async function runGracefulShutdown(deps: GracefulShutdownDeps): Promise<v
   deps.log.info({}, "shutdown: stopping loops");
   deps.handle.stop();
   deps.scheduler.stop();
+  deps.selfBackup?.stop();
   deps.controller.abort(new Error("shutdown"));
   // Clear the grace timer when whenIdle() wins, so a resolved shutdown never leaves an 8s timer
   // pending (which would keep the event loop alive and delay a clean exit).
@@ -31,7 +36,11 @@ export async function runGracefulShutdown(deps: GracefulShutdownDeps): Promise<v
   const grace = new Promise<void>((resolve) => {
     graceTimer = setTimeout(resolve, deps.graceMs);
   });
-  await Promise.race([deps.handle.whenIdle(), grace]);
+  const idle = Promise.all([
+    deps.handle.whenIdle(),
+    deps.selfBackup?.whenIdle() ?? Promise.resolve(),
+  ]);
+  await Promise.race([idle, grace]);
   if (graceTimer !== undefined) clearTimeout(graceTimer);
   // Still attempted on every path, including grace expiry — dropping the session lock promptly is
   // the point — but no longer able to outlast it.

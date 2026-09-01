@@ -137,10 +137,11 @@ público.
 ## Estado del proyecto
 
 Schrodump está en desarrollo activo hacia su **v1**. El modelo de verificación, la programación, el
-almacenamiento, el cifrado, la retención GFS, la ejecución de restauraciones, la interfaz web y el
-pipeline completo de CI + release firmada están implementados y probados. La restauración cubre
-artefactos single-stream de los cuatro motores; los artefactos staged (directorio), el envío de
-notificaciones y las copias físicas/PITR están en la hoja de ruta.
+almacenamiento, el cifrado, la retención GFS, la ejecución de restauraciones, el envío de
+notificaciones (webhook y SMTP), la autocopia del propio catálogo, la interfaz web y el pipeline
+completo de CI + release firmada están implementados y probados. La restauración cubre artefactos
+single-stream y staged (directorio); MongoDB restaura solo con alcance de clúster. Las copias
+físicas/PITR están en la hoja de ruta.
 [docs/roadmap.md](docs/roadmap.md) indica exactamente qué está y qué no está en v1.
 
 ## Contribuir

@@ -26,6 +26,18 @@ services:
       SCHRODUMP_SCRATCH_MAX_BYTES: ${SCRATCH_MAX_BYTES:-107374182400}
       SCHRODUMP_MAX_CONCURRENT_STAGED: ${MAX_STAGED:-2}
       SCHRODUMP_EXECUTOR_NETWORK: ${EXECUTOR_NETWORK:-schrodump_targets}
+      # Documented in docs/install.md and, until now, never passed through: an operator who set
+      # either in .env got the server default and no indication the value had been ignored.
+      SCHRODUMP_STAGED_THRESHOLD_BYTES:
+      SCHRODUMP_NOTIFY_MIN_GAP_MS:
+      # Self-backup of Schrodump's own metadata database. Unset -> disabled, and the server logs a
+      # warning saying so at boot.
+      SCHRODUMP_SELF_BACKUP_DESTINATION_ID:
+      SCHRODUMP_SELF_BACKUP_INTERVAL_MS:
+      # The self-backup executor joins `internal`, where the metadata database lives — NOT the
+      # target network. The metadata database is deliberately unreachable from the network the
+      # customer-database executors run on, and this is the one dump that has to cross that line.
+      SCHRODUMP_SELF_BACKUP_NETWORK: ${SELF_BACKUP_NETWORK:-schrodump_internal}
     volumes:
       - scratch:/scratch
     ports:

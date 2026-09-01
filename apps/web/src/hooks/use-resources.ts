@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Artifact, Destination, Job, NotificationChannel, Policy, Target } from "@/lib/types";
+import type { Artifact, Destination, Job, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
 
 export function useArtifacts() {
   return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<Artifact[]>("/artifacts") });
@@ -33,4 +33,14 @@ export function useNotificationChannels() {
 
 export function usePolicies() {
   return useQuery({ queryKey: ["policies"], queryFn: () => api.get<Policy[]>("/policies") });
+}
+
+export function useSelfBackups() {
+  return useQuery({
+    queryKey: ["self-backups"],
+    queryFn: () => api.get<SelfBackupList>("/self-backups"),
+    // Admin-only endpoint: a viewer or operator gets 403, and retrying a 403 forever just burns
+    // requests to be told the same thing.
+    retry: false,
+  });
 }
