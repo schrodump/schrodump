@@ -456,8 +456,9 @@ model AuditLog {
   // (observability/audit.ts) rather than per route, because a per-route call is a thing a new route
   // forgets and a missing audit row is indistinguishable from an action that never happened.
   //
-  // NOT "credential.read": decryption happens inside job execution and is not recorded. That gap is
-  // written down in docs/lgpd.md rather than papered over here.
+  // Also "credential.read", written by crypto/credential-access.ts wherever a stored credential is
+  // decrypted. Those rows have a null userId — job execution has no user — and are attributed
+  // through correlationId instead.
   action         String
   targetType     String?
   targetId       String?

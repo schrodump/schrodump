@@ -9,20 +9,30 @@
 import type { PrismaClient } from "@prisma/client";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { createS3Driver } from "@schrodump/storage/s3";
-import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import { scopedPrisma } from "../data/scope.js";
 
+// `access` is required rather than optional: building a driver decrypts the destination's S3
+// secret, which is an art. 37 access, and a caller that cannot say why it needs one should not be
+// getting one. See crypto/credential-access.ts.
 export async function driverForDestination(
   prisma: PrismaClient,
   kek: Buffer,
   organizationId: string,
   destinationId: string,
+  access: { audit: CredentialAuditSink; purpose: string; correlationId: string },
 ): Promise<{ driver: StorageDriver; prefix: string } | null> {
   const dest = await scopedPrisma(prisma, organizationId).storageDestination.findFirst({
     where: { id: destinationId },
   });
   if (dest === null) return null;
-  const secret = decryptCredential(kek, parseEncryptedCredential(dest.encryptedSecretAccessKey));
+  const secret = readCredential({ kek, audit: access.audit }, dest.encryptedSecretAccessKey, {
+    organizationId,
+    resource: "destination",
+    resourceId: dest.id,
+    purpose: access.purpose,
+    correlationId: access.correlationId,
+  });
   const driver = createS3Driver({
     ...(dest.endpoint !== null ? { endpoint: dest.endpoint } : {}),
     region: dest.region,

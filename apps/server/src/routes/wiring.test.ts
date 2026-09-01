@@ -97,7 +97,7 @@ describe("createJobsService list bounds", () => {
 
   it("bounds the artifact list and asks the database for the counts", async () => {
     const spy = spyPrisma();
-    const result = await createJobsService(spy.prisma, Buffer.alloc(32)).listArtifacts("org-1");
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listArtifacts("org-1");
     const call = spy.calls.find((c) => c.model === "Artifact" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
@@ -108,7 +108,7 @@ describe("createJobsService list bounds", () => {
 
   it("bounds the job list", async () => {
     const spy = spyPrisma();
-    await createJobsService(spy.prisma, Buffer.alloc(32)).listJobs("org-1");
+    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs("org-1");
     const call = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);

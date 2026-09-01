@@ -17,6 +17,7 @@
 
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
+import type { CredentialAuditSink } from "../crypto/credential-access.js";
 
 const MUTATING = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
@@ -75,4 +76,40 @@ export function registerAuditTrail(app: FastifyInstance, prisma: PrismaClient): 
         request.log.error({ err, action: "audit.write_failed" }, "could not record the audit trail");
       });
   });
+}
+
+// The `credential.read` half of the art. 37 trail. It cannot ride the onResponse hook: decryption
+// happens inside job execution, where there is no request and no user — so these rows carry a null
+// userId and are attributed to the job through correlationId instead.
+//
+// See crypto/credential-access.ts for why the context is a required argument rather than a call
+// each site remembers to make.
+export function createCredentialAuditSink(
+  prisma: PrismaClient,
+  log: { error(o: Record<string, unknown>, m: string): void },
+): CredentialAuditSink {
+  return {
+    record(access) {
+      void prisma.auditLog
+        .create({
+          data: {
+            organizationId: access.organizationId,
+            // No user: the worker is a system process. An access caused by a request still gets
+            // its actor, through the correlationId that names the request.
+            userId: null,
+            action: "credential.read",
+            targetType: access.resource,
+            targetId: access.resourceId,
+            correlationId: access.correlationId,
+            // The purpose, never the credential and never anything derived from it.
+            metadata: { purpose: access.purpose },
+          },
+        })
+        // Same rule as the request trail: a failed audit write must not fail the operation that
+        // triggered it, and must not vanish either.
+        .catch((err: unknown) => {
+          log.error({ err, action: "audit.credential_write_failed" }, "could not record a credential access");
+        });
+    },
+  };
 }

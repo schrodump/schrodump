@@ -72,14 +72,21 @@ this trail does and does not contain, because the gap is the part you would have
   time and the request's correlation id, so it joins to the server logs for that request.
 - **Restore execution** (`restore.execute`), which additionally records the artefact and the
   encryption key used.
+- **Every credential read** (`credential.read`). Schrodump decrypts a target's password to hand it
+  to an executor, a destination's S3 secret to reach the bucket, an SMTP password or webhook secret
+  to deliver a notification, and an age identity to open an artefact. Each of those writes a row
+  naming the resource, the purpose in words ("backup: connect to the target database to dump it"),
+  and the correlation id of the request or job that caused it — so an access joins to the log lines
+  around it. The value itself is never recorded, and never anything derived from it.
+
+  Decryption inside job execution has no user, so those rows carry a null actor and are attributed
+  through the correlation id instead. The context is a required argument of the only function
+  allowed to decrypt, and eslint refuses a direct import of the raw primitive outside that module:
+  a new call site cannot read a credential without saying which organization, which resource and
+  why.
 
 **Not recorded, and this is the honest limit:**
 
-- **Credential reads.** Schrodump decrypts a target's password to hand it to an executor, and an
-  age identity to decrypt an artefact. Those decryptions happen inside job execution and leave no
-  audit row. If your answer to "did anyone read the backups, and who" has to cover the server
-  reading them on a schedule, this trail does not give you that — it covers what a *person*
-  asked for.
 - **Request payloads.** Deliberately. Bodies here carry database passwords and S3 secret keys, and
   a trail that captured them would be the largest credential leak in the product. You get what
   changed and by whom, never the values.

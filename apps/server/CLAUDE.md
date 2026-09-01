@@ -145,8 +145,13 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   regular.
 - **A write failure is logged, never thrown.** The request has already been answered, so failing it
   is not an option; going quiet is not one either, which is the lesson of the file.
-- **Known gap: `credential.read` is not recorded.** Decryption happens inside job execution across
-  several call sites. That is written down in `docs/lgpd.md` rather than partially implemented.
+- **`credential.read` is recorded too, by `crypto/credential-access.ts`.** It cannot ride this hook
+  — decryption happens inside job execution, where there is no request and no user — so those rows
+  carry a null `userId` and are attributed through `correlationId`. The context is a **required
+  argument** of `readCredential`, and eslint refuses a direct import of `decryptCredential` outside
+  `crypto/`: a new call site cannot decrypt without naming the organization, the resource and the
+  purpose. That shape is the lesson of this file applied a second time — a call each site remembers
+  to make is a call the tenth site forgets.
 
 ## `GET /health` (`observability/health.ts`)
 

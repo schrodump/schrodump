@@ -9,7 +9,8 @@ import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
-import { decryptCredential, encryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { encryptCredential } from "../crypto/envelope.js";
+import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import {
   testTargetConnection,
   type EngineName,
@@ -193,6 +194,7 @@ const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 async function probeTarget(
   prisma: PrismaClient,
   kek: Buffer,
+  audit: CredentialAuditSink,
   organizationId: string,
   targetId: string,
 ): Promise<TestConnectionResult> {
@@ -208,7 +210,13 @@ async function probeTarget(
     host: row.host,
     port: row.port,
     username: row.username,
-    password: decryptCredential(kek, parseEncryptedCredential(row.encryptedCredential)),
+    password: readCredential({ kek, audit }, row.encryptedCredential, {
+      organizationId,
+      resource: "target",
+      resourceId: row.id,
+      purpose: "test connection: probe the target on the operator's request",
+      correlationId: `probe:${row.id}`,
+    }),
     tls: row.tls,
     databases: scope.success ? scope.data.databases : [],
   });
@@ -259,7 +267,11 @@ export function toArtifactRecord(row: {
 }
 
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
-export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsService {
+export function createJobsService(
+  prisma: PrismaClient,
+  kek: Buffer,
+  audit: CredentialAuditSink,
+): JobsService {
   const enqueue = async (
     organizationId: string,
     kind: "BACKUP" | "VERIFY",
@@ -325,7 +337,7 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
       return job.id;
     },
     testConnection: (organizationId, targetId) =>
-      probeTarget(prisma, kek, organizationId, targetId),
+      probeTarget(prisma, kek, audit, organizationId, targetId),
   };
 }
 

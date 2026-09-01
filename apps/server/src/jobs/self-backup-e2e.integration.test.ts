@@ -146,6 +146,7 @@ describe.skipIf(!enabled)("self-backup end to end (integration)", () => {
     const ran = await runScheduledSelfBackup({
       prisma,
       kek,
+      audit: { record: () => undefined },
       // The alias, not localhost — this is the assertion that the executor's own networking works.
       databaseUrl: `postgresql://schrodump:schrodump@${DB_ALIAS}:5432/app`,
       destinationId,
@@ -174,6 +175,7 @@ describe.skipIf(!enabled)("self-backup end to end (integration)", () => {
       await runScheduledSelfBackup({
         prisma,
         kek,
+        audit: { record: () => undefined },
         databaseUrl: `postgresql://schrodump:schrodump@${DB_ALIAS}:5432/app`,
         destinationId,
         network: network.getName(),
