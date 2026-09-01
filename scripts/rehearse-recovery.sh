@@ -28,6 +28,11 @@ BUCKET="" KEY="" SIDECAR_KEY="" IDENTITY="" INTO="" ENDPOINT="" REGION=""
 die() { printf 'rehearsal: %s\n' "$1" >&2; exit 1; }
 note() { printf '\n== %s\n' "$1"; }
 
+# `aws s3 cp` can exit 0 having written nothing where you expected it — a path the container or the
+# CLI resolved differently than you did. Without this the next step fails as a raw `jq: could not
+# open file`, which reads like a corrupt sidecar rather than a download that did not land.
+fetched() { [ -s "$1" ] || die "the download produced no file at $1 — check the bucket, the key and the credentials"; }
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --bucket)   BUCKET="${2:-}"; shift 2 ;;
@@ -70,6 +75,7 @@ existing="$(psql "$INTO" -tAc \
 if [ -n "$SIDECAR_KEY" ]; then
   note "2/6  Reading the sidecar"
   "${AWS[@]}" s3 cp "s3://${BUCKET}/${SIDECAR_KEY}" "$WORK/self-backup.json" >/dev/null
+  fetched "$WORK/self-backup.json"
   [ -n "$KEY" ] || KEY="$(jq -r '.bucketKey' "$WORK/self-backup.json")"
   jq -r '.recovery' "$WORK/self-backup.json"
 else
@@ -78,6 +84,7 @@ fi
 
 note "3/6  Fetching s3://${BUCKET}/${KEY}"
 "${AWS[@]}" s3 cp "s3://${BUCKET}/${KEY}" "$WORK/metadata.bin" >/dev/null
+fetched "$WORK/metadata.bin"
 
 if [ -f "$WORK/self-backup.json" ]; then
   note "4/6  Verifying the checksum recorded in the sidecar"
