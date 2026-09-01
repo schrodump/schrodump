@@ -5,6 +5,7 @@
 // under its own advisory lock, so at most one replica is ever dumping the metadata database.
 
 import type { PrismaClient } from "@prisma/client";
+import type { CredentialAuditSink } from "../crypto/credential-access.js";
 import { createDockerRunner } from "@schrodump/runner/runner";
 import { isSelfBackupDue, runSelfBackup } from "./self-backup.js";
 import { createSelfBackupPorts, resolveSelfBackupContext } from "./self-backup-wiring.js";
@@ -17,6 +18,7 @@ const SELF_BACKUP_TIMEOUT_MS = 30 * 60 * 1000;
 export interface SelfBackupTickDeps {
   prisma: PrismaClient;
   kek: Buffer;
+  audit: CredentialAuditSink;
   databaseUrl: string;
   destinationId: string;
   network: string;
@@ -67,6 +69,7 @@ export async function runScheduledSelfBackup(deps: SelfBackupTickDeps): Promise<
     {
       prisma: deps.prisma,
       kek: deps.kek,
+      audit: deps.audit,
       databaseUrl: deps.databaseUrl,
       destinationId: deps.destinationId,
       network: deps.network,

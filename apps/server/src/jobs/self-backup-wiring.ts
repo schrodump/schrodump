@@ -21,6 +21,7 @@ import {
   type SelfBackupPorts,
   type SelfBackupUpload,
 } from "./self-backup.js";
+import type { CredentialAuditSink } from "../crypto/credential-access.js";
 import { driverForDestination } from "./destination-driver.js";
 
 const PART_SIZE = 64 * 1024 * 1024;
@@ -57,6 +58,9 @@ export function parseDatabaseUrl(raw: string): SelfBackupConnection {
 export interface SelfBackupWiringDeps {
   prisma: PrismaClient;
   kek: Buffer;
+  // The self-backup decrypts the destination's S3 secret like any other upload; recorded like any
+  // other access. See crypto/credential-access.ts.
+  audit: CredentialAuditSink;
   databaseUrl: string;
   destinationId: string;
   network: string;
@@ -77,7 +81,7 @@ export interface SelfBackupContext {
 // Resolves everything the dump needs BEFORE a row is written, so a misconfiguration (unknown
 // destination, no escrow key) is a boot-time complaint rather than a FAILED row every interval.
 export async function resolveSelfBackupContext(
-  deps: Pick<SelfBackupWiringDeps, "prisma" | "kek" | "destinationId">,
+  deps: Pick<SelfBackupWiringDeps, "prisma" | "kek" | "destinationId" | "audit">,
 ): Promise<SelfBackupContext> {
   // Unscoped by design: this is instance-level configuration, named by an operator with server
   // env access, and the deployment has no "current organization" at scheduler time.
@@ -100,6 +104,11 @@ export async function resolveSelfBackupContext(
     deps.kek,
     destination.organizationId,
     deps.destinationId,
+    {
+      audit: deps.audit,
+      purpose: "self-backup: upload this deployment's metadata dump",
+      correlationId: `self-backup:${deps.destinationId}`,
+    },
   );
   if (resolved === null) throw new Error("self-backup destination could not be opened");
 

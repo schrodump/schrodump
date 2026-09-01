@@ -305,7 +305,7 @@ describe("runVerify org-scoping guard", () => {
     } = fakePrisma({
       organizationId: "org-other",
     });
-    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), env });
+    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, env });
     const job: ClaimedJob = {
       id: "job-1",
       organizationId: "org-mine",

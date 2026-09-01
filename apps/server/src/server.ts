@@ -21,6 +21,8 @@ import { betterAuthResolver, createAuth, parseTrustedProxies } from "./auth/auth
 import { bootstrap } from "./bootstrap/bootstrap.js";
 import { createBootstrapDeps, createSetupDeps } from "./bootstrap/wiring.js";
 import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
+import { createCredentialAuditSink } from "./observability/audit.js";
+import type { CredentialAuditSink } from "./crypto/credential-access.js";
 import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
 import { createLogger, newCorrelationId } from "./observability/pino.js";
@@ -35,10 +37,15 @@ function deriveAuthSecret(kek: Buffer): string {
 async function destinationCanary(
   prisma: PrismaClient,
   kek: Buffer,
+  audit: CredentialAuditSink,
   organizationId: string,
   destinationId: string,
 ): Promise<{ ok: boolean; failedOperation: string | null }> {
-  const target = await driverForDestination(prisma, kek, organizationId, destinationId);
+  const target = await driverForDestination(prisma, kek, organizationId, destinationId, {
+    audit,
+    purpose: "canary: exercise put/get/delete against the destination",
+    correlationId: `canary:${destinationId}`,
+  });
   if (target === null) return { ok: false, failedOperation: null };
   const health = await target.driver.canary();
   return { ok: health.ok, failedOperation: health.failedOperation };
@@ -47,10 +54,15 @@ async function destinationCanary(
 async function runRebuild(
   prisma: PrismaClient,
   kek: Buffer,
+  audit: CredentialAuditSink,
   organizationId: string,
   destinationId: string,
 ): Promise<{ scanned: number; imported: string[]; skipped: string[] }> {
-  const target = await driverForDestination(prisma, kek, organizationId, destinationId);
+  const target = await driverForDestination(prisma, kek, organizationId, destinationId, {
+    audit,
+    purpose: "catalog rebuild: scan the destination for manifests",
+    correlationId: `rebuild:${destinationId}`,
+  });
   if (target === null) return { scanned: 0, imported: [], skipped: [] };
   return rebuildCatalog(
     createCatalogRebuildPorts({
@@ -68,6 +80,9 @@ export async function main(): Promise<void> {
   const kek = kekBuffer(env.SCHRODUMP_KEK);
   const logger = createLogger(env.LOG_LEVEL);
   const prisma = createPrismaClient();
+  // Every credential decryption in this process is recorded through this sink. It is threaded
+  // rather than reached for globally so that a call site cannot decrypt without one.
+  const credentialAudit = createCredentialAuditSink(prisma, logger);
 
   // Fail the boot if the KEK differs from the one this instance was initialized with.
   await assertKekFingerprint(prisma, kek);
@@ -108,13 +123,13 @@ export async function main(): Promise<void> {
     targetStore: (organizationId) => prismaTargetStore(prisma, organizationId),
     destinationStore: (organizationId) => prismaDestinationStore(prisma, organizationId),
     destinationCanary: (organizationId, destinationId) =>
-      destinationCanary(prisma, kek, organizationId, destinationId),
+      destinationCanary(prisma, kek, credentialAudit, organizationId, destinationId),
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
     notificationChannelStore: (organizationId) =>
       prismaNotificationChannelStore(prisma, organizationId),
-    jobsService: createJobsService(prisma, kek),
+    jobsService: createJobsService(prisma, kek, credentialAudit),
     catalogRebuild: (organizationId, destinationId) =>
-      runRebuild(prisma, kek, organizationId, destinationId),
+      runRebuild(prisma, kek, credentialAudit, organizationId, destinationId),
     prisma,
     encryptionKeys: createEncryptionKeyService(prisma, kek),
     selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
@@ -148,7 +163,13 @@ export async function main(): Promise<void> {
   // print a spurious MaxListenersExceededWarning. This is one process-wide controller, not a leak.
   setMaxListeners(0, shutdownController.signal);
   const store = createWorkerStore(prisma, shutdownController.signal);
-  const executor = createJobExecutor({ prisma, kek, env, signal: shutdownController.signal });
+  const executor = createJobExecutor({
+    prisma,
+    kek,
+    audit: credentialAudit,
+    env,
+    signal: shutdownController.signal,
+  });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startLoop({
     intervalMs: env.WORKER_POLL_MS,
@@ -185,6 +206,7 @@ export async function main(): Promise<void> {
         await runNotifications({
           prisma,
           kek,
+          audit: credentialAudit,
           now: () => new Date(),
           fetch,
           smtp: defaultSmtpDeps,
@@ -223,6 +245,7 @@ export async function main(): Promise<void> {
           runScheduledSelfBackup({
             prisma,
             kek,
+            audit: credentialAudit,
             databaseUrl: env.DATABASE_URL,
             destinationId: selfBackupDestinationId,
             network: env.SCHRODUMP_SELF_BACKUP_NETWORK,

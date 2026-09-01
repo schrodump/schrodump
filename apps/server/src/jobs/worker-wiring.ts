@@ -30,7 +30,7 @@ import {
   resolveRecipients,
   type EncryptionKeyRecord,
 } from "../crypto/artifact.js";
-import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import { writeMongoConfig } from "../crypto/mongo-config.js";
 import type { Env } from "../env.js";
 import { createBackupPorts } from "./backup-wiring.js";
@@ -324,6 +324,9 @@ function toKeyRecord(row: {
 export interface JobExecutorDeps {
   prisma: PrismaClient;
   kek: Buffer;
+  // Every credential this executor decrypts is an art. 37 access, recorded here. Required, not
+  // optional: an executor that cannot record what it read should not be reading it.
+  audit: CredentialAuditSink;
   env: Env;
   // The shutdown signal (Task 4 constructs the real AbortController and passes it here). A
   // construction-time dependency, bound once and forwarded into every container-creating call this
@@ -397,6 +400,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       policy.destinationId,
+      { audit: deps.audit, purpose: "backup: upload the artifact to the destination bucket", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "backup destination unavailable");
@@ -410,10 +414,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     const connectDatabase = probeDatabaseFor(engine, scopedDatabases);
 
     // Decrypt the credential to USE it — hand it to the probe/driver. It never leaves this scope.
-    const password = decryptCredential(
-      deps.kek,
-      parseEncryptedCredential(target.encryptedCredential),
-    );
+    const password = readCredential(deps, target.encryptedCredential, {
+      organizationId: job.organizationId,
+      resource: "target",
+      resourceId: target.id,
+      purpose: "backup: connect to the target database to dump it",
+      correlationId: job.id,
+    });
 
     // The RICH probe runs here, outside the pipeline, so a probe failure is sanitized by the worker
     // (sanitizeReason) instead of being written verbatim into BackupJob.reason via the pipeline's
@@ -675,6 +682,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       artifact.destinationId,
+      { audit: deps.audit, purpose: "verify: download the artifact to check it", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "verify destination unavailable");
@@ -751,10 +759,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             where: { organizationId: job.organizationId, keyId },
           });
           if (keyRow === null || keyRow.encryptedIdentity === null) return "INCONCLUSIVE";
-          const ageIdentity = decryptCredential(
-            deps.kek,
-            parseEncryptedCredential(keyRow.encryptedIdentity),
-          );
+          const ageIdentity = readCredential(deps, keyRow.encryptedIdentity, {
+            organizationId: job.organizationId,
+            resource: "encryptionKey",
+            resourceId: keyRow.keyId,
+            purpose: "verify: decrypt the artifact for a full-restore check",
+            correlationId: job.id,
+          });
 
           // The RESTORE descriptors take an empty scope: verify restores the WHOLE artifact into a
           // fresh sandbox, never a sub-scope. Each engine's restore already knows where the data
@@ -955,6 +966,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       artifact.destinationId,
+      { audit: deps.audit, purpose: "restore: download the artifact to restore it", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "restore destination unavailable");
@@ -1012,10 +1024,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         let probe;
         try {
           // Decrypt the credential to USE it (probe the origin target), never to show it.
-          const password = decryptCredential(
-            deps.kek,
-            parseEncryptedCredential(originTarget.encryptedCredential),
-          );
+          const password = readCredential(deps, originTarget.encryptedCredential, {
+            organizationId: job.organizationId,
+            resource: "target",
+            resourceId: originTarget.id,
+            purpose: "verify: probe the origin target for its server version",
+            correlationId: job.id,
+          });
           probe = await PROBES[engine]({
             host: originTarget.host,
             port: originTarget.port,
@@ -1062,14 +1077,20 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           // this is a structural guard against a corrupt row, not an expected path.
           throw new Error("operational identity unavailable for the resolved key");
         }
-        const ageIdentity = decryptCredential(
-          deps.kek,
-          parseEncryptedCredential(keyRow.encryptedIdentity),
-        );
-        const password = decryptCredential(
-          deps.kek,
-          parseEncryptedCredential(originTarget.encryptedCredential),
-        );
+        const ageIdentity = readCredential(deps, keyRow.encryptedIdentity, {
+          organizationId: job.organizationId,
+          resource: "encryptionKey",
+          resourceId: keyRow.keyId,
+          purpose: "restore: decrypt the artifact before restoring it",
+          correlationId: job.id,
+        });
+        const password = readCredential(deps, originTarget.encryptedCredential, {
+          organizationId: job.organizationId,
+          resource: "target",
+          resourceId: originTarget.id,
+          purpose: "restore: connect to the target database to restore into it",
+          correlationId: job.id,
+        });
         const connection = connectionFor(password);
 
         return runRestorePipeline({
@@ -1181,6 +1202,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       policy.destinationId,
+      { audit: deps.audit, purpose: "retention: delete artifacts the policy no longer keeps", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "retention destination unavailable");

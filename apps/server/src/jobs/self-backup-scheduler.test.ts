@@ -49,6 +49,7 @@ function harness(opts: { lastSucceededAt?: Date; destination?: unknown; keys?: u
   const deps = {
     prisma: prisma as unknown as PrismaClient,
     kek: Buffer.alloc(32),
+    audit: { record: () => undefined },
     databaseUrl: "postgresql://u:p@db:5432/schrodump",
     destinationId: "dest-1",
     network: "schrodump_internal",

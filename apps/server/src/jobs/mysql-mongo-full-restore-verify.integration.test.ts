@@ -86,7 +86,11 @@ async function corruptArtifact(
   destinationId: string,
   bucketKey: string,
 ): Promise<void> {
-  const destination = await driverForDestination(prisma, kek, organizationId, destinationId);
+  const destination = await driverForDestination(prisma, kek, organizationId, destinationId, {
+    audit: { record: () => undefined },
+    purpose: "test setup: corrupt an artifact",
+    correlationId: "test",
+  });
   if (destination === null) throw new Error("test setup: destination unavailable for corruption");
   await destination.driver.put(bucketKey, Readable.from([Buffer.from("not an age archive")]), {
     contentType: "application/octet-stream",
@@ -293,7 +297,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
   });
 
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -323,7 +327,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
   }
 
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -611,7 +615,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
   });
 
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -641,7 +645,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
   }
 
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,

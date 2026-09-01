@@ -8,7 +8,7 @@
 
 import { cronEvaluator } from "../scheduler/wiring.js";
 import type { PrismaClient } from "../db.js";
-import { decryptCredential, parseEncryptedCredential } from "../crypto/envelope.js";
+import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import { evaluateNotifications, type DeliveredState, type FleetSnapshot } from "./evaluate.js";
 import { deliverEmail, type SmtpDeps } from "./smtp.js";
 import { deliverWebhook } from "./webhook.js";
@@ -16,6 +16,8 @@ import { deliverWebhook } from "./webhook.js";
 export interface NotificationDeps {
   prisma: PrismaClient;
   kek: Buffer;
+  // Every decryption below is an art. 37 access. See crypto/credential-access.ts.
+  audit: CredentialAuditSink;
   now: () => Date;
   fetch: typeof fetch;
   smtp: SmtpDeps;
@@ -130,10 +132,13 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
                 host: smtpHost,
                 port: smtpPort,
                 username: smtpUsername,
-                password: decryptCredential(
-                  deps.kek,
-                  parseEncryptedCredential(encryptedSmtpPassword),
-                ),
+                password: readCredential(deps, encryptedSmtpPassword, {
+                  organizationId: channel.organizationId,
+                  resource: "notificationChannel",
+                  resourceId: channel.id,
+                  purpose: "notification: authenticate to the SMTP relay",
+                  correlationId: `notify:${channel.id}`,
+                }),
                 from: fromAddress,
                 to: channel.toAddresses,
               },
@@ -148,7 +153,13 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
               { fetch: deps.fetch },
               {
                 url,
-                secret: decryptCredential(deps.kek, parseEncryptedCredential(encryptedSecret)),
+                secret: readCredential(deps, encryptedSecret, {
+                  organizationId: channel.organizationId,
+                  resource: "notificationChannel",
+                  resourceId: channel.id,
+                  purpose: "notification: sign the outgoing webhook",
+                  correlationId: `notify:${channel.id}`,
+                }),
               },
               notification,
             );
