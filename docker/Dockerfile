@@ -58,6 +58,24 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Prisma generates against this stage's platform, so the musl query engine is the one that ships.
 RUN pnpm -r build
 
+# sharp is an optional dependency of Next, for image optimisation. This UI renders no <Image> and
+# sets no `images` config, so it is never loaded — but Next traces it into the standalone output
+# anyway, and with it @img/sharp-libvips: 17 MB of the web runtime's 35 MB, and the standing image
+# -scanner complaint about this build (docs/roadmap.md listed it as shipped-but-never-loaded).
+#
+# Done here rather than with `outputFileTracingExcludes` in next.config.ts because that does not
+# cover it: Next special-cases sharp for the standalone server and copies it regardless of the
+# exclude globs. Tried, verified not to work, recorded so the next person does not repeat it.
+#
+# The container smoke test is the check on this, exactly as it is for the Prisma engine cuts below:
+# if the UI ever does need sharp, it fails on boot with a missing module rather than silently.
+RUN rm -rf /app/apps/web/.next/standalone/node_modules/.pnpm/sharp@* \
+           /app/apps/web/.next/standalone/node_modules/.pnpm/@img+* \
+           /app/apps/web/.next/standalone/node_modules/.pnpm/node_modules/sharp \
+           /app/apps/web/.next/standalone/node_modules/.pnpm/node_modules/@img && \
+    find /app/apps/web/.next/standalone -type d -name sharp -prune -exec rm -rf {} + && \
+    du -sh /app/apps/web/.next/standalone/node_modules
+
 # ---------------------------------------------------------------------------
 # prod-deps — the runtime dependency tree, installed from a clean store
 # ---------------------------------------------------------------------------
