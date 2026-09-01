@@ -135,10 +135,27 @@ discovers them during an incident.
 
 ### On image size
 
-The target was under 400 MB and it is not met. The floor for this stack is roughly 450 MB before
-any application code: Node on Alpine is ~170 MB, the Prisma client with its native query engine
-is ~90 MB, the Prisma CLI needed for `migrate deploy` is ~115 MB, and the Next standalone output
-is ~40 MB.
+The target was under 400 MB and it is not met. These are measured, not estimated — `docker history`
+and `du` inside the built `linux/arm64` image on 2026-09-01:
+
+| Layer / tree                                    | Size    |
+| ----------------------------------------------- | ------- |
+| Node runtime layer + Alpine rootfs               | ~165 MB |
+| `/app/server` (runtime dependency closure)       | 168 MB  |
+| `/app/prisma-cli` (for `migrate deploy`)         | 120 MB  |
+| `/app/web` (Next standalone + static)            | ~23 MB  |
+| Application code (`dist` of every package)       | ~3 MB   |
+
+So the two levers are Prisma's: the client inside `/app/server` is 50 MB on its own, and the CLI is
+another 120 MB — 170 MB, 28% of the image, to apply migrations at boot and talk to PostgreSQL.
+
+Also measured, and deliberately left alone: roughly 20 MB of transitive weight this process never
+loads. `@opentelemetry/semantic-conventions` (12 MB) arrives through better-auth's telemetry,
+`@grpc/grpc-js` and `protobufjs` (8 MB) through dockerode, which reaches the Docker daemon over
+HTTP on the socket and not over gRPC. Both are declared runtime dependencies of packages that are
+themselves loaded, so `prune-store.mjs` keeps them, correctly — deleting them is a bet against two
+libraries' internals, and the subsystems it would break on a wrong guess are authentication and the
+container runner. 3% of the image is not worth that; the note is here so nobody re-measures it.
 
 The build already prunes what it can — the dependency tree is reduced to the runtime closure
 (~600 MB removed), Prisma's WASM engines for database vendors Schrodump does not use are deleted,
