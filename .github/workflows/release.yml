@@ -21,7 +21,39 @@ permissions:
   id-token: write # keyless signing via OIDC
 
 jobs:
+  # Nothing published from here was verified before this job existed: release.yml triggers on a tag
+  # and had no `needs:`, so `git tag v1.0.0 && git push --tags` on a commit whose CI had failed —
+  # or had not finished — produced a signed, attested, SBOM'd image of broken code, carrying
+  # provenance that says it is official. The image IS the product here; the two minutes are cheap.
+  #
+  # This deliberately re-runs rather than querying the tagged commit's check runs. A gate that
+  # trusts a green tick from another workflow is a gate that trusts whatever that workflow was when
+  # it ran, which is not necessarily what it is now.
+  verify:
+    name: verify the tagged commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      - run: pnpm build
+
   image:
+    needs: verify
     name: build, sign and publish
     runs-on: ubuntu-latest
     outputs:
@@ -150,6 +182,7 @@ jobs:
           files: schrodump-${{ steps.version.outputs.version }}.spdx.json
 
   executors:
+    needs: verify
     name: publish executor images
     runs-on: ubuntu-latest
     # The server resolves this by name at backup time (schrodump/mydumper:1), so a release that ships

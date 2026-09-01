@@ -74,6 +74,26 @@ relicense, and a CLA is friction that turns a one-line fix into a legal review. 
 Linux kernel, GitLab and Docker use, and it is enough for what this project actually needs:
 a record that each contributor had the right to contribute what they sent.
 
+## Cutting a release
+
+Releases are tags. `release.yml` triggers on `v*`, re-runs the full gate on the tagged commit, and
+only then builds, signs and publishes — a tag on a commit whose CI failed must not become a signed
+image.
+
+```sh
+git tag -a v0.1.0-rc.1 -m "v0.1.0-rc.1"
+git push origin v0.1.0-rc.1
+```
+
+`latest` moves only when the tag parses as exactly `X.Y.Z`, so a `-rc.N` publishes to
+`ghcr.io/schrodump/schrodump:0.1.0-rc.1` and `schrodump/schrodump:0.1.0-rc.1` without becoming the
+tag `compose.yaml` pulls by default. Cut a release candidate first: the pipeline signs with cosign,
+attaches an SBOM and publishes the executor images, and none of that has an opportunity to be wrong
+until a tag exists.
+
+It needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, alongside the
+`GITHUB_TOKEN` that GHCR uses. Without them the Docker Hub login fails and nothing publishes.
+
 ## Reporting security issues
 
 Do **not** open a public issue for security problems. Follow the process in
