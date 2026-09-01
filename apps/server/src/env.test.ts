@@ -47,3 +47,30 @@ describe("loadEnv worker config", () => {
     expect(env.SCHRODUMP_MAX_CONCURRENT_STAGED).toBe(1);
   });
 });
+
+describe("SCHRODUMP_ADMIN_PASSWORD floor", () => {
+  const base = {
+    DATABASE_URL: "postgresql://x",
+    SCHRODUMP_KEK: "kek",
+  };
+
+  // The bootstrap admin is the account with every permission in the deployment, provisioned from a
+  // value that sits in .env and shows up in `docker inspect`. Eight characters was Better-Auth's
+  // default; twelve is the floor the rotation form already asks for, and the two must agree or the
+  // form is a suggestion rather than a control.
+  it("refuses a password below the server's own minimum", () => {
+    expect(() => loadEnv({ ...base, SCHRODUMP_ADMIN_PASSWORD: "short11chars" .slice(0, 11) })).toThrow();
+  });
+
+  it("accepts one at the floor", () => {
+    expect(loadEnv({ ...base, SCHRODUMP_ADMIN_PASSWORD: "twelvechars1" }).SCHRODUMP_ADMIN_PASSWORD).toBe(
+      "twelvechars1",
+    );
+  });
+
+  // Absent is not the same as invalid: leaving it out is how an operator opts into the one-time
+  // setup link instead, and that path must keep working.
+  it("still allows it to be absent entirely", () => {
+    expect(loadEnv(base).SCHRODUMP_ADMIN_PASSWORD).toBeUndefined();
+  });
+});
