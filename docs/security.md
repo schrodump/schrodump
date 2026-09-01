@@ -75,19 +75,23 @@ Schrodump sweeps abandoned scratch directories at boot and periodically.
 > drain that outlasts the grace budget anyway — still bypasses this: the process exits immediately
 > and the directory survives, in clear, until the next sweep.
 
-> **Verified 2026-08-30, and here is exactly what was verified.** A backup was run against a real
-> PostgreSQL origin (4M rows of incompressible data) through a real Docker executor onto real
-> S3-compatible storage, in `STAGED` mode so the dump really was writing a cleartext directory to
-> the scratch volume. The shutdown signal was tripped 2.5s into the dump. Result: the scratch
-> directory existed while the dump ran and was **gone** afterwards, **no** executor container
-> remained on the daemon, and the job row read `FAILED` with reason `run aborted by shutdown`.
-> Cleanup finished in under two seconds, well inside the grace.
+> **Verified 2026-09-01 against the packaged image, with a real `docker stop`.** A backup was run
+> against a real PostgreSQL origin (6M rows of incompressible data) in `STAGED` mode, so the dump
+> was genuinely writing a cleartext directory to the scratch volume — the check waited for that
+> directory to be _growing_, not merely to exist, because `pg_dump -Fd` creates its table of
+> contents within the first second and stopping there tests nothing. Then `docker stop`.
 >
-> Two things that check did NOT cover, stated so nobody reads more into it than it earned. The
-> signal was tripped **in process**, not by `docker stop` on the packaged image, so the delivery leg
-> — `dumb-init` → `entrypoint.sh` → the Node process — is not covered here (it predates this
-> handler and was already working). And the wall clock of a real `docker stop` against the shipped
-> image was not measured; only that the cleanup fits the internal grace with room to spare.
+> Result: no executor container left on the daemon, the scratch directory **gone**, the job row
+> `FAILED` with reason `run aborted by shutdown`, and `docker stop` returned in **0.52s** — no
+> `SIGKILL` needed. All four of the design's success criteria, including the signal-delivery leg
+> (`dumb-init` → `entrypoint.sh` → Node) that an in-process check cannot cover.
+>
+> That leg is exactly where a defect was found. Before this run, one `docker stop` reached the
+> server as **two** SIGTERMs — dumb-init broadcasting to the process group, and `entrypoint.sh`
+> forwarding it again — and the handler, registered with `process.once`, died on the second one
+> mid-cleanup. The executor was orphaned, the cleartext scratch survived, and the job stayed
+> `RUNNING`. Measured both ways on the same build: a single signal completed the shutdown in 86ms;
+> two never completed it at all.
 
 ## The KEK belongs somewhere else
 

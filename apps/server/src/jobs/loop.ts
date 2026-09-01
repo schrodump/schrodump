@@ -38,14 +38,33 @@ export interface ShutdownHandlers {
   onSignal(): Promise<void> | void;
 }
 
-// Installs SIGTERM/SIGINT once. The handler stops claiming and releases resources before exit.
-export function installShutdown(handlers: ShutdownHandlers): void {
+// Installs SIGTERM/SIGINT. The handler stops claiming and releases resources before exit.
+//
+// `on`, NOT `once`, and the guard is what makes the difference. One `docker stop` delivers SIGTERM
+// to this process TWICE: dumb-init broadcasts to the process group, and entrypoint.sh forwards it
+// explicitly to each child. With `once`, the second arrival finds no listener and Node's default
+// action terminates the process mid-cleanup — the executor container is orphaned, the cleartext
+// scratch directory survives, and the job stays RUNNING until boot recovery. Measured against the
+// built image: one signal completes the shutdown in 86ms; two never complete it at all.
+//
+// The escalation path is unchanged in practice. Repeated SIGTERM is now ignored while the first is
+// unwinding, but `docker stop` escalates to SIGKILL after its grace period, and SIGKILL cannot be
+// handled by anything — that is the real escalation, and it always was.
+//
+// `exit` is injectable so the duplicate-signal behaviour can be tested without the test runner
+// exiting. It is not a production seam.
+export function installShutdown(
+  handlers: ShutdownHandlers,
+  exit: () => void = () => process.exit(0),
+): void {
   let shuttingDown = false;
   const handle = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    Promise.resolve(handlers.onSignal()).finally(() => process.exit(0));
+    // `.finally`, so a shutdown sequence that rejects still exits: hanging until SIGKILL for a
+    // reason nobody can see is worse than exiting with the work half-done.
+    Promise.resolve(handlers.onSignal()).finally(exit);
   };
-  process.once("SIGTERM", handle);
-  process.once("SIGINT", handle);
+  process.on("SIGTERM", handle);
+  process.on("SIGINT", handle);
 }
