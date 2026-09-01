@@ -146,6 +146,22 @@ link de setup.
 - **O resolver lê a flag da linha do `User`, não da sessão.** A sessão é cunhada no sign-in e
   continuaria dizendo "rotação pendente" pelo resto da vida dela depois da senha já trocada.
 
+## Listagens são limitadas, contadores não
+
+- **`GET /jobs` e `GET /artifacts` retornam no máximo `LIST_PAGE_SIZE` (200) linhas**, mais recentes
+  primeiro, e mandam `total` junto. Vinte policies diárias com verify encadeado escrevem ~40 linhas
+  de job por dia — ~15 mil por ano — e a tabela de artefato cresce com o que a retenção GFS guardar.
+  Endpoint de lista sem limite degrada em silêncio por um ano e depois para de servir.
+- **`counts` vem de um `groupBy` sobre a tabela inteira, NUNCA de `items`.** O painel lidera com "N
+  backups não observados"; derivar esse número de uma página truncada o reportaria para baixo — e
+  esse é o único número que este produto não pode arredondar. Truncar a lista é decisão de
+  renderização; truncar esse contador seria mentira.
+- **`countByState` foi removido do `apps/web`, não só deixado sem uso.** A função existia para
+  derivar contador de array, que agora é ativamente errado.
+- **O `take` mora no `wiring.ts`, e os testes de rota fazem stub do serviço inteiro** — então
+  `wiring.test.ts` assere a forma da query com um fake que passa pelo wrapper real do
+  `scopedPrisma`, o que de quebra prova que o filtro de `organizationId` continua aplicado.
+
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
 - **STAGED funciona nos dois sentidos, e três coisas precisaram entrar juntas.** O diretório de

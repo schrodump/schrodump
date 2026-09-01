@@ -281,4 +281,5 @@ export const ptBR: Record<MessageKey, string> = {
   "rotate.mismatch": "As duas senhas não conferem.",
   "rotate.tooShort": "Use pelo menos 12 caracteres.",
   "rotate.failed": "A senha não foi trocada. Confira a senha atual e tente de novo.",
+  "list.truncated": "Mostrando os {shown} mais recentes de {total}.",
 };

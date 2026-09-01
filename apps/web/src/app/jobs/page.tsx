@@ -48,7 +48,7 @@ export default function JobsPage() {
   const [filter, setFilter] = useState<JobState | "ALL">("ALL");
 
   const visible = useMemo(
-    () => (jobs.data ?? []).filter((job) => filter === "ALL" || job.state === filter),
+    () => (jobs.data?.items ?? []).filter((job) => filter === "ALL" || job.state === filter),
     [jobs.data, filter],
   );
 

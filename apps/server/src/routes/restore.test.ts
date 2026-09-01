@@ -9,8 +9,9 @@ import type { JobsService } from "./jobs.js";
 
 function serviceWith(enqueueRestore = vi.fn(() => Promise.resolve("job-r"))): JobsService {
   return {
-    listJobs: () => Promise.resolve([]),
-    listArtifacts: () => Promise.resolve([]),
+    listJobs: () => Promise.resolve({ items: [], total: 0 }),
+    listArtifacts: () =>
+    Promise.resolve({ items: [], total: 0, counts: { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 } }),
     enqueueBackup: () => Promise.resolve("b"),
     enqueueVerify: () => Promise.resolve("v"),
     enqueueRestore,

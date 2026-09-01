@@ -280,6 +280,7 @@ export const en = {
   "rotate.mismatch": "The two passwords do not match.",
   "rotate.tooShort": "Use at least 12 characters.",
   "rotate.failed": "The password was not changed. Check the current password and try again.",
+  "list.truncated": "Showing the {shown} most recent of {total}.",
 } as const;
 
 export type MessageKey = keyof typeof en;

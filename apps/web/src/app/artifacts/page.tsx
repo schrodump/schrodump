@@ -63,12 +63,22 @@ export default function ArtifactsPage() {
           <LoadingState />
         ) : artifacts.isError ? (
           <ErrorState message={artifacts.error.message} onRetry={() => void artifacts.refetch()} />
-        ) : artifacts.data.length === 0 ? (
+        ) : artifacts.data.items.length === 0 ? (
           <EmptyState message={t("artifacts.empty")} />
         ) : (
-          artifacts.data.map((artifact) => (
-            <ArtifactRow key={artifact.id} artifact={artifact} role={role} />
-          ))
+          <>
+            {artifacts.data.items.map((artifact) => (
+              <ArtifactRow key={artifact.id} artifact={artifact} role={role} />
+            ))}
+            {artifacts.data.total > artifacts.data.items.length ? (
+              <p className="pt-2 text-sm text-muted-foreground">
+                {t("list.truncated", {
+                  shown: artifacts.data.items.length,
+                  total: artifacts.data.total,
+                })}
+              </p>
+            ) : null}
+          </>
         )}
       </div>
     </AppShell>

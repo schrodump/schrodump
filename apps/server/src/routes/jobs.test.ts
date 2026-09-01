@@ -4,12 +4,12 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
-import { jobsRoutes, type JobsService } from "./jobs.js";
+import { jobsRoutes, LIST_PAGE_SIZE, type JobsService } from "./jobs.js";
 
 const service: JobsService = {
-  listJobs: () => Promise.resolve([{ id: "j1" }]),
+  listJobs: () => Promise.resolve({ items: [{ id: "j1" }], total: 1 }),
   listArtifacts: () =>
-    Promise.resolve([
+    Promise.resolve({ counts: { VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 }, total: 1, items: [
       {
         id: "a1",
         jobId: "j1",
@@ -29,7 +29,7 @@ const service: JobsService = {
         dependsOn: [],
         createdAt: new Date("2026-07-01T00:00:00.000Z"),
       },
-    ]),
+    ] }),
   enqueueBackup: () => Promise.resolve("job-b"),
   enqueueVerify: () => Promise.resolve("job-v"),
   enqueueRestore: () => Promise.resolve("job-r"),
@@ -66,6 +66,32 @@ describe("jobs routes", () => {
     const res = await app.inject({ method: "POST", url: "/policies/p1/backup" });
     expect(res.statusCode).toBe(202);
     expect(JSON.parse(res.body)).toEqual({ jobId: "job-b" });
+    await app.close();
+  });
+});
+
+describe("list bounds", () => {
+  it("caps both lists at a page size small enough to render", () => {
+    // A deployment running twenty policies daily, each chaining a verify, writes ~40 job rows a day.
+    // The cap is what keeps a three-year-old install's dashboard from fetching fifty thousand rows.
+    expect(LIST_PAGE_SIZE).toBeLessThanOrEqual(500);
+    expect(LIST_PAGE_SIZE).toBeGreaterThan(0);
+  });
+
+  it("sends the artifact counts and total alongside the page", async () => {
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "GET", url: "/artifacts" });
+    const body = JSON.parse(res.body) as {
+      items: unknown[];
+      total: number;
+      counts: Record<string, number>;
+    };
+    // The counts must be their own field, not something the client can only get by counting items.
+    // A truncated page would understate the unobserved total, which is the number the dashboard
+    // leads with — the one figure this product must never round down.
+    expect(body.counts).toEqual({ VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 });
+    expect(body.total).toBe(1);
+    expect(Array.isArray(body.items)).toBe(true);
     await app.close();
   });
 });

@@ -10,7 +10,7 @@ import { StateCounters } from "@/components/state-counters";
 import { Card, CardContent } from "@/components/ui/card";
 import { useArtifacts, useJobs } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
-import { countByState, type Job } from "@/lib/types";
+import type { Job } from "@/lib/types";
 
 function RecentJobs({ jobs }: { jobs: Job[] }) {
   const t = useT();
@@ -44,7 +44,8 @@ export default function DashboardPage() {
         ) : artifacts.isError ? (
           <ErrorState message={artifacts.error.message} onRetry={() => void artifacts.refetch()} />
         ) : (
-          <StateCounters counts={countByState(artifacts.data)} />
+          // Straight from the server: computed over the whole table, not the returned page.
+          <StateCounters counts={artifacts.data.counts} />
         )}
       </section>
 
@@ -58,10 +59,10 @@ export default function DashboardPage() {
           </Card>
         ) : jobs.isError ? (
           <ErrorState message={jobs.error.message} onRetry={() => void jobs.refetch()} />
-        ) : jobs.data.length === 0 ? (
+        ) : jobs.data.items.length === 0 ? (
           <EmptyState message={t("dashboard.noJobs")} />
         ) : (
-          <RecentJobs jobs={jobs.data.slice(0, 10)} />
+          <RecentJobs jobs={jobs.data.items.slice(0, 10)} />
         )}
       </section>
     </AppShell>
