@@ -10,6 +10,7 @@ import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
 import { startLoop, installShutdown } from "./jobs/loop.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
+import { defaultSmtpDeps } from "./notifications/smtp.js";
 import { runNotifications } from "./notifications/wiring.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
@@ -159,6 +160,7 @@ export async function main(): Promise<void> {
           kek,
           now: () => new Date(),
           fetch,
+          smtp: defaultSmtpDeps,
           log: logger,
           minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
         }).catch((err) => {
