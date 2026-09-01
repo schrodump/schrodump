@@ -24,7 +24,12 @@ import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient }
 import { loadEnv } from "./env.js";
 import { createLogger, newCorrelationId } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
-import { createJobsService, prismaDestinationStore, prismaPolicyStore } from "./routes/wiring.js";
+import {
+  createJobsService,
+  prismaDestinationStore,
+  prismaNotificationChannelStore,
+  prismaPolicyStore,
+} from "./routes/wiring.js";
 
 // A stable per-instance auth secret derived from the KEK when none is configured explicitly.
 function deriveAuthSecret(kek: Buffer): string {
@@ -88,6 +93,8 @@ export async function main(): Promise<void> {
     destinationCanary: (organizationId, destinationId) =>
       destinationCanary(prisma, kek, organizationId, destinationId),
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
+    notificationChannelStore: (organizationId) =>
+      prismaNotificationChannelStore(prisma, organizationId),
     jobsService: createJobsService(prisma, kek),
     catalogRebuild: (organizationId, destinationId) =>
       runRebuild(prisma, kek, organizationId, destinationId),

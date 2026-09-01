@@ -9,6 +9,7 @@ import { newCorrelationId } from "./observability/pino.js";
 import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js";
 import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
+import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { restoreRoutes } from "./routes/restore.js";
 import { sessionRoutes } from "./routes/session.js";
@@ -27,6 +28,7 @@ export interface AppDeps {
     destinationId: string,
   ): Promise<{ ok: boolean; failedOperation: string | null }>;
   policyStore(organizationId: string): PolicyStore;
+  notificationChannelStore(organizationId: string): ChannelStore;
   jobsService: JobsService;
   catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
   kek: Buffer;
@@ -85,6 +87,14 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     policyRoutes({ resolver: deps.resolver, store: deps.policyStore })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    notificationRoutes({
+      resolver: deps.resolver,
+      kek: deps.kek,
+      store: deps.notificationChannelStore,
+    })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {
