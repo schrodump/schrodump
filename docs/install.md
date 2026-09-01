@@ -341,6 +341,30 @@ be a claim nobody had checked.
 > way to turn it green is to do step 1 through 4 above on a spare host — which is the same thing
 > this product says about every other backup it takes.
 
+### Scratch must be a host path, not a named volume
+
+`SCRATCH_HOST_PATH` (default `/var/lib/schrodump/scratch`) is bind-mounted into the container **at
+the same absolute path**, and that is load-bearing rather than tidy.
+
+Executors mount files out of scratch — the decrypted artifact for a restore, the staging directory
+for a STAGED dump, the `--config` file mongo's password travels in — and the bind source of those
+mounts is resolved by the **Docker daemon, on the host**. A named volume mounted at `/scratch`
+hands the daemon a path that exists only inside Schrodump's own container, and it answers:
+
+```
+mounts denied: The path /scratch/... is not shared from the host and is not known to Docker
+```
+
+STREAM backups keep working, because nothing is mounted for them — the dump goes out on stdout. So
+the failure looks like "backups fine, verify broken", which is the worst possible shape for this
+product: artifacts accumulating that nothing can ever check. Verified end to end on a composed
+stack; with the path matched, a backup and its chained `FULL_RESTORE` verify both succeed and the
+artifact reaches `VERIFIED`.
+
+If you point `SCRATCH_HOST_PATH` somewhere else, it must be a path the Docker daemon can see, and
+it must be mounted at that same path inside the container. It holds dumps in clear while a job
+runs — put it on an encrypted filesystem.
+
 ### Reaching your databases
 
 Executors join the network named by `EXECUTOR_NETWORK`. If your databases run in Docker on the
@@ -349,7 +373,7 @@ them — the executor inherits the host's connectivity, not the server container
 
 ### Scratch
 
-`STAGED` backups write the dump to `/scratch` before uploading it. **While a job runs, that
+`STAGED` backups write the dump to the scratch directory before uploading it. **While a job runs, that
 directory holds your data in clear** — the compression and encryption happen on the way out. Give
 it a dedicated volume on an encrypted filesystem. This is the operator's job, not Schrodump's;
 [security.md](security.md#scratch-holds-your-data-in-clear) explains why.

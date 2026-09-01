@@ -73,13 +73,13 @@ a host takeover, not a service compromise.
 
 ## Scratch holds your data in clear
 
-`STAGED` backups write the dump to `/scratch` first, then compress, then encrypt, then upload.
+`STAGED` backups write the dump to the scratch directory first, then compress, then encrypt, then upload.
 The order is deliberate — you cannot compress ciphertext — and the consequence is that **while a
-job runs, `/scratch` contains an unencrypted copy of your database**.
+job runs, the scratch directory contains an unencrypted copy of your database**.
 
 Your responsibilities:
 
-- Put `/scratch` on a **dedicated volume**, not shared with anything else.
+- Put the scratch directory on a **dedicated volume**, not shared with anything else.
 - Put that volume on an **encrypted filesystem**. Schrodump cannot do this for you; encryption at
   rest is a property of the host's storage, and a process cannot encrypt the disk it is writing to.
 - Size it with `SCRATCH_MAX_BYTES` so a runaway dump fills a volume instead of the host's root
