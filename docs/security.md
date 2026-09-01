@@ -177,6 +177,38 @@ server never generates a private half at all.
 Losing the escrow identity is unrecoverable, and it is the failure that only shows up on the day it
 matters. Store it the way you store the KEK: off this host, in a place that survives it.
 
+## Rotating a key, and what rotation does not do
+
+An admin can retire either key and issue its successor from **Settings → Encryption keys**, or with
+`POST /encryption-keys/rotate`. Nothing is re-encrypted and nothing moves: the predecessor is marked
+retired, not deleted, and every artifact already written stays readable through it. Restore resolves
+its key from the artifact's own manifest rather than from current configuration, which is what makes
+that safe — and the read paths never filtered on key state, deliberately, since before this
+operation existed.
+
+**Rotation is not remediation for a key that leaked.** This is the part worth reading twice. Every
+artifact already in the bucket is still sealed to the outgoing recipient, and whoever holds the
+outgoing identity can still open all of them. Rotating changes what the *next* backup is sealed to
+and nothing else. If a key was exposed, the artifacts written under it are exposed too: re-take
+those backups, or delete them. The API says this on every rotation, success included, rather than
+answering with an id and letting a green screen imply the incident is closed.
+
+The two keys differ in what rotation leaves you holding:
+
+| Key           | After rotation                                                                       |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `operational` | Nothing to do. The outgoing identity stays in the row, KEK-wrapped, and the server keeps opening older artifacts on its own. |
+| `escrow`      | **Keep the outgoing identity.** The server never held it, and it is the only thing that can open self-backups and artifacts written before the rotation. |
+
+So escrow identities accumulate: rotating escrow three times means three identities you must keep,
+each one the sole key to the artifacts written in its era. Rotate escrow when you have a reason,
+not on a schedule.
+
+Rotation refuses in two states, both with `409`. A type with **no** active key needs provisioning,
+not rotation — answering otherwise would hide that the organization never had one. A type with
+**two** active keys means the recipient resolver has been choosing by row order, and picking one to
+retire would be guessing which one it had been choosing; that state needs a human, not a default.
+
 ## Sealed mode: real custody separation
 
 A destination can be marked **operational** or **sealed**.

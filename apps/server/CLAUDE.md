@@ -271,7 +271,39 @@ seconds. The bucket key depends on `advanced.ipAddress.trustedProxies` — see
   artifact nobody can open.
 - **409, not 400, when an active key of that type already exists.** Two active operational keys
   would make `resolveRecipients`' `find` pick by row order — a decision nobody made. Rotation is a
-  separate operation and does not exist yet.
+  separate operation, on its own route (below).
+
+## Key rotation (`POST /encryption-keys/rotate`, `crypto/key-rotation.ts`)
+
+- **Nothing is re-encrypted and nothing moves.** Every read path already queried
+  `encryptionKey` *without* filtering on state — the comment "ALL keys (active + retired): an
+  artifact may have been encrypted with a now-retired key" predates this route. Rotation changes
+  which key the NEXT backup seals to; existing artifacts stay readable through the key they were
+  written with, resolved from the **manifest** by `resolveDecryptionKeyId`.
+- **The predecessor is retired, never deleted, and `encryptedIdentity` is left untouched.** Clearing
+  it would make every artifact sealed to that key unopenable by the server — a routine rotation
+  turned into silent, unrecoverable data loss that surfaces only at the next restore. The
+  integration test seals a payload *before* rotating and opens it *after*, from the retired row;
+  adding `encryptedIdentity: null` to the retire step reddens it.
+- **One type at a time, and both halves in one `$transaction`.** Retiring and creating must not
+  interleave: a window with zero active keys fails every backup, and a window with two makes
+  `resolveRecipients`' `find` pick by row order.
+- **409 for both blockers.** `not_provisioned` — rotation succeeds an existing key; an organization
+  with none needs provisioning, and answering with a rotation would hide that it never had one.
+  `ambiguous_active` — two active keys of a type means `find` has been choosing by row order, and
+  picking one to retire would be guessing which one it had been choosing.
+- **The response always carries `consequences`, success included, and says what rotation did NOT
+  do.** Rotating an exposed key protects future backups only: every artifact already written stays
+  sealed to the outgoing recipient, and whoever holds the leaked identity still opens all of them.
+  A rotation that answered with an id alone would read as "exposure handled". It is not — the
+  remedy for exposure is re-taking or deleting those artifacts, and the API says so.
+- **Escrow rotation puts an obligation on the operator; operational rotation does not.** The server
+  never held the outgoing escrow identity, so it is the only thing that can open self-backups and
+  artifacts written before the rotation. `operatorMustRetain` carries that sentence; for operational
+  it is null, because the outgoing identity stays in the row.
+- **An operational key is always server-generated** — the server must hold the identity to verify
+  and restore, so there is no operator-supplied variant. Escrow mirrors provisioning
+  (`generate` | `recipient`), validated by age itself, bech32 checksum included.
 
 ## Bootstrap and the setup link (`bootstrap/`)
 

@@ -54,6 +54,23 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
 - **The session is a cookie**, never localStorage. Only the language preference goes to
   localStorage.
 
+## Key rotation is friction, and a retired key is not clutter
+
+- **The confirmation exists to be read, not clicked.** Rotating is cheap and easy to misread: the
+  dangerous belief is that rotating a leaked key closes the leak. It does not — every artifact
+  already written stays sealed to the outgoing key. The confirm button is dead until the
+  acknowledgement is ticked, and a test proves it by asserting no request went out first.
+- **The post-rotation notice is the server's sentence, not a local paraphrase.** What the operator
+  must retain (`consequences.operatorMustRetain`) is a property of the rotation the API decided; a
+  translated copy here would drift from it the first time the rule changed.
+- **A retired key is labelled, kept visible, and has no rotate button.** It is what opens every
+  artifact written before the rotation. Listing it without saying so invites an operator to read
+  the extra row as clutter to tidy away — and there is no delete, precisely because there must not
+  be. Active keys sort first.
+- **Escrow rotation offers "bring your own recipient" exactly like provisioning does.** An operator
+  who keeps age identities offline must not be pushed onto a server-generated key just because they
+  are replacing one.
+
 ## The guided setup starts with keys, and not by taste
 
 `guided-setup.tsx` puts encryption keys first because until an active escrow key exists every
