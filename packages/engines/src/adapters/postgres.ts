@@ -96,6 +96,26 @@ export const postgresAdapter: EngineAdapter = {
     const connection = input.connection;
     const schemaArgs =
       input.target === "SCHEMA" ? input.scope.schemas.flatMap((schema) => ["-n", schema]) : [];
+    // -t is what confines --clean below to the requested tables. Without it a TABLE restore ran
+    // --clean over the WHOLE dump: every table in the database dropped and replaced to write one
+    // of them, which is why the capability was withdrawn. The two are one decision, not two flags.
+    //
+    // Refusing an empty selection is the other half. The only widening available is "every table",
+    // which is the opposite of what was asked for and destroys data outside it.
+    const tableArgs =
+      input.target === "TABLE"
+        ? (() => {
+            const tables = input.scope.tables ?? [];
+            if (tables.length === 0) {
+              throw new EngineDescriptorError(
+                "POSTGRES_RESTORE_TABLE_REQUIRED",
+                "a TABLE restore must name at least one table; without one --clean would drop " +
+                  "every table in the database",
+              );
+            }
+            return tables.flatMap((table) => ["-t", table]);
+          })()
+        : [];
     const command = [
       "pg_restore",
       ...connArgs(connection),
@@ -109,6 +129,7 @@ export const postgresAdapter: EngineAdapter = {
       // Safe with --clean --if-exists (the DROPs don't error on absent objects).
       "--exit-on-error",
       ...schemaArgs,
+      ...tableArgs,
     ];
     if (input.sourcePath !== undefined) {
       command.push(input.sourcePath);

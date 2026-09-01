@@ -57,13 +57,18 @@ describe("artifactBelongsToOrg", () => {
 
 describe("restoreScopeOf", () => {
   it("parses a full scope and defaults missing arrays to empty", () => {
-    expect(restoreScopeOf({ databases: ["app"], schemas: ["public"], collections: [] })).toEqual({
-      databases: ["app"],
-      schemas: ["public"],
+    expect(
+      restoreScopeOf({ databases: ["app"], schemas: ["public"], collections: [], tables: ["t"] }),
+    ).toEqual({ databases: ["app"], schemas: ["public"], collections: [], tables: ["t"] });
+    // A legitimately unscoped target (full instance) is valid, not a failure. `tables` defaults
+    // like its siblings — and a TABLE restore that arrives with it empty is refused by the
+    // descriptor rather than widened to every table.
+    expect(restoreScopeOf({})).toEqual({
+      databases: [],
+      schemas: [],
       collections: [],
+      tables: [],
     });
-    // A legitimately unscoped target (full instance) is valid, not a failure.
-    expect(restoreScopeOf({})).toEqual({ databases: [], schemas: [], collections: [] });
   });
 
   it("fails LOUD on a malformed scope instead of degrading to empty", () => {

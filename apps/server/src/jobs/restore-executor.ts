@@ -78,6 +78,7 @@ const RestoreScopeSchema = z.object({
   databases: z.array(z.string()).default([]),
   schemas: z.array(z.string()).default([]),
   collections: z.array(z.string()).default([]),
+  tables: z.array(z.string()).default([]),
 });
 
 export type RestoreScope = z.infer<typeof RestoreScopeSchema>;

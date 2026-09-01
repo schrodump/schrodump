@@ -30,6 +30,10 @@ export interface DumpScope {
   readonly databases: string[];
   readonly schemas: string[];
   readonly collections: string[];
+  // Optional, unlike its siblings: most scopes have no table dimension, and making it required
+  // would touch every scope literal in the workspace to say `tables: []`. A TABLE restore that
+  // finds it absent or empty is REFUSED rather than widened — see postgres buildRestore.
+  readonly tables?: string[];
 }
 
 // Facts discovered by the probe that change how a dump must be built.
