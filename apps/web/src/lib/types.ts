@@ -94,11 +94,10 @@ export interface Policy {
   enabled: boolean;
 }
 
-export function countByState(artifacts: Artifact[]): Record<ArtifactState, number> {
-  const counts: Record<ArtifactState, number> = { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 };
-  for (const artifact of artifacts) counts[artifact.state] += 1;
-  return counts;
-}
+// countByState used to live here, deriving the dashboard's counters from the fetched array. It is
+// deliberately gone rather than left unused: the artifact list is now capped server-side, so any
+// count derived from it would understate the unobserved total — the one number this product leads
+// with. GET /artifacts returns `counts` computed over the whole table; use that.
 
 // Mirrors the server's ChannelRecord minus the secrets, which the API never returns. lastFailure
 // is present on purpose: a notifier nobody can tell is broken is worse than having none, so the
@@ -136,4 +135,20 @@ export interface SelfBackup {
 export interface SelfBackupList {
   configured: boolean;
   items: SelfBackup[];
+}
+
+// Both list endpoints are capped server-side. `total` is what the row count actually is, so the UI
+// can say it is showing the newest N of M instead of implying it showed everything.
+export interface JobList {
+  items: Job[];
+  total: number;
+}
+
+// `counts` is computed across the whole table, NOT from `items`. The dashboard's primary number is
+// "N unobserved backups"; deriving it from a truncated page would understate the open questions,
+// which is the one number this product must never round down.
+export interface ArtifactList {
+  items: Artifact[];
+  total: number;
+  counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
 }

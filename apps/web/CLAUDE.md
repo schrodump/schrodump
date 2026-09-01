@@ -30,6 +30,11 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   desabilita mais por modo de execução. A regra de desabilitar-com-motivo em vez de esconder segue
   valendo para o que continua recusado — escopo que a engine não suporta, e mongo fora de
   `FULL_CLUSTER`.
+- **Contador do painel vem do servidor, nunca de `.length`.** `GET /artifacts` devolve
+  `{ items, total, counts }`; `items` é capado em 200 e `counts` é calculado sobre a tabela inteira.
+  Contar `items` reportaria menos backups não observados do que existem, que é exatamente o número
+  que a tese proíbe arredondar. Quando a lista está truncada, a tela diz (`list.truncated`) em vez
+  de deixar implícito que mostrou tudo.
 - **Verify desligado numa policy é aviso persistente**, não toast.
 - **Canal de notificação mostra a última falha de entrega.** Um notificador que parou de entregar é
   idêntico a um saudável se a interface não disser — e o ponto de gravar a falha era exatamente

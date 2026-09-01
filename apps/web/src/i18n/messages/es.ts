@@ -286,4 +286,5 @@ export const es: Record<MessageKey, string> = {
   "rotate.mismatch": "Las dos contraseñas no coinciden.",
   "rotate.tooShort": "Usa al menos 12 caracteres.",
   "rotate.failed": "La contraseña no se cambió. Revisa la contraseña actual e inténtalo de nuevo.",
+  "list.truncated": "Mostrando los {shown} más recientes de {total}.",
 };

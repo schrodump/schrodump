@@ -18,6 +18,7 @@ import {
 import type { DestinationStore } from "./destinations.js";
 import type { ChannelStore } from "./notifications.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
+import { LIST_PAGE_SIZE } from "./jobs.js";
 import type { ArtifactRecord, JobsService } from "./jobs.js";
 
 export function prismaDestinationStore(
@@ -277,14 +278,30 @@ export function createJobsService(prisma: PrismaClient, kek: Buffer): JobsServic
     return job.id;
   };
   return {
-    listJobs: (organizationId) =>
-      scopedPrisma(prisma, organizationId).backupJob.findMany({ orderBy: { createdAt: "desc" } }),
-    listArtifacts: async (organizationId) =>
-      (
-        await scopedPrisma(prisma, organizationId).artifact.findMany({
-          orderBy: { createdAt: "desc" },
-        })
-      ).map(toArtifactRecord),
+    listJobs: async (organizationId) => {
+      const db = scopedPrisma(prisma, organizationId);
+      const [items, total] = await Promise.all([
+        db.backupJob.findMany({ orderBy: { createdAt: "desc" }, take: LIST_PAGE_SIZE }),
+        db.backupJob.count(),
+      ]);
+      return { items, total };
+    },
+    // The counts come from a groupBy over the WHOLE table, never from `items`. A dashboard that
+    // counted the returned page would report "3 unobserved backups" on a deployment with four
+    // hundred of them the moment the list got capped — and the unobserved count is the number this
+    // entire product leads with. Truncating the list is a rendering decision; truncating that
+    // number would be a lie.
+    listArtifacts: async (organizationId) => {
+      const db = scopedPrisma(prisma, organizationId);
+      const [rows, total, grouped] = await Promise.all([
+        db.artifact.findMany({ orderBy: { createdAt: "desc" }, take: LIST_PAGE_SIZE }),
+        db.artifact.count(),
+        db.artifact.groupBy({ by: ["state"], _count: { _all: true } }),
+      ]);
+      const counts = { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 };
+      for (const group of grouped) counts[group.state] = group._count._all;
+      return { items: rows.map(toArtifactRecord), total, counts };
+    },
     // Real dispatch (probe / descriptor / runner composition) is handled by the worker that picks
     // up the PENDING job; here we only enqueue it.
     enqueueBackup: (organizationId, policyId) => enqueue(organizationId, "BACKUP", { policyId }),

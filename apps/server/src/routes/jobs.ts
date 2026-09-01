@@ -32,9 +32,31 @@ export interface ArtifactRecord {
   createdAt: Date;
 }
 
+// Both lists are capped. A deployment running twenty policies daily, each chaining a verify,
+// writes about forty job rows a day — fifteen thousand a year — and the artifact table grows with
+// whatever GFS retention keeps. An unbounded list endpoint degrades quietly for a year and then
+// stops being usable, which is the worst shape a capacity problem can take.
+//
+// `total` is sent so the UI can say it is showing the newest N of M rather than implying it has
+// shown everything. Silence about truncation is the same class of dishonesty this product exists to
+// refuse elsewhere.
+export const LIST_PAGE_SIZE = 200;
+
+export interface JobListDTO {
+  items: unknown[];
+  total: number;
+}
+
+export interface ArtifactListDTO {
+  items: ArtifactRecord[];
+  total: number;
+  // Computed across the WHOLE table, not the returned page. See the wiring for why.
+  counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
+}
+
 export interface JobsService {
-  listJobs(organizationId: string): Promise<unknown[]>;
-  listArtifacts(organizationId: string): Promise<ArtifactRecord[]>;
+  listJobs(organizationId: string): Promise<JobListDTO>;
+  listArtifacts(organizationId: string): Promise<ArtifactListDTO>;
   // Enqueue a manual BACKUP job for a policy; returns the jobId.
   enqueueBackup(organizationId: string, policyId: string): Promise<string>;
   // Enqueue a VERIFY job for an artifact.

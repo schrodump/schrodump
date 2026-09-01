@@ -3,14 +3,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Artifact, Destination, Job, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
+import type { ArtifactList, Destination, JobList, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
 
 export function useArtifacts() {
-  return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<Artifact[]>("/artifacts") });
+  return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<ArtifactList>("/artifacts") });
 }
 
 export function useJobs() {
-  return useQuery({ queryKey: ["jobs"], queryFn: () => api.get<Job[]>("/jobs") });
+  return useQuery({ queryKey: ["jobs"], queryFn: () => api.get<JobList>("/jobs") });
 }
 
 export function useTargets() {
