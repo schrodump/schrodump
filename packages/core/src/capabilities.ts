@@ -67,9 +67,13 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
     // sub-scope here is precisely what made that reachable. They return together with --nsInclude
     // scoping; until then, refusing is the same call already made for STAGED restore.
     supportedRestoreTargets: ["FULL_CLUSTER"],
-    // --archive is a stream.
-    // TODO: validar --numParallelCollections vs --archive na doc oficial do MongoDB
-    // Database Tools antes de subir maxParallelism acima de 1.
+    // --archive is a stream, and parallelism stays at 1 until someone proves it is safe on top of
+    // one. mongodump accepts --numParallelCollections alongside --archive, but "accepts" is not the
+    // claim that matters: what has to be shown is that an archive written by parallel collection
+    // workers restores completely, and the failure it would hide is a silently short archive —
+    // exactly the class of defect this product exists to catch. Raising it is a feature, gated on
+    // an integration test that dumps in parallel and asserts every collection came back, not on
+    // reading the flag's documentation.
     maxParallelism: 1,
     streamCapable: true,
     stagedCapable: false,
