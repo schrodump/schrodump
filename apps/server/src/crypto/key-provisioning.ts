@@ -32,7 +32,7 @@ export type ProvisioningBlocker = "operational" | "escrow";
 // keys would make resolveRecipients' `find` pick by row order, which is not a decision anyone made.
 //
 // Rotation — retiring a key and issuing its successor while old artifacts stay readable — is a
-// separate operation with its own rules, and deliberately not smuggled in here.
+// separate operation with its own rules, and deliberately not smuggled in here. See key-rotation.ts.
 export function provisioningBlockers(existing: EncryptionKeyRecord[]): ProvisioningBlocker[] {
   const active = existing.filter((key) => key.state === "active");
   const blockers: ProvisioningBlocker[] = [];

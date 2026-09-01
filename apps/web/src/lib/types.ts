@@ -173,3 +173,22 @@ export interface ProvisionedKeys {
   escrowIdentity: string | null;
   escrowIdentityWarning: string | null;
 }
+
+// What a rotation did and — the half that matters — what it did not. The server sends this on
+// every rotation, success included, because a response carrying only an id would read as
+// "exposure handled" and rotation does not handle exposure of artifacts already written.
+export interface RotationConsequences {
+  existingArtifactsUnchanged: boolean;
+  predecessorReadableByServer: boolean;
+  operatorMustRetain: string | null;
+  doesNotRemediateExposure: string;
+}
+
+export interface RotatedKey {
+  type: "operational" | "escrow";
+  retiredKeyId: string;
+  newKeyId: string;
+  escrowIdentity: string | null;
+  escrowIdentityWarning: string | null;
+  consequences: RotationConsequences;
+}

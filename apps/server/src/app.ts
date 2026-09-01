@@ -37,7 +37,7 @@ export interface AppDeps {
   jobsService: JobsService;
   catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
   prisma: PrismaClient;
-  encryptionKeys: Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision">;
+  encryptionKeys: Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision" | "rotate">;
   // Null when self-backup is unconfigured; surfaced by GET /self-backups so the UI can distinguish
   // "not configured" from "configured and never ran".
   selfBackupDestinationId: string | null;

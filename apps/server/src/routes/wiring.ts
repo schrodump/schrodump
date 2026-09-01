@@ -386,7 +386,7 @@ export function prismaNotificationChannelStore(
 export function createEncryptionKeyService(
   prisma: PrismaClient,
   kek: Buffer,
-): Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision"> {
+): Pick<EncryptionKeyRoutesDeps, "list" | "existing" | "provision" | "rotate"> {
   return {
     list: async (organizationId) =>
       (
@@ -451,6 +451,58 @@ export function createEncryptionKeyService(
         operationalKeyId: operational.keyId,
         escrowKeyId,
         escrowIdentity: generatedEscrow?.identity ?? null,
+      };
+    },
+
+    rotate: async (organizationId, request) => {
+      const db = scopedPrisma(prisma, organizationId);
+      const outgoing = await db.encryptionKey.findFirst({
+        where: { type: request.type, state: "active" },
+      });
+      // The route checked rotationBlockers first; this is the race, not the validation. Two
+      // rotations of the same key at once must not both succeed and leave two active successors.
+      if (outgoing === null) throw new Error(`no active ${request.type} key to rotate`);
+
+      const generated =
+        request.type === "operational" || request.escrow.mode === "generate"
+          ? await generateAgeKeyPair()
+          : null;
+      const recipient =
+        generated?.recipient ??
+        (request as { escrow: { publicRecipient: string } }).escrow.publicRecipient;
+      const keyId = generated?.keyId ?? recipientFingerprint(recipient);
+
+      await prisma.$transaction([
+        // The predecessor is RETIRED, never deleted, and `encryptedIdentity` is deliberately left
+        // untouched. Clearing it here would make every artifact sealed to this key unopenable by
+        // the server — turning a routine rotation into silent, unrecoverable data loss that would
+        // only surface at the next restore.
+        prisma.encryptionKey.updateMany({
+          where: { organizationId, keyId: outgoing.keyId, state: "active" },
+          data: { state: "retired", retiredAt: new Date() },
+        }),
+        prisma.encryptionKey.create({
+          data: {
+            organizationId,
+            keyId,
+            type: request.type,
+            publicRecipient: recipient,
+            // Same asymmetry as provisioning: the server holds an operational identity and never
+            // an escrow one.
+            ...(request.type === "operational" && generated !== null
+              ? { encryptedIdentity: encryptCredential(kek, generated.identity) }
+              : {}),
+            state: "active",
+          },
+        }),
+      ]);
+
+      return {
+        retiredKeyId: outgoing.keyId,
+        newKeyId: keyId,
+        // Only ever the escrow identity, and only when this server generated it. An operational
+        // identity is never returned — the server keeps it and nobody needs to copy it down.
+        escrowIdentity: request.type === "escrow" ? (generated?.identity ?? null) : null,
       };
     },
   };
