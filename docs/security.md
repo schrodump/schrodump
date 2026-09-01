@@ -135,8 +135,14 @@ Set it to the CIDRs of the hops that are actually in front of the server, and co
 to **overwrite** `X-Forwarded-For` with the address it observed rather than appending to whatever
 the client sent. Appending preserves the attacker's chosen prefix.
 
-Rate limiting is a cost multiplier on guessing, not a substitute for a strong password. It does not
-protect a deployment whose admin password is `admin`.
+Passwords have a **server-side floor of 12 characters**, enforced on sign-up and on
+change-password — not a client-side hint the API would accept around. Length is the only property
+worth enforcing: composition rules push people toward predictable substitutions, and length is what
+actually costs a guesser. `SCHRODUMP_ADMIN_PASSWORD` is checked against the same floor at boot, so a
+short one is a legible startup failure naming the variable rather than a confusing auth error later.
+
+Rate limiting is a cost multiplier on guessing, not a substitute for a strong password. Twelve
+characters of `passwordpassword` is still `passwordpassword`.
 
 ## The KEK belongs somewhere else
 

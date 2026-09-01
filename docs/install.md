@@ -84,7 +84,9 @@ Open it and create the administrator. The token is single-use and expires; once 
 exists, `/setup` closes permanently and account recovery moves to the CLI.
 
 If you prefer to provision without touching the browser, set `SCHRODUMP_ADMIN_EMAIL` and
-`SCHRODUMP_ADMIN_PASSWORD` in `.env` before the first start.
+`SCHRODUMP_ADMIN_PASSWORD` in `.env` before the first start. The password must be at least 12
+characters — the same floor the server enforces on every password — and a shorter one fails the
+boot with a message naming the variable rather than starting with a weak admin.
 
 ## 5. First verified backup
 

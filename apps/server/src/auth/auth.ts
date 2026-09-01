@@ -39,7 +39,15 @@ export interface AuthOptions {
 export function createAuth(prisma: PrismaClient, opts: AuthOptions) {
   return betterAuth({
     database: prismaAdapter(prisma, { provider: "postgresql" }),
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      // Better-Auth's default floor is 8. This is the SERVER's floor, enforced on sign-up and on
+      // change-password, so the 12 the rotation form asks for is a control rather than a suggestion
+      // a client can skip. Length is the only property worth enforcing here: composition rules push
+      // people toward predictable substitutions, and a length floor is what actually costs a
+      // guesser. It still does not save a deployment whose admin password is "passwordpassword".
+      minPasswordLength: 12,
+    },
     secret: opts.secret,
     baseURL: opts.baseURL,
     rateLimit: {

@@ -9,7 +9,13 @@ const EnvSchema = z.object({
   SCHRODUMP_KEK: z.string().min(1),
   SCHRODUMP_URL: z.string().default("http://localhost:8080"),
   SCHRODUMP_ADMIN_EMAIL: z.email().optional(),
-  SCHRODUMP_ADMIN_PASSWORD: z.string().min(1).optional(),
+  // Matches the server's minPasswordLength (auth.ts). Checked here so a too-short value is a
+  // legible boot failure naming the variable, rather than a Better-Auth error surfacing from
+  // whatever the bootstrap happened to be doing.
+  SCHRODUMP_ADMIN_PASSWORD: z
+    .string()
+    .min(12, "SCHRODUMP_ADMIN_PASSWORD must be at least 12 characters")
+    .optional(),
   BETTER_AUTH_SECRET: z.string().min(1).optional(),
   PORT: z.coerce.number().int().default(8080),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
