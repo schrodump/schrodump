@@ -133,6 +133,14 @@ jobs:
       # test could reach a real one.
       #
       # The engine images are overridable by environment, which is what the edges step below uses.
+      # The `age` CLI, for the interop test in apps/server/src/crypto. It asserts that an artifact
+      # this server writes opens with the STANDARD binary — the tool an operator actually has on the
+      # day the metadata database is gone. Every other crypto test decrypts with the same library
+      # that encrypted, which proves self-consistency and nothing about that day. The test skips
+      # silently without the binary, so it has to be installed here to be worth having.
+      - name: Install the age CLI
+        run: sudo apt-get update && sudo apt-get install -y age
+
       - name: Integration tests
         env:
           SCHRODUMP_TEST_INTEGRATION: "1"

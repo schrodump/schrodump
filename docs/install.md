@@ -318,6 +318,24 @@ What neither drill can cover is your own topology — that your reverse proxy, y
 spare host before you need it.** That is the step that turns a self-backup from written into
 verified, and nothing in CI can do it for you.
 
+`scripts/rehearse-recovery.sh` is that rehearsal, and it deliberately uses nothing from Schrodump —
+`aws`, `age`, `gunzip`, `pg_restore`. On the day you need this, Schrodump is the thing that is gone,
+and a procedure that depends on it is not a procedure:
+
+```sh
+scripts/rehearse-recovery.sh \
+  --bucket my-backups --sidecar schrodump/self-backup/<id>/self-backup.json \
+  --identity ./escrow.key \
+  --into 'postgresql://postgres:postgres@127.0.0.1:5433/rehearsal'
+```
+
+It is read-only against the bucket, refuses to write into a database that already holds tables,
+verifies the sidecar checksum before decrypting, deletes the cleartext dump on every exit path, and
+finishes by counting the organizations, targets and artifacts it recovered. That the artifact opens
+with the plain `age` binary at all is itself asserted in CI
+(`apps/server/src/crypto/age-cli-interop.integration.test.ts`) — otherwise these instructions would
+be a claim nobody had checked.
+
 > A self-backup that says **Written** is amber in the UI, not green, and that is not an
 > oversight. It means a `pg_dump` exited without complaining and nobody has restored it. The one
 > way to turn it green is to do step 1 through 4 above on a spare host — which is the same thing
