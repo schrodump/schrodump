@@ -22,7 +22,8 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
 - `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — `scopedPrisma`;
   `data/patch.ts` — the shared `PATCH` semantics.
 - `notifications/` — a pure evaluator plus webhook and SMTP delivery (below).
-- `observability/` — `pino.ts` (logging with redaction) and `audit.ts` (the art. 37 trail, below).
+- `observability/` — `pino.ts` (logging with redaction), `audit.ts` (the art. 37 trail, below) and
+  `health.ts` (`GET /health`, below).
 - `bootstrap/` — first-boot admin creation and the setup-token flow.
 
 ## Invariants
@@ -146,6 +147,23 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   is not an option; going quiet is not one either, which is the lesson of the file.
 - **Known gap: `credential.read` is not recorded.** Decryption happens inside job execution across
   several call sites. That is written down in `docs/lgpd.md` rather than partially implemented.
+
+## `GET /health` (`observability/health.ts`)
+
+- **It asks PostgreSQL; it does not assert.** The endpoint used to return a hardcoded
+  `{ status: "ok" }`, and the Dockerfile `HEALTHCHECK` polled it every 30s — so a deployment whose
+  metadata database had gone away reported HEALTHY while every job failed. Being up was the only
+  thing it ever checked, which is the exact reasoning this product rejects everywhere else.
+- **It reports, it does not act.** Docker's `restart` policy reacts to a container *exiting*, not
+  to health status, so an unhealthy container keeps running and the state is merely visible. That
+  is the behaviour we want: killing the process because PostgreSQL blipped would abort an in-flight
+  backup — and leave the cleartext scratch directory the shutdown handler would have removed.
+- **The probe budget (`HEALTH_TIMEOUT_MS`, 2s) is below the Dockerfile's own 5s timeout**, so a
+  wedged database is reported by us with a reason rather than by `wget` giving up with none. A test
+  asserts that ordering, because the two numbers live in different files.
+- **Failure is logged as a driver code, never as the driver's prose** (it reuses `driverCodeOf`
+  from `probe/test-connection.ts`), and the 503 body names the dependency and nothing else. The
+  route is unauthenticated, and a Prisma connection error spells out host, port and user.
 
 ## Notifications (`notifications/`)
 
