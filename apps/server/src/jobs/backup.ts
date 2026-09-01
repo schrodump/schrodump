@@ -15,6 +15,9 @@ export interface ProbeResult {
 
 export interface Capabilities {
   stagedCapable: boolean;
+  // The engine's ceiling on parallel dump workers. Read here so a policy cannot ask for more
+  // connections against a customer's database than the engine is declared to support.
+  maxParallelism: number;
   requiresSeparateGlobalsDump: boolean;
 }
 
@@ -98,6 +101,7 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
         ? { stagedThresholdBytes: ctx.stagedThresholdBytes }
         : {}),
       stagedCapable: caps.stagedCapable,
+      maxParallelism: caps.maxParallelism,
     });
     // Unreachable while STAGED is disabled (resolveExecutionMode explains why). Kept, not deleted:
     // the directory pipeline that re-enables STAGED needs exactly this reserve/release lifecycle.

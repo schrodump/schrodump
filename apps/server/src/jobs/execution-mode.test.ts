@@ -10,6 +10,7 @@ const base: ExecutionModeInput = {
   estimatedBytes: 0,
   stagedThresholdBytes: 1000,
   stagedCapable: true,
+  maxParallelism: 8,
 };
 
 describe("resolveExecutionMode", () => {
@@ -54,6 +55,7 @@ describe("resolveExecutionMode", () => {
         requestedParallelism: base.requestedParallelism,
         scratchConfigured: base.scratchConfigured,
         stagedCapable: base.stagedCapable,
+        maxParallelism: base.maxParallelism,
         estimatedBytes: 1_000_000_000_000,
       }).mode,
     ).toBe("STREAM");
@@ -67,5 +69,54 @@ describe("resolveExecutionMode", () => {
     });
     expect(decision.mode).toBe("STREAM");
     expect(decision.parallelism).toBe(1);
+  });
+});
+
+// The capability matrix declares maxParallelism per engine — 8 for the SQL engines, 1 for mongo —
+// and nothing read it. The policy schema is `min(1)` with no upper bound, so the requested value
+// reached pg_dump -j unchanged: a policy asking for 500 opened 500 connections against the
+// customer's production database. A backup tool taking its own target down is the failure this
+// clamp exists to prevent.
+describe("resolveExecutionMode — the engine's parallelism ceiling", () => {
+  it("clamps a request above the engine's maximum, and says so", () => {
+    const decision = resolveExecutionMode({
+      ...base,
+      requestedParallelism: 500,
+      maxParallelism: 8,
+    });
+
+    expect(decision.mode).toBe("STAGED");
+    expect(decision.parallelism).toBe(8);
+    // A warning rather than a refusal: the backup should still run, and the operator should learn
+    // that the number they chose is not the number being used.
+    expect(decision.warnings).toEqual([
+      "parallelism reduced to 8: the highest this engine supports",
+    ]);
+  });
+
+  it("leaves a request at or below the ceiling untouched", () => {
+    for (const requested of [2, 8]) {
+      const decision = resolveExecutionMode({ ...base, requestedParallelism: requested, maxParallelism: 8 });
+      expect(decision.parallelism).toBe(requested);
+      expect(decision.warnings).toEqual([]);
+    }
+  });
+
+  it("keeps the not-staged-capable rule ahead of the ceiling", () => {
+    // mongo declares maxParallelism 1 AND stagedCapable false. The existing rule already forces
+    // STREAM at 1, and it must keep winning — a clamp warning there would describe a degradation
+    // that is not the one that happened.
+    const decision = resolveExecutionMode({
+      ...base,
+      requestedParallelism: 4,
+      maxParallelism: 1,
+      stagedCapable: false,
+    });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.parallelism).toBe(1);
+    expect(decision.warnings).toEqual([
+      "parallelism unavailable: this engine does not support staged parallel dumps",
+    ]);
   });
 });

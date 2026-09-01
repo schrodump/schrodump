@@ -63,7 +63,7 @@ function makeHarness(
     },
     capabilities: () => {
       calls.push("capabilities");
-      return caps ?? { stagedCapable: true, requiresSeparateGlobalsDump: false };
+      return caps ?? { stagedCapable: true, maxParallelism: 8, requiresSeparateGlobalsDump: false };
     },
     reserveScratch: () => {
       calls.push("reserveScratch");
@@ -128,7 +128,7 @@ describe("runBackupJob", () => {
   it("marks the job FAILED when a mid-pipeline step throws", async () => {
     const h = makeHarness(
       { executeAndUpload: () => Promise.reject(new Error("dump failed")) },
-      { stagedCapable: true, requiresSeparateGlobalsDump: false },
+      { stagedCapable: true, maxParallelism: 8, requiresSeparateGlobalsDump: false },
       { ...PROBE, estimatedBytes: 5000 },
     );
     const outcome = await runBackupJob({ ...CTX, stagedThresholdBytes: 1000 }, h.ports);
@@ -137,7 +137,7 @@ describe("runBackupJob", () => {
   });
 
   it("runs the postgres globals dump when the capability requires it", async () => {
-    const h = makeHarness({}, { stagedCapable: true, requiresSeparateGlobalsDump: true });
+    const h = makeHarness({}, { stagedCapable: true, maxParallelism: 8, requiresSeparateGlobalsDump: true });
     await runBackupJob(CTX, h.ports);
     expect(h.calls).toContain("executeGlobals");
   });

@@ -14,6 +14,12 @@ export interface ExecutionModeInput {
   stagedThresholdBytes?: number;
   // From the capability matrix: mongodb, for example, is not staged-capable.
   stagedCapable: boolean;
+  // Also from the capability matrix, and required rather than optional so a caller cannot decide
+  // parallelism without one. It was declared per engine (8 for the SQL engines, 1 for mongo) and
+  // read by nothing: the policy schema is min(1) with no upper bound, so the requested value
+  // reached `pg_dump -j` unchanged. A policy asking for 500 opened 500 connections against the
+  // customer's production database — a backup tool taking down the thing it exists to protect.
+  maxParallelism: number;
 }
 
 export interface ExecutionModeDecision {
@@ -25,7 +31,8 @@ export interface ExecutionModeDecision {
 
 // Precedence:
 //   0. engine not staged-capable       -> STREAM (parallelism 1)
-//   1. parallelism > 1 requested        -> STAGED (needs scratch); without scratch -> STREAM + warning
+//   1. parallelism > 1 requested        -> STAGED (needs scratch), clamped to the engine's
+//                                          maxParallelism; without scratch -> STREAM + warning
 //   2. otherwise                        -> STAGED above the size threshold, STREAM below
 // STAGED writes a DIRECTORY dump and the artifact pipeline moves a single stream. The bridge is
 // buildArchiveStaging: after the dump, a second run tars the staging directory to stdout and THAT
@@ -44,7 +51,15 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
 
   if (input.requestedParallelism > 1) {
     if (input.scratchConfigured) {
-      return { mode: "STAGED", parallelism: input.requestedParallelism, warnings: [] };
+      // Clamped, not refused: the backup should still run. But the operator has to learn that the
+      // number they chose is not the number being used, or the ceiling is invisible until someone
+      // wonders why a dump is no faster at 64 than at 8.
+      const parallelism = Math.min(input.requestedParallelism, input.maxParallelism);
+      const warnings =
+        parallelism < input.requestedParallelism
+          ? [`parallelism reduced to ${String(parallelism)}: the highest this engine supports`]
+          : [];
+      return { mode: "STAGED", parallelism, warnings };
     }
     return {
       mode: "STREAM",
