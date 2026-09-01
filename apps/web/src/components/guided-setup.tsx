@@ -48,7 +48,10 @@ export function GuidedSetup() {
       <CardContent>
         <ol className="space-y-3">
           {steps.map((step, index) => (
-            <li key={`${step.key}-${index}`} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <li
+              key={`${step.key}-${index}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1"
+            >
               <span
                 aria-hidden="true"
                 className={cn(
@@ -60,9 +63,13 @@ export function GuidedSetup() {
               >
                 {index + 1}
               </span>
-              <span className={step.done ? "text-muted-foreground line-through" : ""}>{t(step.key)}</span>
+              <span className={step.done ? "text-muted-foreground line-through" : ""}>
+                {t(step.key)}
+              </span>
               {step.done ? (
-                <span className="text-sm text-[var(--color-state-verified)]">{t("guided.done")}</span>
+                <span className="text-sm text-[var(--color-state-verified)]">
+                  {t("guided.done")}
+                </span>
               ) : (
                 <>
                   {step.manual ? (

@@ -96,7 +96,10 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
                   disabled={!isSupported}
                   onChange={() => setTarget(option)}
                 />
-                <Label htmlFor={`target-${option}`} className={isSupported ? "" : "text-muted-foreground"}>
+                <Label
+                  htmlFor={`target-${option}`}
+                  className={isSupported ? "" : "text-muted-foreground"}
+                >
                   {t(targetLabel[option])}
                 </Label>
                 {!isSupported ? (
@@ -132,7 +135,9 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
 
             {overExisting ? (
               <div className="space-y-1.5">
-                <p className="text-sm text-[var(--color-state-failed)]">{t("restore.confirmPrompt")}</p>
+                <p className="text-sm text-[var(--color-state-failed)]">
+                  {t("restore.confirmPrompt")}
+                </p>
                 <Label htmlFor="restore-confirm">{t("restore.confirmName")}</Label>
                 <Input
                   id="restore-confirm"
@@ -140,7 +145,9 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
                   onChange={(event) => setConfirmName(event.target.value)}
                 />
                 {confirmName.length > 0 && !nameMatches ? (
-                  <p className="text-sm text-[var(--color-state-failed)]">{t("restore.mismatch")}</p>
+                  <p className="text-sm text-[var(--color-state-failed)]">
+                    {t("restore.mismatch")}
+                  </p>
                 ) : null}
               </div>
             ) : null}

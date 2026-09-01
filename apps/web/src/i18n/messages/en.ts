@@ -13,6 +13,7 @@ export const en = {
   "nav.policies": "Policies",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artifacts",
+  "nav.notifications": "Notifications",
   "nav.settings": "Settings",
   "nav.signOut": "Sign out",
 
@@ -103,20 +104,25 @@ export const en = {
   "targets.probe.reason.UNREACHABLE": "Nothing answered at that host and port.",
   "targets.probe.reason.TIMEOUT": "The server did not answer in time.",
   "targets.probe.reason.AUTH_FAILED": "The server refused those credentials.",
-  "targets.probe.reason.INSUFFICIENT_PRIVILEGES": "The credentials are valid but lack the privileges the probe needs (MongoDB: listDatabases; PostgreSQL: read on the catalogue).",
+  "targets.probe.reason.INSUFFICIENT_PRIVILEGES":
+    "The credentials are valid but lack the privileges the probe needs (MongoDB: listDatabases; PostgreSQL: read on the catalogue).",
   "targets.probe.reason.TLS_FAILED": "TLS negotiation failed — check the Require TLS setting.",
   "targets.probe.reason.UNKNOWN": "The driver gave no code this recognises.",
   "targets.probe.driverCode": "Driver reported: {code}",
-  "targets.probe.limited": "Scope, estimated size and probe warnings need a richer server endpoint.",
+  "targets.probe.limited":
+    "Scope, estimated size and probe warnings need a richer server endpoint.",
   "targets.empty": "No targets yet. Add one to start backing it up.",
   "targets.url": "Connection URL",
-  "targets.url.hint": "Paste a connection URL to fill the fields below. It is never saved or sent — review the fields before creating the target.",
+  "targets.url.hint":
+    "Paste a connection URL to fill the fields below. It is never saved or sent — review the fields before creating the target.",
   "targets.url.fill": "Fill the fields",
   "targets.databases": "Databases to back up (comma-separated, empty means all)",
   "targets.url.error.malformed": "That is not a connection URL this can read.",
   "targets.url.error.unsupportedScheme": "Unsupported scheme: {scheme}",
-  "targets.url.error.srvUnsupported": "mongodb+srv cannot be used here: a target records an explicit host and port, and SRV only resolves them at connection time. Paste the address of the node to back up from.",
-  "targets.url.error.multipleHosts": "This URI lists more than one host. A target holds a single one — enter the node to back up from.",
+  "targets.url.error.srvUnsupported":
+    "mongodb+srv cannot be used here: a target records an explicit host and port, and SRV only resolves them at connection time. Paste the address of the node to back up from.",
+  "targets.url.error.multipleHosts":
+    "This URI lists more than one host. A target holds a single one — enter the node to back up from.",
 
   "destinations.title": "Storage destinations",
   "destinations.add": "Add destination",
@@ -158,9 +164,11 @@ export const en = {
   "executionMode.STREAM": "Stream",
   "executionMode.STAGED": "Staged",
   "policies.parallelism": "Parallelism",
-  "policies.parallelism.disabled": "Parallelism is unavailable: scratch is not configured on this deploy.",
+  "policies.parallelism.disabled":
+    "Parallelism is unavailable: scratch is not configured on this deploy.",
   "policies.verifyOff.title": "Verify is off for this policy",
-  "policies.verifyOff.description": "Backups from this policy are never verified — every artifact stays UNOBSERVED.",
+  "policies.verifyOff.description":
+    "Backups from this policy are never verified — every artifact stays UNOBSERVED.",
   "policies.trigger": "Run backup now",
   "policies.disabled": "disabled",
   "policies.enable": "Enable",
@@ -189,7 +197,8 @@ export const en = {
   "artifacts.empty": "No artifacts yet.",
 
   "restore.title": "Restore artifact",
-  "restore.description": "Restore is deliberate. Pick a scope — scopes this engine cannot restore are disabled.",
+  "restore.description":
+    "Restore is deliberate. Pick a scope — scopes this engine cannot restore are disabled.",
   "restore.scope": "Restore scope",
   "restore.unsupported": "Not supported for {engine}",
   "restore.targetDatabase": "Target database",
@@ -208,7 +217,8 @@ export const en = {
   "restoreTarget.COLLECTION": "Collection",
 
   "guided.title": "Get to your first verified backup",
-  "guided.description": "Five steps. Only the last one turns a backup from a question into an answer.",
+  "guided.description":
+    "Five steps. Only the last one turns a backup from a question into an answer.",
   "guided.step.destination": "Create a storage destination",
   "guided.step.canary": "Run the canary on that destination",
   "guided.step.target": "Create a database target",
@@ -220,11 +230,34 @@ export const en = {
 
   "settings.title": "Settings",
   "settings.keys": "Encryption keys",
-  "settings.keys.description": "Age recipients and the KEK fingerprint the server pins at first boot.",
+  "settings.keys.description":
+    "Age recipients and the KEK fingerprint the server pins at first boot.",
   "settings.members": "Members",
   "settings.members.description": "Organization members and their roles: admin, operator, viewer.",
   "settings.instance": "Instance",
   "settings.instance.description": "Scratch space, retention floor and runner configuration.",
+  "notifications.title": "Notification channels",
+  "notifications.subtitle":
+    "Where this organization's open questions get sent. The trigger is a change in what the fleet has and has not proven — never a job result.",
+  "notifications.empty": "No channels yet. Nothing is being sent.",
+  "notifications.kind": "Kind",
+  "notifications.kind.webhook": "Webhook",
+  "notifications.kind.smtp": "Email (SMTP)",
+  "notifications.url": "Webhook URL",
+  "notifications.secret": "Signing secret",
+  "notifications.secret.hint": "Signs every delivery. Stored encrypted and never shown again.",
+  "notifications.smtp.host": "SMTP host",
+  "notifications.smtp.port": "Port",
+  "notifications.smtp.username": "Username",
+  "notifications.smtp.password": "Password",
+  "notifications.from": "From address",
+  "notifications.to": "Recipients (one per line)",
+  "notifications.create": "Add channel",
+  "notifications.enable": "Enable",
+  "notifications.disable": "Disable",
+  "notifications.disabled": "Disabled",
+  "notifications.lastFailure": "Last delivery failed: {reason}",
+  "notifications.tls": "Email is always sent over TLS. This is not configurable.",
 } as const;
 
 export type MessageKey = keyof typeof en;

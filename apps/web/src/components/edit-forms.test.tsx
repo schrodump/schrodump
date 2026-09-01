@@ -73,7 +73,10 @@ function captureFetch(): { calls: Array<{ method: string; url: string; body: unk
         body: typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined,
       });
       return Promise.resolve(
-        new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } }),
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     }),
   );

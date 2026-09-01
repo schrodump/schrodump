@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { Artifact, Destination, Job, Policy, Target } from "@/lib/types";
+import type { Artifact, Destination, Job, NotificationChannel, Policy, Target } from "@/lib/types";
 
 export function useArtifacts() {
   return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<Artifact[]>("/artifacts") });
@@ -18,7 +18,17 @@ export function useTargets() {
 }
 
 export function useDestinations() {
-  return useQuery({ queryKey: ["destinations"], queryFn: () => api.get<Destination[]>("/destinations") });
+  return useQuery({
+    queryKey: ["destinations"],
+    queryFn: () => api.get<Destination[]>("/destinations"),
+  });
+}
+
+export function useNotificationChannels() {
+  return useQuery({
+    queryKey: ["notification-channels"],
+    queryFn: () => api.get<NotificationChannel[]>("/notification-channels"),
+  });
 }
 
 export function usePolicies() {

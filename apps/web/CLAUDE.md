@@ -31,6 +31,10 @@ API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretó
   valendo para o que continua recusado — escopo que a engine não suporta, e mongo fora de
   `FULL_CLUSTER`.
 - **Verify desligado numa policy é aviso persistente**, não toast.
+- **Canal de notificação mostra a última falha de entrega.** Um notificador que parou de entregar é
+  idêntico a um saudável se a interface não disser — e o ponto de gravar a falha era exatamente
+  esse. Desabilitar vem antes de apagar: apagar um canal que está registrando falhas joga fora a
+  única evidência de que ele estava falhando.
 - **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
   chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
   faltando quebra o typecheck. Adicionar locale: novo dicionário + entrada em `Locale`/`LOCALES`/

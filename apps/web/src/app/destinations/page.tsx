@@ -20,11 +20,18 @@ function Canary({ destinationId }: { destinationId: string }) {
   const failedOp = canary.data?.failedOperation ?? "?";
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button size="sm" variant="outline" onClick={() => canary.mutate(destinationId)} disabled={canary.isPending}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => canary.mutate(destinationId)}
+        disabled={canary.isPending}
+      >
         {canary.isPending ? t("common.loading") : t("destinations.canary")}
       </Button>
       {canary.isSuccess && canary.data.ok ? (
-        <span className="text-sm text-[var(--color-state-verified)]">{t("destinations.canary.ok")}</span>
+        <span className="text-sm text-[var(--color-state-verified)]">
+          {t("destinations.canary.ok")}
+        </span>
       ) : null}
       {canary.isSuccess && !canary.data.ok ? (
         <span className="text-sm text-[var(--color-state-failed)]">
@@ -61,7 +68,8 @@ function DestinationRow({ destination }: { destination: Destination }) {
             <p className="font-medium">{destination.name}</p>
             <p className="text-sm text-muted-foreground">
               {destination.bucket}
-              {destination.prefix ? `/${destination.prefix}` : ""} · {t(`sealMode.${destination.sealMode}`)}
+              {destination.prefix ? `/${destination.prefix}` : ""} ·{" "}
+              {t(`sealMode.${destination.sealMode}`)}
             </p>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -112,7 +120,10 @@ export default function DestinationsPage() {
         {destinations.isPending ? (
           <LoadingState />
         ) : destinations.isError ? (
-          <ErrorState message={destinations.error.message} onRetry={() => void destinations.refetch()} />
+          <ErrorState
+            message={destinations.error.message}
+            onRetry={() => void destinations.refetch()}
+          />
         ) : destinations.data.length === 0 ? (
           <EmptyState message={t("destinations.empty")} />
         ) : (

@@ -15,6 +15,7 @@ export const ptBR: Record<MessageKey, string> = {
   "nav.policies": "Políticas",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artefatos",
+  "nav.notifications": "Notificações",
   "nav.settings": "Configurações",
   "nav.signOut": "Sair",
 
@@ -105,20 +106,25 @@ export const ptBR: Record<MessageKey, string> = {
   "targets.probe.reason.UNREACHABLE": "Nada respondeu nesse host e porta.",
   "targets.probe.reason.TIMEOUT": "O servidor não respondeu a tempo.",
   "targets.probe.reason.AUTH_FAILED": "O servidor recusou essas credenciais.",
-  "targets.probe.reason.INSUFFICIENT_PRIVILEGES": "As credenciais são válidas, mas não têm os privilégios que o probe precisa (MongoDB: listDatabases; PostgreSQL: leitura do catálogo).",
+  "targets.probe.reason.INSUFFICIENT_PRIVILEGES":
+    "As credenciais são válidas, mas não têm os privilégios que o probe precisa (MongoDB: listDatabases; PostgreSQL: leitura do catálogo).",
   "targets.probe.reason.TLS_FAILED": "A negociação de TLS falhou — confira a opção Exigir TLS.",
   "targets.probe.reason.UNKNOWN": "O driver não devolveu um código que isto reconheça.",
   "targets.probe.driverCode": "O driver reportou: {code}",
-  "targets.probe.limited": "Escopo, tamanho estimado e avisos do probe precisam de um endpoint mais rico no servidor.",
+  "targets.probe.limited":
+    "Escopo, tamanho estimado e avisos do probe precisam de um endpoint mais rico no servidor.",
   "targets.empty": "Nenhum alvo ainda. Adicione um para começar a copiá-lo.",
   "targets.url": "URL de conexão",
-  "targets.url.hint": "Cole uma URL de conexão para preencher os campos abaixo. Ela nunca é salva nem enviada — revise os campos antes de criar o alvo.",
+  "targets.url.hint":
+    "Cole uma URL de conexão para preencher os campos abaixo. Ela nunca é salva nem enviada — revise os campos antes de criar o alvo.",
   "targets.url.fill": "Preencher os campos",
   "targets.databases": "Bancos a copiar (separados por vírgula, vazio significa todos)",
   "targets.url.error.malformed": "Isto não é uma URL de conexão que dê para ler.",
   "targets.url.error.unsupportedScheme": "Scheme não suportado: {scheme}",
-  "targets.url.error.srvUnsupported": "mongodb+srv não serve aqui: um alvo registra host e porta explícitos, e o SRV só os resolve na hora da conexão. Cole o endereço do nó de onde copiar.",
-  "targets.url.error.multipleHosts": "Esta URI lista mais de um host. Um alvo guarda um só — informe o nó de onde copiar.",
+  "targets.url.error.srvUnsupported":
+    "mongodb+srv não serve aqui: um alvo registra host e porta explícitos, e o SRV só os resolve na hora da conexão. Cole o endereço do nó de onde copiar.",
+  "targets.url.error.multipleHosts":
+    "Esta URI lista mais de um host. Um alvo guarda um só — informe o nó de onde copiar.",
 
   "destinations.title": "Destinos de armazenamento",
   "destinations.add": "Adicionar destino",
@@ -160,9 +166,11 @@ export const ptBR: Record<MessageKey, string> = {
   "executionMode.STREAM": "Stream",
   "executionMode.STAGED": "Staged",
   "policies.parallelism": "Paralelismo",
-  "policies.parallelism.disabled": "Paralelismo indisponível: scratch não está configurado neste deploy.",
+  "policies.parallelism.disabled":
+    "Paralelismo indisponível: scratch não está configurado neste deploy.",
   "policies.verifyOff.title": "Verify desligado nesta política",
-  "policies.verifyOff.description": "Os backups desta política nunca são verificados — todo artefato fica NÃO OBSERVADO.",
+  "policies.verifyOff.description":
+    "Os backups desta política nunca são verificados — todo artefato fica NÃO OBSERVADO.",
   "policies.trigger": "Rodar backup agora",
   "policies.disabled": "desativada",
   "policies.enable": "Ativar",
@@ -191,7 +199,8 @@ export const ptBR: Record<MessageKey, string> = {
   "artifacts.empty": "Nenhum artefato ainda.",
 
   "restore.title": "Restaurar artefato",
-  "restore.description": "Restore é deliberado. Escolha um escopo — os que esta engine não restaura ficam desabilitados.",
+  "restore.description":
+    "Restore é deliberado. Escolha um escopo — os que esta engine não restaura ficam desabilitados.",
   "restore.scope": "Escopo do restore",
   "restore.unsupported": "Não suportado para {engine}",
   "restore.targetDatabase": "Banco de destino",
@@ -222,9 +231,32 @@ export const ptBR: Record<MessageKey, string> = {
 
   "settings.title": "Configurações",
   "settings.keys": "Chaves de criptografia",
-  "settings.keys.description": "Recipients do age e o fingerprint da KEK que o servidor fixa no primeiro boot.",
+  "settings.keys.description":
+    "Recipients do age e o fingerprint da KEK que o servidor fixa no primeiro boot.",
   "settings.members": "Membros",
   "settings.members.description": "Membros da organização e seus papéis: admin, operator, viewer.",
   "settings.instance": "Instância",
   "settings.instance.description": "Scratch, piso de retenção e configuração do runner.",
+  "notifications.title": "Canais de notificação",
+  "notifications.subtitle":
+    "Para onde vão as perguntas em aberto desta organização. O gatilho é uma mudança no que a frota provou e não provou — nunca o resultado de um job.",
+  "notifications.empty": "Nenhum canal ainda. Nada está sendo enviado.",
+  "notifications.kind": "Tipo",
+  "notifications.kind.webhook": "Webhook",
+  "notifications.kind.smtp": "E-mail (SMTP)",
+  "notifications.url": "URL do webhook",
+  "notifications.secret": "Segredo de assinatura",
+  "notifications.secret.hint": "Assina cada entrega. Guardado cifrado e nunca mais exibido.",
+  "notifications.smtp.host": "Host SMTP",
+  "notifications.smtp.port": "Porta",
+  "notifications.smtp.username": "Usuário",
+  "notifications.smtp.password": "Senha",
+  "notifications.from": "Endereço remetente",
+  "notifications.to": "Destinatários (um por linha)",
+  "notifications.create": "Adicionar canal",
+  "notifications.enable": "Habilitar",
+  "notifications.disable": "Desabilitar",
+  "notifications.disabled": "Desabilitado",
+  "notifications.lastFailure": "Última entrega falhou: {reason}",
+  "notifications.tls": "E-mail é sempre enviado sobre TLS. Isso não é configurável.",
 };

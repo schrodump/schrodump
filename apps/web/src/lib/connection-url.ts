@@ -21,10 +21,7 @@ export interface ParsedConnection {
 }
 
 export type ParseFailureReason =
-  | "malformed"
-  | "unsupportedScheme"
-  | "srvUnsupported"
-  | "multipleHosts";
+  "malformed" | "unsupportedScheme" | "srvUnsupported" | "multipleHosts";
 
 export type ParseResult =
   | { readonly ok: true; readonly value: ParsedConnection }
@@ -40,7 +37,14 @@ const BY_SCHEME: Record<string, { engine: EngineKind; port: number }> = {
 
 // Values that mean "TLS is required". Anything else that is stated explicitly — disable, prefer,
 // allow — does not require TLS, so it maps to false rather than being rounded up to true.
-const TLS_REQUIRED = new Set(["require", "verify-ca", "verify-full", "required", "verify_ca", "verify_identity"]);
+const TLS_REQUIRED = new Set([
+  "require",
+  "verify-ca",
+  "verify-full",
+  "required",
+  "verify_ca",
+  "verify_identity",
+]);
 
 function readTls(params: URLSearchParams): boolean | null {
   const mode = params.get("sslmode") ?? params.get("ssl-mode") ?? params.get("sslMode");

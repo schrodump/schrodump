@@ -172,7 +172,12 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="engine">{t("targets.engine")}</Label>
-        <Select id="engine" value={engine} disabled={editing} onChange={(e) => setEngine(e.target.value as EngineKind)}>
+        <Select
+          id="engine"
+          value={engine}
+          disabled={editing}
+          onChange={(e) => setEngine(e.target.value as EngineKind)}
+        >
           {ENGINE_KINDS.map((kind) => (
             <option key={kind} value={kind}>
               {t(engineLabel[kind])}
@@ -213,7 +218,9 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
         <Input id="databases" value={databases} onChange={(e) => setDatabases(e.target.value)} />
       </div>
       <div className="sm:col-span-2 space-y-2">
-        {invalid ? <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p> : null}
+        {invalid ? (
+          <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p>
+        ) : null}
         {failure !== null ? <ErrorState message={failure.message} /> : null}
         <div className="flex gap-2">
           <Button type="submit" disabled={pending}>

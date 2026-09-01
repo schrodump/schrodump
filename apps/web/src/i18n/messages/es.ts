@@ -15,6 +15,7 @@ export const es: Record<MessageKey, string> = {
   "nav.policies": "Políticas",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artefactos",
+  "nav.notifications": "Notificaciones",
   "nav.settings": "Configuración",
   "nav.signOut": "Cerrar sesión",
 
@@ -33,7 +34,8 @@ export const es: Record<MessageKey, string> = {
   "common.configured": "Configurado",
   "common.replace": "Reemplazar",
   "common.notAvailable": "Todavía no disponible",
-  "common.endpointPending": "Estos datos dependen de un endpoint del servidor que todavía no está disponible.",
+  "common.endpointPending":
+    "Estos datos dependen de un endpoint del servidor que todavía no está disponible.",
 
   "locale.label": "Idioma",
   "locale.en": "Inglés",
@@ -105,20 +107,25 @@ export const es: Record<MessageKey, string> = {
   "targets.probe.reason.UNREACHABLE": "Nada respondió en ese host y puerto.",
   "targets.probe.reason.TIMEOUT": "El servidor no respondió a tiempo.",
   "targets.probe.reason.AUTH_FAILED": "El servidor rechazó esas credenciales.",
-  "targets.probe.reason.INSUFFICIENT_PRIVILEGES": "Las credenciales son válidas pero no tienen los privilegios que el probe necesita (MongoDB: listDatabases; PostgreSQL: lectura del catálogo).",
+  "targets.probe.reason.INSUFFICIENT_PRIVILEGES":
+    "Las credenciales son válidas pero no tienen los privilegios que el probe necesita (MongoDB: listDatabases; PostgreSQL: lectura del catálogo).",
   "targets.probe.reason.TLS_FAILED": "La negociación de TLS falló — revisa la opción Exigir TLS.",
   "targets.probe.reason.UNKNOWN": "El driver no devolvió un código que esto reconozca.",
   "targets.probe.driverCode": "El driver reportó: {code}",
-  "targets.probe.limited": "El alcance, el tamaño estimado y las advertencias del probe necesitan un endpoint más completo en el servidor.",
+  "targets.probe.limited":
+    "El alcance, el tamaño estimado y las advertencias del probe necesitan un endpoint más completo en el servidor.",
   "targets.empty": "Todavía no hay objetivos. Agrega uno para empezar a respaldarlo.",
   "targets.url": "URL de conexión",
-  "targets.url.hint": "Pega una URL de conexión para completar los campos de abajo. Nunca se guarda ni se envía — revisa los campos antes de crear el objetivo.",
+  "targets.url.hint":
+    "Pega una URL de conexión para completar los campos de abajo. Nunca se guarda ni se envía — revisa los campos antes de crear el objetivo.",
   "targets.url.fill": "Completar los campos",
   "targets.databases": "Bases de datos a respaldar (separadas por comas, vacío significa todas)",
   "targets.url.error.malformed": "Esto no es una URL de conexión que se pueda leer.",
   "targets.url.error.unsupportedScheme": "Scheme no soportado: {scheme}",
-  "targets.url.error.srvUnsupported": "mongodb+srv no sirve aquí: un objetivo registra un host y un puerto explícitos, y SRV solo los resuelve al momento de conectar. Pega la dirección del nodo desde el que respaldar.",
-  "targets.url.error.multipleHosts": "Esta URI lista más de un host. Un objetivo guarda uno solo — indica el nodo desde el que respaldar.",
+  "targets.url.error.srvUnsupported":
+    "mongodb+srv no sirve aquí: un objetivo registra un host y un puerto explícitos, y SRV solo los resuelve al momento de conectar. Pega la dirección del nodo desde el que respaldar.",
+  "targets.url.error.multipleHosts":
+    "Esta URI lista más de un host. Un objetivo guarda uno solo — indica el nodo desde el que respaldar.",
 
   "destinations.title": "Destinos de almacenamiento",
   "destinations.add": "Agregar destino",
@@ -160,9 +167,11 @@ export const es: Record<MessageKey, string> = {
   "executionMode.STREAM": "Stream",
   "executionMode.STAGED": "Staged",
   "policies.parallelism": "Paralelismo",
-  "policies.parallelism.disabled": "Paralelismo no disponible: scratch no está configurado en este deploy.",
+  "policies.parallelism.disabled":
+    "Paralelismo no disponible: scratch no está configurado en este deploy.",
   "policies.verifyOff.title": "Verify apagado en esta política",
-  "policies.verifyOff.description": "Los backups de esta política nunca se verifican — todo artefacto queda NO OBSERVADO.",
+  "policies.verifyOff.description":
+    "Los backups de esta política nunca se verifican — todo artefacto queda NO OBSERVADO.",
   "policies.trigger": "Ejecutar backup ahora",
   "policies.disabled": "desactivada",
   "policies.enable": "Activar",
@@ -172,7 +181,8 @@ export const es: Record<MessageKey, string> = {
   "policies.retentionOff.title": "Esta política está reteniendo todas las copias, para siempre",
   "policies.retentionOff.description":
     "Todos los contadores están en cero, lo que Schrodump interpreta como retención no configurada, no como una petición de borrado. Nada se podará nunca. Configure los contadores según el plazo durante el cual está obligado a conservar los datos.",
-  "policies.disabledRetention.title": "La retención no se ejecuta mientras esta política esté desactivada",
+  "policies.disabledRetention.title":
+    "La retención no se ejecuta mientras esta política esté desactivada",
   "policies.disabledRetention.description":
     "La retención poda solo tras una copia exitosa de esta política, así que no se está borrando nada mientras esté apagada. Los artefactos sobrevivirán a la ventana configurada aquí hasta que las copias se reanuden.",
   "policies.empty": "Todavía no hay políticas. Agrega una para programar backups.",
@@ -191,12 +201,14 @@ export const es: Record<MessageKey, string> = {
   "artifacts.empty": "Todavía no hay artefactos.",
 
   "restore.title": "Restaurar artefacto",
-  "restore.description": "El restore es deliberado. Elige un alcance — los que esta engine no puede restaurar quedan deshabilitados.",
+  "restore.description":
+    "El restore es deliberado. Elige un alcance — los que esta engine no puede restaurar quedan deshabilitados.",
   "restore.scope": "Alcance del restore",
   "restore.unsupported": "No soportado para {engine}",
   "restore.targetDatabase": "Base de datos de destino",
   "restore.overExisting": "Restaurar sobre una base de datos existente (sobrescribe datos)",
-  "restore.confirmPrompt": "Para confirmar, escribe exactamente el nombre de la base de datos de destino.",
+  "restore.confirmPrompt":
+    "Para confirmar, escribe exactamente el nombre de la base de datos de destino.",
   "restore.confirmName": "Escribe el nombre de la base de datos para confirmar",
   "restore.mismatch": "El nombre no coincide con la base de datos de destino.",
   "restore.submit": "Iniciar restore",
@@ -216,15 +228,40 @@ export const es: Record<MessageKey, string> = {
   "guided.step.target": "Crear una base de datos objetivo",
   "guided.step.probe": "Probar la conexión con el objetivo",
   "guided.step.policy": "Crear una política con verify activado",
-  "guided.manual": "Ejecútalo en la propia página — el servidor no guarda registro de que se ejecutó.",
+  "guided.manual":
+    "Ejecútalo en la propia página — el servidor no guarda registro de que se ejecutó.",
   "guided.open": "Abrir",
   "guided.done": "Hecho",
 
   "settings.title": "Configuración",
   "settings.keys": "Claves de cifrado",
-  "settings.keys.description": "Los recipients de age y el fingerprint de la KEK que el servidor fija en el primer arranque.",
+  "settings.keys.description":
+    "Los recipients de age y el fingerprint de la KEK que el servidor fija en el primer arranque.",
   "settings.members": "Miembros",
-  "settings.members.description": "Los miembros de la organización y sus roles: admin, operator, viewer.",
+  "settings.members.description":
+    "Los miembros de la organización y sus roles: admin, operator, viewer.",
   "settings.instance": "Instancia",
   "settings.instance.description": "Scratch, piso de retención y configuración del runner.",
+  "notifications.title": "Canales de notificación",
+  "notifications.subtitle":
+    "Adónde van las preguntas abiertas de esta organización. El disparador es un cambio en lo que la flota ha probado y no ha probado — nunca el resultado de un trabajo.",
+  "notifications.empty": "Aún no hay canales. No se está enviando nada.",
+  "notifications.kind": "Tipo",
+  "notifications.kind.webhook": "Webhook",
+  "notifications.kind.smtp": "Correo (SMTP)",
+  "notifications.url": "URL del webhook",
+  "notifications.secret": "Secreto de firma",
+  "notifications.secret.hint": "Firma cada entrega. Se guarda cifrado y no se vuelve a mostrar.",
+  "notifications.smtp.host": "Host SMTP",
+  "notifications.smtp.port": "Puerto",
+  "notifications.smtp.username": "Usuario",
+  "notifications.smtp.password": "Contraseña",
+  "notifications.from": "Dirección remitente",
+  "notifications.to": "Destinatarios (uno por línea)",
+  "notifications.create": "Añadir canal",
+  "notifications.enable": "Habilitar",
+  "notifications.disable": "Deshabilitar",
+  "notifications.disabled": "Deshabilitado",
+  "notifications.lastFailure": "La última entrega falló: {reason}",
+  "notifications.tls": "El correo siempre se envía sobre TLS. Esto no es configurable.",
 };

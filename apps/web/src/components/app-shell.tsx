@@ -18,6 +18,7 @@ const NAV: { href: string; key: MessageKey }[] = [
   { href: "/targets", key: "nav.targets" },
   { href: "/destinations", key: "nav.destinations" },
   { href: "/policies", key: "nav.policies" },
+  { href: "/notifications", key: "nav.notifications" },
   { href: "/jobs", key: "nav.jobs" },
   { href: "/artifacts", key: "nav.artifacts" },
   { href: "/settings", key: "nav.settings" },
