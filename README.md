@@ -137,14 +137,15 @@ Found a vulnerability? See [SECURITY.md](SECURITY.md). Please don't open a publi
 Schrodump is in active development toward its **v1**. The verification model, scheduling, storage,
 encryption, GFS retention, restore execution, notification delivery (webhook and SMTP), self-backup
 of its own catalog, the web UI, and the full CI + signed-release pipeline are implemented and
-tested. Restore covers both single-stream and staged (directory) artifacts; MongoDB restores at
-cluster scope only. Physical/PITR backups are on the roadmap.
+tested. Restore covers both single-stream and staged (directory) artifacts, and is scoped where the
+engine provides a mechanism for it: PostgreSQL to a schema or a table, MongoDB to a database or a
+collection. Physical/PITR backups are on the roadmap.
 [docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1.
 
 ## Contributing
 
-Contributions are welcome under the project's Contributor License Agreement — see
-[CONTRIBUTING.md](CONTRIBUTING.md). Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
+Contributions are welcome under the [Developer Certificate of Origin](https://developercertificate.org/) —
+sign your commits with `git commit -s`. See [CONTRIBUTING.md](CONTRIBUTING.md). Commits follow [Conventional Commits](https://www.conventionalcommits.org/),
 and `pnpm typecheck`, `pnpm lint` and `pnpm test` must be green.
 
 ## License
