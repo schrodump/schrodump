@@ -28,10 +28,10 @@ import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { chmod, mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { PassThrough, Readable } from "node:stream";
+import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
-import { Decrypter } from "age-encryption";
+import { decryptStream } from "../crypto/artifact.js";
 import { z } from "zod";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
 import { SchrodumpError } from "@schrodump/core/errors";
@@ -263,17 +263,6 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
     if (extra !== null) await extra.cleanup();
     await staging.cleanup();
   }
-}
-
-// Decrypts the S3 ciphertext IN-PROCESS with age's STREAM construction (chunked, per-chunk
-// authenticated, truncation-detecting) — the mirror of backup-wiring's encryptStream. Returns a Node
-// Readable of the plaintext (the gzipped dump). The identity is a string held only in memory. The
-// promise resolves once the age header is processed, so a wrong identity rejects here, before the body.
-async function decryptStream(ciphertext: Readable, identity: string): Promise<Readable> {
-  const decrypter = new Decrypter();
-  decrypter.addIdentity(identity);
-  const source = Readable.toWeb(ciphertext) as ReadableStream<Uint8Array>;
-  return Readable.fromWeb(await decrypter.decrypt(source));
 }
 
 async function restoreOne(
