@@ -33,6 +33,27 @@ broken stream ends up reported as a successful backup. `pipeline()` aborts the w
 rejects. The final `Writable` is supplied by the caller, which is what keeps the storage boundary
 out of this package.
 
+## The deployment proxies the Docker socket, and this package's calls define its allow-list
+
+`compose.yaml` does not give Schrodump the socket; it gives it `tecnativa/docker-socket-proxy`.
+So **every Docker API call added here has to be permitted there**, and the two live at opposite
+ends of the repository in different languages.
+
+That drifted once, badly: the proxy shipped `EXEC: 0` while `withEphemeralService` polls a verify
+sandbox's readiness with `docker exec`, so the proxy answered `403` and `FULL_RESTORE` verify could
+not run on any deployment using the file we ship. Nothing caught it because the integration suite
+talks to the socket **directly** — the proxy was never in the loop being tested.
+
+`socket-proxy.integration.test.ts` now closes that: it reads the proxy's environment out of
+`compose.yaml`, starts a proxy configured exactly that way, and drives pull → networks → create →
+start → inspect → exec → remove through it with dockerode. Adding a new Docker call here means
+adding it to that test and, if the allow-list refuses it, to `compose.yaml` and `docs/security.md`.
+
+Note what the proxy is and is not: it removes endpoints this package never calls, which reduces
+accidental surface. It is **not** containment — `CONTAINERS` plus `POST` accepts a create carrying
+`Binds` and `Privileged`, which is root on the host, and that is what running dumps in containers
+requires. See `docs/security.md`.
+
 ## Scratch (`scratch.ts`)
 
 > Scratch holds the **dump in clear**. In `directory` mode the writer is `pg_dump`/`mydumper`
