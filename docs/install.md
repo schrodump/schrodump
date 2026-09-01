@@ -256,6 +256,17 @@ and the recovery steps. The procedure:
 Everything in the bucket is addressable again at that point. Verify the checksum in the sidecar
 against what you fetched before restoring.
 
+Steps 2 and 3 are covered by a drill that runs in CI
+(`apps/server/src/jobs/self-backup-recovery.integration.test.ts`): it takes a real `pg_dump` of a
+real Schrodump schema using the same descriptor the backup path builds, seals it with the
+production encrypt pipeline to an escrow-only recipient, then decrypts, gunzips and `pg_restore`s
+it into an empty database and checks the catalog came back. It also asserts the operational
+identity **cannot** open it.
+
+What the drill does not cover, and what your own rehearsal still has to: the executor actually
+reaching the metadata database over the internal network, and the round trip through your bucket.
+Those are the parts that depend on your deployment, not on this code.
+
 > A self-backup that says **Written** is amber in the UI, not green, and that is not an
 > oversight. It means a `pg_dump` exited without complaining and nobody has restored it. The one
 > way to turn it green is to do step 1 through 4 above on a spare host — which is the same thing

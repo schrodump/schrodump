@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 
 export interface AgeKeyPair {
   // AGE-SECRET-KEY-1... — held server-side (operational) or offline by the operator (escrow).
@@ -83,4 +83,16 @@ export async function encryptStream(compressed: Readable, recipients: string[]):
   for (const recipient of recipients) encrypter.addRecipient(recipient);
   const source = Readable.toWeb(compressed) as ReadableStream<Uint8Array>;
   return Readable.fromWeb(await encrypter.encrypt(source));
+}
+
+// The mirror of encryptStream, and it lives beside it for the same reason: there is one right
+// pipeline and a second copy is a second chance to get it wrong. The identity is a string held only
+// in memory, never written to disk. The promise resolves once the age header is processed, so a
+// WRONG identity rejects here — before any body bytes — which is what lets a recovery drill assert
+// that the escrow key alone can open a self-backup.
+export async function decryptStream(ciphertext: Readable, identity: string): Promise<Readable> {
+  const decrypter = new Decrypter();
+  decrypter.addIdentity(identity);
+  const source = Readable.toWeb(ciphertext) as ReadableStream<Uint8Array>;
+  return Readable.fromWeb(await decrypter.decrypt(source));
 }

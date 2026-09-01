@@ -121,6 +121,11 @@ link de setup.
   não rodaria nunca.
 - **Loop e advisory lock próprios (`SCHRDMP3`).** Um dump de metadados leva minutos e o `startLoop`
   é single-flight — dobrá-lo dentro do tick do scheduler pararia o dispatch por esse tempo todo.
+- **O ensaio de recuperação roda no CI** (`self-backup-recovery.integration.test.ts`): `pg_dump`
+  real com o descritor de produção → `encryptStream` para escrow apenas → `decryptStream` →
+  `pg_restore` num banco vazio → a organização volta. E assere que a identidade **operacional não
+  abre**. É o único teste do projeto que tira um artefato de `UNOBSERVED`; o que ele não cobre é o
+  executor alcançando o banco pela rede interna e o ida-e-volta pelo bucket.
 - **A linha na tabela nasce ANTES de resolver a configuração.** Destino apagado ou escrow ausente
   vira `SelfBackup` `FAILED` com motivo legível, visível em `GET /self-backups`, não só um log.
 
