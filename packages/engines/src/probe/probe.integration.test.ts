@@ -46,7 +46,22 @@ describe.skipIf(!enabled)("probe integration (testcontainers)", () => {
         POSTGRES_DB: "app",
       })
       .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forListeningPorts())
+      // NOT Wait.forListeningPorts(). The postgres image runs a TEMPORARY socket-only server during
+      // initialisation, then stops it and starts the real one; the mapped port is reachable during
+      // that window and a probe against it fails with "the database system is starting up". `-h`
+      // forces pg_isready onto TCP, which only the real server listens on.
+      //
+      // This lesson was already written down in claim.test.ts and in adapters/postgres.ts — and
+      // claim.test.ts even cites THIS file as having learned it. It had not: this case still waited
+      // on the port, and it failed in CI on 2026-09-01. A flake that reads as a code failure trains
+      // everyone to re-run a red CI, which is how a real red gets waved through.
+      .withHealthCheck({
+        test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U schrodump -d app"],
+        interval: 1000,
+        timeout: 3000,
+        retries: 30,
+      })
+      .withWaitStrategy(Wait.forHealthCheck())
       .start();
     try {
       const result = await probePostgres(connFor(container, 5432, "app", "schrodump"));
