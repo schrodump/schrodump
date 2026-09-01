@@ -1,114 +1,136 @@
-# Schrodump — instruções raiz
+# Schrodump — root instructions
 
-Ferramenta open source de agendamento e verificação de backups **lógicos** de banco
-(PostgreSQL, MySQL/MariaDB, MongoDB). Docker-first, agentless, destino S3-compatible.
-Titular dos direitos: **ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA** (CNPJ
-34.292.395/0001-65), licença **AGPL-3.0-or-later**.
+Open-source tool for scheduling and verifying **logical** database backups (PostgreSQL,
+MySQL/MariaDB, MongoDB). Docker-first, agentless, S3-compatible destinations. Rights holder:
+**ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA** (CNPJ 34.292.395/0001-65), licensed
+**AGPL-3.0-or-later**.
 
-## A tese (o que torna este projeto diferente de um cron com `pg_dump`)
+## The thesis (what separates this project from a cron job running `pg_dump`)
 
-**Um backup não é confiável até que um restore o tenha verificado.** Um job que sai com
-código 0 provou uma coisa só: um processo rodou sem reclamar. Não provou que o arquivo no
-bucket contém os dados. Todo artefato está em **um de três estados**, e a cor é conteúdo:
+**A backup is not trustworthy until a restore has verified it.** A job that exits 0 has proven
+exactly one thing: a process ran without complaining. It has not proven the file in the bucket
+holds the data. Every artifact is in **one of three states**, and the colour is content:
 
-- **`VERIFIED`** (verde) — algo abriu e conferiu. Restaura.
-- **`UNOBSERVED`** (âmbar, nunca cinza, nunca verde) — foi escrito, ninguém olhou. É o
-  **default**. Pode estar perfeito ou vazio.
-- **`FAILED`** (vermelho) — foi conferido e não presta.
+- **`VERIFIED`** (green) — something opened it and checked. It restores.
+- **`UNOBSERVED`** (amber, never grey, never green) — it was written, nobody looked. This is the
+  **default**. It may be perfect or it may be empty.
+- **`FAILED`** (red) — it was checked and it is no good.
 
-Não existe "OK". O painel lidera pelo número de **não observados** — as perguntas em aberto —
-não pelo número de sucessos. Qualquer decisão de UI, API ou domínio que borre essa distinção
-está errada. Ver `docs/backup-restore.md` para o racional completo.
+There is no "OK". The dashboard leads with the number of **unobserved** artifacts — the open
+questions — not the number of successes. Any UI, API or domain decision that blurs that
+distinction is wrong. See `docs/backup-restore.md` for the full rationale.
 
 ## Stack
 
-- **Runtime:** Node.js 22 (ver `.nvmrc`)
-- **Linguagem:** TypeScript ESM. A raiz e os pacotes usam `moduleResolution: nodenext`,
-  `verbatimModuleSyntax`. O `apps/web` usa `bundler` (exigência do Next).
-- **Package manager:** pnpm (ver `packageManager` no `package.json`)
-- **Test runner:** Vitest (ESM nativo, sem transform)
+- **Runtime:** Node.js 22 (see `.nvmrc`)
+- **Language:** TypeScript ESM. The root and the packages use `moduleResolution: nodenext` and
+  `verbatimModuleSyntax`. `apps/web` uses `bundler` (a Next requirement).
+- **Package manager:** pnpm (see `packageManager` in `package.json`)
+- **Test runner:** Vitest (native ESM, no transform)
 - **Lint/format:** ESLint flat config + Prettier
 
-## Mapa do workspace
+## Workspace map
 
 ```
-packages/core       # domínio puro, sem I/O. Só depende de zod.
-packages/engines    # descritores + probe por engine (o QUE executar)
-packages/runner     # execução via Docker + scratch (ONDE executar)
-packages/storage    # driver S3-compatible
-apps/server         # Fastify + Prisma. Compõe os quatro pacotes acima.
-apps/web            # Next.js 16 + React 19. Consome a API do server.
-docker/             # Dockerfile de produção + executores (age, mydumper)
-docs/               # install, security, backup-restore, lgpd, roadmap
+packages/core       # pure domain, no I/O. Depends on zod alone.
+packages/engines    # per-engine descriptors + probe (WHAT to execute)
+packages/runner     # execution via Docker + scratch (WHERE to execute)
+packages/storage    # S3-compatible driver
+apps/server         # Fastify + Prisma. Composes the four packages above.
+apps/web            # Next.js 16 + React 19. Consumes the server API.
+docker/             # production Dockerfile, entrypoint.sh, prune-store.mjs, executors/
+docs/               # install, security, backup-restore, lgpd, roadmap + superpowers/
 .github/workflows/  # ci, security, release, cla
-compose.yaml        # stack de deploy (server + postgres + docker-socket-proxy)
+compose.yaml        # deployment stack (server + postgres + docker-socket-proxy)
 ```
 
-Cada pacote/app tem seu **próprio `CLAUDE.md`**, e ele **prevalece sobre este** dentro do seu
-diretório. Esta raiz vale para o que não for sobrescrito.
+Each package and app has its **own `CLAUDE.md`**, and that file **takes precedence over this one**
+inside its directory. This root file governs whatever is not overridden.
 
-## Grafo de dependência
+## Where the rationale already lives — read before re-litigating a decision
 
-Respeite estritamente — a CI e o review vão cobrar:
+- **`ARCHITECTURE.md`** — the eight architecture decisions taken for v1, each with its reasoning:
+  logical-only backup, agentless, Docker-first with ephemeral executors, S3-compatible destinations
+  only, ternary backup state, `organizationId` from the first migration, retention owned by the
+  application, and client-side encryption with multiple recipients. It records the *why*; the *how*
+  lives in the code and in these `CLAUDE.md` files.
+- **`docs/roadmap.md`** — what was deliberately left **out of v1** and why (physical backup/PITR,
+  the agent that would be written in Go, local filesystem destinations, S3 Object Lock), plus the
+  **known limitations** that ship in v1. Notifications and self-backup are **not** on that list —
+  both shipped, and the roadmap records how.
+- **`docs/superpowers/plans/` and `docs/superpowers/specs/`** — design records for the features
+  that needed one (full-restore verify, job worker, restore execution, graceful shutdown,
+  notifications, the staged directory pipeline).
 
-- `packages/core` — não importa nenhum outro pacote do workspace.
-- `packages/engines`, `packages/runner`, `packages/storage` — importam **apenas** `core`,
-  e **nunca** uns aos outros.
-- `apps/*` — compõem os pacotes acima; são o único lugar onde eles se encontram.
-- `apps/web` **não** importa pacote do workspace: reimplementa o vocabulário de domínio em
-  `src/lib/domain.ts` (ver o `CLAUDE.md` dele).
+## Dependency graph
 
-## Como verificar (sem evidência, não está pronto)
+Follow it strictly — CI and review will enforce it:
 
-Da raiz, rodando em todo o workspace:
+- `packages/core` — imports no other workspace package.
+- `packages/engines`, `packages/runner`, `packages/storage` — import **only** `core`, and
+  **never** each other.
+- `apps/*` — compose the packages above; they are the only place those packages meet.
+- `apps/web` imports **no** workspace package: it re-declares the domain vocabulary in
+  `src/lib/domain.ts` (see its own `CLAUDE.md`).
+
+## How to verify (without evidence, it is not done)
+
+From the root, across the whole workspace:
 
 ```
-pnpm typecheck      # tsc --noEmit por pacote (+ prisma generate no server)
+pnpm typecheck      # tsc --noEmit per package (+ prisma generate in the server)
 pnpm lint           # eslint
-pnpm test           # vitest run — unitários; pula os de integração por default
-pnpm build          # tsc dos pacotes + next build do web
+pnpm test           # vitest run — unit tests; skips the integration suites by default
+pnpm build          # tsc for the packages + next build for the web
 ```
 
-Os testes de **integração** (bancos reais via testcontainers, S3 real) só rodam com env
-setado — são `describe.skipIf` de outra forma:
+The **integration** tests (real databases via testcontainers, real S3) only run with the
+environment set — otherwise they are `describe.skipIf`:
 
-- `SCHRODUMP_TEST_INTEGRATION=1` — habilita probe (testcontainers) e runner (dockerode).
-- `SCHRODUMP_TEST_S3_ENDPOINT` (+ `_ACCESS_KEY`/`_SECRET_KEY`/`_BUCKET`) — habilita o driver S3
-  contra MinIO. Ver `.github/workflows/ci.yml`.
+- `SCHRODUMP_TEST_INTEGRATION=1` — enables probe (testcontainers), runner (dockerode) and the
+  server suites that need a real PostgreSQL.
+- `SCHRODUMP_TEST_S3_ENDPOINT` (+ `_REGION`/`_ACCESS_KEY`/`_SECRET_KEY`/`_BUCKET`) — enables the
+  S3 driver against MinIO.
+- `SCHRODUMP_TEST_POSTGRES_IMAGE`, `SCHRODUMP_TEST_MYSQL_IMAGE`, `SCHRODUMP_TEST_MONGO_IMAGE` —
+  override the container image the probe suites stand up. This is how CI covers the edges of the
+  supported range (`postgres:13-alpine`, `postgres:18-alpine`, `mariadb:11`) without running the
+  whole suite again. See `.github/workflows/ci.yml`.
 
-## Imagem e deploy
+## Image and deployment
 
-- `docker/Dockerfile` — imagem única (API Fastify + UI Next), multi-stage, Node alpine pinado
-  por patch, usuário não-root, `dumb-init` como PID 1, `prisma migrate deploy` no entrypoint.
-  **Sem nenhum client de banco dentro** — dump/restore rodam em executores efêmeros. Alvo de
-  tamanho e a poda de dependências (`docker/prune-store.mjs`) estão documentados lá.
-- `docker/executors/` — `mydumper.Dockerfile` (STAGED mysql/mariadb), versão **e digest** pinados.
-  A cripto de artefato é **in-process** (`age-encryption`), não há executor `age`.
-- CI: `ci.yml` (check + integração + build/smoke da imagem), `security.yml` (audit, Trivy,
-  gitleaks, SPDX), `release.yml` (multi-arch, cosign, SBOM em tag `v*`), `cla.yml`
-  (**desabilitado** até o texto do CLA sair de `TODO` em `CONTRIBUTING.md`).
-- `docs/roadmap.md` registra o que ficou **fora do v1** e por quê (backup físico/PITR, agent em
-  Go, Object Lock, notificações) e as **limitações conhecidas** que embarcam no v1.
+- `docker/Dockerfile` — a single image (Fastify API + Next UI), multi-stage, Node alpine pinned to
+  the patch, non-root user, `dumb-init` as PID 1, `prisma migrate deploy` in the entrypoint.
+  **No database client inside it** — dump and restore run in ephemeral executors. The size target
+  and the dependency pruning (`docker/prune-store.mjs`) are documented there.
+- `docker/executors/` holds **one** file: `mydumper.Dockerfile` (STAGED mysql/mariadb), with the
+  version **and digest** pinned. There is **no `age` executor** — artifact encryption is
+  in-process via the `age-encryption` library. See `apps/server/CLAUDE.md` for why.
+- CI: `ci.yml` (readme-sync, check, integration, image build/smoke), `security.yml` (dependency
+  audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the executor
+  images, on a `v*` tag), `cla.yml` (**not enabled** — it is `workflow_dispatch` only until the CLA
+  text stops being `TODO` in `CONTRIBUTING.md`).
 
-## READMEs — sincronia obrigatória
+## READMEs — synchronisation is mandatory
 
-O projeto tem três READMEs: `README.md` (inglês, **fonte de verdade**), `README.pt-BR.md` e
-`README.es.md`. Eles são o mesmo documento em três idiomas.
+The project has three READMEs: `README.md` (English, the **source of truth**), `README.pt-BR.md`
+and `README.es.md`. They are the same document in three languages.
 
-**Regra:** qualquer mudança de conteúdo no `README.md` deve atualizar os três no **mesmo commit/PR**.
-Corrigir só uma tradução (typo, gramática) sem tocar no inglês é permitido. O job `readme-sync` do
-`ci.yml` cobra a direção que importa: inglês mudou → traduções têm que mudar junto. Ele detecta que
-os arquivos foram tocados, não equivalência semântica — manter o sentido igual é responsabilidade de
-quem edita.
+**Rule:** any content change to `README.md` must update all three in the **same commit/PR**.
+Fixing one translation alone (a typo, grammar) without touching the English is allowed. The
+`readme-sync` job in `ci.yml` enforces the direction that matters: English changed → the
+translations must change with it. It detects that the files were touched, not semantic
+equivalence — keeping the meaning aligned is the editor's responsibility.
 
-## Header SPDX (obrigatório)
+## SPDX header (mandatory)
 
-Todo arquivo-fonte começa com — inclusive `Dockerfile`, workflows e `.mjs`:
+Every source file begins with — including `Dockerfile`, workflows and `.mjs`:
 
 ```
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 ```
 
-A única exceção rastreada é `apps/web/next-env.d.ts`, regenerado pelo `next build`. O job `spdx`
-do `security.yml` cobra o resto.
+The one tracked exception is `apps/web/next-env.d.ts`, regenerated by `next build`. The `spdx` job
+in `security.yml` enforces the header over `*.ts`, `*.tsx`, `*.mjs`, `*.js`, `docker/Dockerfile`,
+`docker/executors/*.Dockerfile` and `.github/workflows/*.yml`. Files outside that glob still carry
+it by convention (`docker/entrypoint.sh` does); Prisma migrations (`.sql`) do not.

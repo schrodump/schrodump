@@ -23,9 +23,13 @@ const EnvSchema = z.object({
   SCHRODUMP_SCRATCH_PATH: z.string().min(1).optional(),
   SCHRODUMP_SCRATCH_MAX_BYTES: z.coerce.number().int().default(107374182400), // 100 GiB
   SCHRODUMP_MAX_CONCURRENT_STAGED: z.coerce.number().int().min(1).default(2),
-  // Dumps estimated above this are executed STAGED. Deliberately has NO default: STAGED artifacts
-  // cannot be restored or FULL_RESTORE-verified in v1, so the mode is never chosen for an operator
-  // by size — only by an explicit parallelism > 1 on the policy. Set it to opt in.
+  // Dumps estimated above this are executed STAGED. Deliberately has NO default: STAGED writes the
+  // clear-text dump to disk before uploading and needs the scratch volume sized for it, so the mode
+  // is never chosen FOR an operator by size — only by an explicit parallelism > 1 on the policy.
+  // Set it to opt in.
+  //
+  // (STAGED artifacts DO restore and FULL_RESTORE-verify since the directory pipeline landed —
+  // buildArchiveStaging/buildExtractStaging. The reason for no default is the disk, not the gap.)
   SCHRODUMP_STAGED_THRESHOLD_BYTES: z.coerce.number().int().positive().optional(),
   // Minimum age of the previous notification snapshot before it is allowed to anchor the
   // "verification is falling behind" comparison. Below this, the previous point is ignored: every

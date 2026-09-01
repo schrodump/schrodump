@@ -1,88 +1,100 @@
 # @schrodump/web
 
-Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + Zod. Consome a
-API de `apps/server`. Prevalece sobre o `CLAUDE.md` da raiz dentro deste diretório.
+Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + Zod. Consumes the
+`apps/server` API. Takes precedence over the root `CLAUDE.md` inside this directory.
 
-## Invariantes
+## Invariants
 
-- **O estado do backup é ternário e a cor é conteúdo, não decoração.** `VERIFIED` verde,
-  `UNOBSERVED` âmbar, `FAILED` vermelho. Não existe "OK", não existe cinza para não verificado, e
-  o contador primário do painel é _"N backups não observados"_ — nunca "N ok". Ver `StatusBadge`
-  e `state-counters.tsx`, e a tese na raiz.
-- **Credencial é write-only na UI.** Valor do servidor nunca chega ao front, nunca preenche
-  campo. Configurado → mostra "configurado" + permite substituir. Ver `CredentialField`.
-- **Em modo de edição, campo de segredo vazio significa "manter o guardado"** — nunca `""`. É a
-  única forma de corrigir um host ou uma região quando a UI não consegue ler o segredo de volta
-  para reenviá-lo; mandar string vazia seria 400 no melhor caso e credencial sobrescrita no pior.
-  Os formulários montam o corpo do `PATCH` campo a campo (allow-list), nunca spread-menos-N: o
-  schema do servidor é `.strict()`, então campo a mais é 400, e allow-list não vaza campo novo
-  quando alguém adicionar um ao schema de criação. Coberto em `edit-forms.test.tsx`, que assere o
-  corpo da requisição que realmente sai.
-- **Campo que o servidor recusa aparece desabilitado com o motivo, nunca escondido.** `engine` do
-  alvo, `bucket`/`prefix`/`sealMode` do destino, `target`/`destination` da policy. O que um recurso
-  aponta é a primeira coisa que o operador precisa ler nele — sumir com o campo troca uma
-  explicação por um mistério.
-- **Restore tem atrito de propósito.** Escopos que a engine não suporta ficam desabilitados com o
-  motivo (matriz em `lib/domain.ts`); sobrescrever banco existente exige digitar o nome do banco.
-  Viewer não vê o botão — e o servidor recusa mesmo assim (a UI é a segunda tranca, não a única).
-  Artefato `STAGED` **restaura** desde que o pipeline de diretório entrou (o servidor desempacota o
-  tar antes de entregar o diretório ao `pg_restore`/`myloader`), então `canRestoreArtifact` não
-  desabilita mais por modo de execução. A regra de desabilitar-com-motivo em vez de esconder segue
-  valendo para o que continua recusado — escopo que a engine não suporta, e mongo fora de
+- **Backup state is ternary and the colour is content, not decoration.** `VERIFIED` green,
+  `UNOBSERVED` amber, `FAILED` red. There is no "OK", there is no grey for unverified, and the
+  dashboard's primary counter is _"N unobserved backups"_ — never "N ok". See `StatusBadge` and
+  `state-counters.tsx`, and the thesis in the root file.
+- **Credentials are write-only in the UI.** The server's value never reaches the front end and
+  never fills a field. Configured → show "configured" + allow replacing. See `CredentialField`.
+- **In edit mode an empty secret field means "keep what is stored"** — never `""`. It is the only
+  way to correct a host or a region when the UI cannot read the secret back to resend it; sending
+  an empty string would be a 400 at best and an overwritten credential at worst. The forms build
+  the `PATCH` body field by field (allow-list), never spread-minus-N: the server schema is
+  `.strict()`, so an extra field is a 400, and an allow-list does not leak a new field when someone
+  adds one to the create schema. Covered by `edit-forms.test.tsx`, which asserts the request body
+  that actually goes out.
+- **A field the server refuses appears disabled with the reason, never hidden.** The target's
+  `engine`, the destination's `bucket`/`prefix`/`sealMode`, the policy's `target`/`destination`.
+  What a resource points at is the first thing an operator needs to read on it — removing the field
+  trades an explanation for a mystery.
+- **Restore has friction on purpose.** Scopes the engine does not support are disabled with the
+  reason (matrix in `lib/domain.ts`); overwriting an existing database requires typing the database
+  name. A viewer does not see the button — and the server refuses anyway (the UI is the second
+  lock, not the only one). A `STAGED` artifact **does** restore now that the directory pipeline
+  landed (the server unpacks the tar before handing the directory to `pg_restore`/`myloader`), so
+  `canRestoreArtifact` no longer disables by execution mode. The disable-with-a-reason rule still
+  governs what remains refused — a scope the engine does not support, and mongo outside
   `FULL_CLUSTER`.
-- **Contador do painel vem do servidor, nunca de `.length`.** `GET /artifacts` devolve
-  `{ items, total, counts }`; `items` é capado em 200 e `counts` é calculado sobre a tabela inteira.
-  Contar `items` reportaria menos backups não observados do que existem, que é exatamente o número
-  que a tese proíbe arredondar. Quando a lista está truncada, a tela diz (`list.truncated`) em vez
-  de deixar implícito que mostrou tudo.
-- **Verify desligado numa policy é aviso persistente**, não toast.
-- **Canal de notificação mostra a última falha de entrega.** Um notificador que parou de entregar é
-  idêntico a um saudável se a interface não disser — e o ponto de gravar a falha era exatamente
-  esse. Desabilitar vem antes de apagar: apagar um canal que está registrando falhas joga fora a
-  única evidência de que ele estava falhando.
-- **Nenhuma string literal de UI em componente.** Tudo em `src/i18n/messages/en.ts` (fonte das
-  chaves); cada tradução — `pt-BR.ts` e `es.ts` — é um `Record<MessageKey, string>`, então tradução
-  faltando quebra o typecheck. Adicionar locale: novo dicionário + entrada em `Locale`/`LOCALES`/
-  `dictionaries` no `provider.tsx`. Chaves dinâmicas usam template literal
-  (``t(`job.state.${state}`)``), que o TS estreita para o subconjunto válido.
-- **Rotação de senha substitui o app inteiro, não é um banner.** Enquanto `mustChangePassword` está
-  de pé o servidor recusa toda ação, então renderizar o painel atrás de um aviso seria uma tela
-  cheia de controles que falham — o operador leria como produto quebrado, não como uma coisa sendo
-  pedida a ele. E o texto nomeia `SCHRODUMP_ADMIN_PASSWORD` e o `docker inspect`: "troque sua senha"
-  sem motivo vira burocracia, e a pessoa escolhe algo igualmente displicente.
-- **Sessão é cookie**, nunca localStorage. Só a preferência de idioma vai pro localStorage.
+- **The dashboard counter comes from the server, never from `.length`.** `GET /artifacts` returns
+  `{ items, total, counts }`; `items` is capped at 200 and `counts` is computed over the whole
+  table. Counting `items` would report fewer unobserved backups than exist, which is exactly the
+  number the thesis forbids rounding. When the list is truncated the screen says so
+  (`list.truncated`) instead of implying it showed everything.
+- **Verify disabled on a policy is a persistent warning**, not a toast.
+- **A notification channel shows its last delivery failure.** A notifier that stopped delivering is
+  identical to a healthy one unless the interface says otherwise — recording the failure was the
+  whole point. Disabling comes before deleting: deleting a channel that is logging failures throws
+  away the only evidence that it was failing.
+- **No literal UI string in a component.** Everything lives in `src/i18n/messages/en.ts` (the
+  source of keys); each translation — `pt-BR.ts` and `es.ts` — is a `Record<MessageKey, string>`,
+  so a missing translation breaks the typecheck. Adding a locale: a new dictionary plus an entry in
+  `Locale`/`LOCALES`/`dictionaries` in `provider.tsx`. Dynamic keys use a template literal
+  (``t(`job.state.${state}`)``), which TS narrows to the valid subset.
+- **Password rotation replaces the whole app; it is not a banner.** While `mustChangePassword`
+  stands the server refuses every action, so rendering the dashboard behind a notice would be a
+  screen full of controls that fail — the operator would read it as a broken product rather than as
+  something being asked of them. And the text names `SCHRODUMP_ADMIN_PASSWORD` and `docker
+  inspect`: "change your password" without a reason is bureaucracy, and the person picks something
+  equally careless.
+- **The session is a cookie**, never localStorage. Only the language preference goes to
+  localStorage.
 
-## Como fala com o servidor
+## The guided setup starts with keys, and not by taste
 
-Não há CORS: o `next.config.ts` faz rewrite de `/api/auth/*` e `/backend/*` para
-`SCHRODUMP_API_URL`. Todo fetch é same-origin com `credentials: "include"`. O valor é assado no
-build (`output: "standalone"`), não lido em runtime — na imagem, a API escuta em `127.0.0.1:8081`.
+`guided-setup.tsx` puts encryption keys first because until an active escrow key exists every
+backup fails inside `resolveRecipients` — a checklist starting at "destination" walked the operator
+through four steps and then a failed job citing a key nobody had told them to create. The canary
+and probe steps are prompts rather than checkmarks: the server records no state for them.
 
-## Domínio e formatação
+## How it talks to the server
 
-- `src/lib/domain.ts` é um espelho manual do vocabulário de `@schrodump/core` (enums pequenos e
-  estáveis) — o web **não** depende de pacote do workspace, o que mantém o build do Next limpo.
-  Mudou enum no core, atualize aqui.
-- **Números do servidor não vão crus para a tela.** `serverVersionNum` é inteiro codificado
-  (`70015` = MongoDB 7.0.15); sempre passe por `formatServerVersion`. Tamanhos por `formatBytes`.
+There is no CORS: `next.config.ts` rewrites `/api/auth/*` and `/backend/*` to `SCHRODUMP_API_URL`.
+Every fetch is same-origin with `credentials: "include"`. The value is baked at build time
+(`output: "standalone"`), not read at runtime — inside the image the API listens on
+`127.0.0.1:8081`.
 
-## Test-connection e RBAC
+## Domain and formatting
 
-- O probe retorna `{ ok, serverVersionNum, failure, driverCode }`. `failure` é um código
-  (`UNREACHABLE`/`TIMEOUT`/`AUTH_FAILED`/`INSUFFICIENT_PRIVILEGES`/`TLS_FAILED`/`UNKNOWN`) com
-  texto em `targets.probe.reason.*`. O `driverCode` só é mostrado quando `failure === "UNKNOWN"`
-  — nos outros casos é ruído.
-- **Role falha fechado.** `useCurrentRole` lê a role de `GET /me` (`routes/session.ts`) — ela vive
-  no membership, não na sessão do Better-Auth. Enquanto a query carrega, e se ela falhar, o default
-  é `viewer`, que esconde o restore. O servidor impõe `operator+` de forma independente: isso é UX,
-  não é o controle.
+- `src/lib/domain.ts` is a hand-maintained mirror of the `@schrodump/core` vocabulary (small,
+  stable enums) — the web depends on **no** workspace package, which keeps the Next build clean.
+  Change an enum in core, update it here.
+- **Server numbers do not reach the screen raw.** `serverVersionNum` is an encoded integer
+  (`70015` = MongoDB 7.0.15); always pass it through `formatServerVersion`. Sizes through
+  `formatBytes`.
 
-## URL de conexão (`lib/connection-url.ts`)
+## Test-connection and RBAC
 
-Colar uma URL **preenche** o formulário de alvo; nunca é enviada ao servidor nem armazenada — a
-credencial tem um caminho só, e ele não passa por aqui. Parse client-side com o `URL` do WHATWG.
-No sucesso o campo é limpo (não guardar a senha em dois lugares do estado); no erro, nenhum campo
-é tocado. Recusa com motivo `mongodb+srv` e URIs multi-host em vez de chutar.
+- The probe returns `{ ok, serverVersionNum, failure, driverCode }`. `failure` is a code
+  (`UNREACHABLE`/`TIMEOUT`/`AUTH_FAILED`/`INSUFFICIENT_PRIVILEGES`/`TLS_FAILED`/`UNKNOWN`) with
+  text in `targets.probe.reason.*`. `driverCode` is shown only when `failure === "UNKNOWN"` — in
+  the other cases it is noise.
+- **Role fails closed.** `useCurrentRole` reads the role from `GET /me` (`routes/session.ts`) — it
+  lives on the membership, not on the Better-Auth session. While the query is loading, and if it
+  fails, the default is `viewer`, which hides restore. The server enforces `operator+`
+  independently: this is UX, not the control.
+
+## Connection URL (`lib/connection-url.ts`)
+
+Pasting a URL **fills in** the target form; it is never sent to the server nor stored — the
+credential has exactly one path and it does not go through here. Client-side parsing with the
+WHATWG `URL`. On success the field is cleared (do not keep the password in two places in state);
+on error no field is touched. It refuses `mongodb+srv` and multi-host URIs with a reason instead of
+guessing.
 
 ## SPDX
 
