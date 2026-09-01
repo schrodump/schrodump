@@ -2,9 +2,6 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { probeMongodb } from "./mongodb.js";
@@ -117,25 +114,28 @@ describe.skipIf(!enabled)("probe integration (testcontainers)", () => {
     // oplog. All of that was unit-tested only, because CI ran no replica set — so the one thing
     // the chain hangs from was never observed against a real one.
     //
-    // A replica set with auth needs a keyfile for internal auth even at one member, and mongod
-    // refuses a keyfile that is group- or other-readable. Mounted 0600 with the container running
-    // as root so mongod can read it — a test-harness concession, not how a deployment should run.
-    // Bind-mounted from a host temp file rather than copied in: mongod validates the keyfile's
-    // permissions at startup and refuses anything group- or other-readable, and a host file whose
-    // mode we set ourselves is the version that reliably satisfies it.
-    const keyDir = await mkdtemp(join(tmpdir(), "schrodump-rs-key-"));
-    const keyPath = join(keyDir, "mongo-keyfile");
-    await writeFile(keyPath, randomBytes(32).toString("base64"), { mode: 0o600 });
-    await chmod(keyPath, 0o600);
-
+    // A replica set with auth needs a keyfile for internal auth even at a single member, and the
+    // keyfile is created INSIDE the container rather than mounted. It has to be, and the reason is
+    // a trap this repository has already been bitten by once (see the 0644 note on the restore dump
+    // in restore-executor.ts): mongod refuses a keyfile that is group- or other-readable, so it
+    // must be 0600 — but the mongo entrypoint gosu-drops to the unprivileged `mongodb` user, and on
+    // native Linux a bind-mounted 0600 file keeps the HOST uid, which `mongodb` is not. Mounting it
+    // works on Docker Desktop, whose file sharing masks ownership, and fails on CI. Writing it
+    // in-container as root and chowning satisfies both.
+    const keyfile = randomBytes(32).toString("base64");
     const container = await new GenericContainer(MONGO_IMAGE)
       .withEnvironment({
         MONGO_INITDB_ROOT_USERNAME: "root",
         MONGO_INITDB_ROOT_PASSWORD: "schrodump",
+        MONGO_KEYFILE: keyfile,
       })
       .withUser("0")
-      .withBindMounts([{ source: keyPath, target: "/etc/mongo-keyfile", mode: "ro" }])
-      .withCommand(["--replSet", "rs0", "--keyFile", "/etc/mongo-keyfile", "--bind_ip_all"])
+      .withEntrypoint(["/bin/sh", "-c"])
+      .withCommand([
+        'printf "%s" "$MONGO_KEYFILE" > /tmp/mongo-keyfile && chmod 600 /tmp/mongo-keyfile && ' +
+          "chown mongodb /tmp/mongo-keyfile && " +
+          "exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /tmp/mongo-keyfile --bind_ip_all",
+      ])
       // Fixed host port, unlike every other container here. A replica set member advertises an
       // address in its own config, and the driver switches to that address after topology
       // discovery — so the member's host:port has to mean the same thing inside the container and
@@ -183,7 +183,6 @@ describe.skipIf(!enabled)("probe integration (testcontainers)", () => {
       expect(result.facts.isReplicaSet).toBe(true);
     } finally {
       await container.stop();
-      await rm(keyDir, { recursive: true, force: true });
     }
   }, 300_000);
 });

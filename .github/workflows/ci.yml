@@ -143,16 +143,6 @@ jobs:
           SCHRODUMP_TEST_S3_SECRET_KEY: minio123
         run: pnpm test
 
-  image:
-    name: image (build and smoke test)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      # Built on every pull request, pushed on none: the Dockerfile is validated by the same event
-      # that would break it.
       # The supported-range edges and MariaDB, in a probe-only pass. Cheap because it runs one test
       # file rather than the whole suite, and it closes the half of the old coverage gap that
       # parameterisation alone only made reachable: reachable is not the same as run.
@@ -169,6 +159,16 @@ jobs:
           SCHRODUMP_TEST_POSTGRES_IMAGE: postgres:18-alpine
         run: pnpm --filter @schrodump/engines test -- src/probe/probe.integration.test.ts
 
+  image:
+    name: image (build and smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built on every pull request, pushed on none: the Dockerfile is validated by the same event
+      # that would break it.
       - name: Build the production image
         uses: docker/build-push-action@v6
         with:
