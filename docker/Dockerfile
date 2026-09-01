@@ -149,4 +149,10 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${PORT}/health" || exit 1
 
-ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/entrypoint.sh"]
+# --single-child: forward signals ONLY to entrypoint.sh, not to the whole process group. Without it
+# dumb-init broadcasts SIGTERM to every process, and entrypoint.sh forwards it again to each child —
+# so the server receives one `docker stop` as TWO signals. That killed the shutdown handler
+# mid-cleanup, leaving the executor container and the cleartext scratch directory behind. The
+# handler is now duplicate-tolerant too (jobs/loop.ts), but the right place to stop sending a signal
+# twice is where it is sent twice.
+ENTRYPOINT ["dumb-init", "--single-child", "--", "/usr/local/bin/entrypoint.sh"]
