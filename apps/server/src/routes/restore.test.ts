@@ -20,7 +20,7 @@ function serviceWith(enqueueRestore = vi.fn(() => Promise.resolve("job-r"))): Jo
 
 async function appWith(role: Role | null, service: JobsService) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u1", organizationId: "o1", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u1", organizationId: "o1", role , mustChangePassword: false };
   await app.register((instance) => {
     restoreRoutes(() => Promise.resolve(ctx), service)(instance);
     return Promise.resolve();

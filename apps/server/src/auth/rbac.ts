@@ -20,6 +20,10 @@ export interface AuthContext {
   readonly userId: string;
   readonly organizationId: string;
   readonly role: Role;
+  // Set for the bootstrap admin, whose password arrives through SCHRODUMP_ADMIN_PASSWORD — readable
+  // in `docker inspect` and sitting in .env on disk. Until it is rotated the account is a shared
+  // secret, so the session authenticates but is not allowed to act. Enforced in requireRole below.
+  readonly mustChangePassword: boolean;
 }
 
 // Resolves the caller's authenticated context from the request (real impl uses Better-Auth;
@@ -59,6 +63,14 @@ export function requireRole(min: Role) {
     const ctx = request.authContext;
     if (ctx === undefined) {
       return reply.status(401).send({ error: "unauthenticated" });
+    }
+    // Checked BEFORE the role, and applying to every role including viewer. The point is not what
+    // this account is allowed to do — it is that the password authorising it is still the one from
+    // the environment, which anyone with `docker inspect` can read. Rotating it is the only way
+    // out; Better-Auth's own change-password endpoint lives under /api/auth/* and does not pass
+    // through this gate, and GET /me uses authenticate() alone so the UI can see WHY it is blocked.
+    if (ctx.mustChangePassword) {
+      return reply.status(403).send({ error: "password_rotation_required" });
     }
     if (!hasAtLeast(ctx.role, min)) {
       return reply.status(403).send({ error: "forbidden" });

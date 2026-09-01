@@ -35,7 +35,7 @@ const STORE: ChannelStore = {
 
 async function appWith(role: Role | null, over: Partial<ChannelStore> = {}) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
     notificationRoutes({
       resolver: () => Promise.resolve(ctx),

@@ -3,6 +3,7 @@
 
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthContext, Role, SessionResolver } from "./rbac.js";
@@ -64,6 +65,24 @@ export function createAuth(prisma: PrismaClient, opts: AuthOptions) {
         trustedProxies: opts.trustedProxies,
       },
     },
+    hooks: {
+      // Clears the rotation flag once the password has actually changed. Without this the gate in
+      // requireRole would be a trap rather than a control: the bootstrap admin would be refused
+      // every action forever, including after doing the one thing being asked of them.
+      //
+      // Keyed on the endpoint path and on a 2xx, so a REJECTED change (wrong current password)
+      // leaves the flag standing.
+      after: createAuthMiddleware((ctx) => {
+        if (ctx.path !== "/change-password") return Promise.resolve();
+        const status = ctx.context.returned instanceof APIError ? 400 : 200;
+        if (status !== 200) return Promise.resolve();
+        const userId = ctx.context.session?.user.id;
+        if (userId === undefined) return Promise.resolve();
+        return prisma.user
+          .update({ where: { id: userId }, data: { mustChangePassword: false } })
+          .then(() => undefined);
+      }),
+    },
   });
 }
 
@@ -86,10 +105,17 @@ export function betterAuthResolver(auth: Auth, prisma: PrismaClient): SessionRes
     if (result === null) return null;
     const membership = await prisma.membership.findFirst({ where: { userId: result.user.id } });
     if (membership === null) return null;
+    // Read from the User row rather than the session: the session is minted at sign-in and would
+    // keep saying "rotation still pending" for its whole lifetime after the password was changed.
+    const user = await prisma.user.findUnique({
+      where: { id: result.user.id },
+      select: { mustChangePassword: true },
+    });
     const ctx: AuthContext = {
       userId: result.user.id,
       organizationId: membership.organizationId,
       role: membership.role as Role,
+      mustChangePassword: user?.mustChangePassword ?? false,
     };
     return ctx;
   };

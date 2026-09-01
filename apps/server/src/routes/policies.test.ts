@@ -35,7 +35,7 @@ const STORE: PolicyStore = {
 
 async function appWith(role: Role | null, over: Partial<PolicyStore> = {}) {
   const app = Fastify();
-  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role };
+  const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
     policyRoutes({
       resolver: () => Promise.resolve(ctx),

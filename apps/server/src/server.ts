@@ -85,6 +85,18 @@ export async function main(): Promise<void> {
         "(plus 127.0.0.1/32) — otherwise the limit is either bypassable or shared by every client",
     );
   }
+  // A deployment that names its proxies is a deployment behind a proxy, and one whose public URL is
+  // http:// while sitting behind TLS gets a session cookie without the Secure flag — free to leak
+  // over any plaintext request the browser is tricked into making. Better-Auth reads
+  // X-Forwarded-Proto first (the documented nginx and Caddy configs both send it), so this is the
+  // narrow case of a proxy that does not.
+  if (trustedProxies.length > 0 && env.SCHRODUMP_URL.startsWith("http://")) {
+    logger.warn(
+      { url: env.SCHRODUMP_URL },
+      "SCHRODUMP_URL is http:// while trusted proxies are configured: unless the proxy sends " +
+        "X-Forwarded-Proto, the session cookie will not be marked Secure",
+    );
+  }
   const auth = createAuth(prisma, {
     secret: env.BETTER_AUTH_SECRET ?? deriveAuthSecret(kek),
     baseURL: env.SCHRODUMP_URL,

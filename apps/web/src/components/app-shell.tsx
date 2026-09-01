@@ -11,6 +11,8 @@ import { LOCALES, useI18n, type Locale } from "@/i18n/provider";
 import type { MessageKey } from "@/i18n/messages/en";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/feedback";
+import { PasswordRotation } from "@/components/password-rotation";
+import { useMustChangePassword } from "@/hooks/use-current-role";
 import { cn } from "@/lib/cn";
 
 const NAV: { href: string; key: MessageKey }[] = [
@@ -49,6 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { data: session, isPending } = useSession();
+  const mustRotate = useMustChangePassword();
 
   useEffect(() => {
     if (!isPending && session === null) router.replace("/login");
@@ -62,6 +65,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
   if (session === null) return null;
+  // Before the chrome, not inside it: every navigation target behind this would 403.
+  if (mustRotate) return <PasswordRotation />;
 
   return (
     <div className="min-h-screen">

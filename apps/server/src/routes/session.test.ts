@@ -17,10 +17,10 @@ async function appWith(ctx: AuthContext | null) {
 
 describe("GET /me", () => {
   it("returns the caller's resolved context so the UI can learn its role", async () => {
-    const app = await appWith({ userId: "u1", organizationId: "o1", role: "operator" satisfies Role });
+    const app = await appWith({ userId: "u1", organizationId: "o1", role: "operator" satisfies Role , mustChangePassword: false });
     const res = await app.inject({ method: "GET", url: "/me" });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({ userId: "u1", organizationId: "o1", role: "operator" });
+    expect(JSON.parse(res.body)).toEqual({ userId: "u1", organizationId: "o1", role: "operator" , mustChangePassword: false });
     await app.close();
   });
 

@@ -132,6 +132,20 @@ link de setup.
 - **A linha na tabela nasce ANTES de resolver a configuração.** Destino apagado ou escrow ausente
   vira `SelfBackup` `FAILED` com motivo legível, visível em `GET /self-backups`, não só um log.
 
+## Rotação da senha de bootstrap (`auth/rbac.ts`, `auth/auth.ts`)
+
+- **`mustChangePassword` é imposto no `requireRole`, antes da checagem de role e para todas elas.**
+  A pergunta não é o que a conta pode fazer — é que a senha que a autoriza ainda é a do ambiente,
+  legível por `docker inspect`. Retorna `403 password_rotation_required`, um código de máquina, não
+  prosa: a UI precisa distinguir isso de negação de permissão comum.
+- **`GET /me` fica de fora do portão** (usa só `authenticate`), senão a UI não teria como explicar
+  por que está bloqueada. O endpoint de troca de senha do Better-Auth vive em `/api/auth/*` e não
+  passa por aqui — sem isso, o portão seria armadilha, não controle.
+- **A flag é limpa por um `hooks.after` em `/change-password`,** e só num 2xx: uma troca recusada
+  (senha atual errada) deixa a exigência de pé.
+- **O resolver lê a flag da linha do `User`, não da sessão.** A sessão é cunhada no sign-in e
+  continuaria dizendo "rotação pendente" pelo resto da vida dela depois da senha já trocada.
+
 ## Gaps conhecidos (ver `docs/roadmap.md`)
 
 - **STAGED funciona nos dois sentidos, e três coisas precisaram entrar juntas.** O diretório de

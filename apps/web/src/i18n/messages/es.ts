@@ -277,4 +277,13 @@ export const es: Record<MessageKey, string> = {
   "selfBackup.state.FAILED": "Falló",
   "selfBackup.escrow": "Sellado con la clave de custodia sin conexión. Recuperarlo exige esa identidad — la operativa está dentro de la base que esta copia guarda.",
   "selfBackup.forbidden": "Solo un admin puede ver el historial de la autocopia.",
+  "rotate.title": "Rota la contraseña de arranque",
+  "rotate.why": "Esta cuenta todavía usa la contraseña de SCHRODUMP_ADMIN_PASSWORD. Ese valor se lee con `docker inspect` y está en el .env en disco, así que hasta cambiarlo es un secreto compartido, no una credencial. Toda acción se rechaza hasta entonces.",
+  "rotate.current": "Contraseña actual",
+  "rotate.new": "Nueva contraseña",
+  "rotate.confirm": "Confirma la nueva contraseña",
+  "rotate.submit": "Cambiar la contraseña",
+  "rotate.mismatch": "Las dos contraseñas no coinciden.",
+  "rotate.tooShort": "Usa al menos 12 caracteres.",
+  "rotate.failed": "La contraseña no se cambió. Revisa la contraseña actual e inténtalo de nuevo.",
 };

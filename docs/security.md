@@ -104,6 +104,21 @@ username, change a policy, and start a restore over a live database. There is no
 behind it. [install.md](install.md#put-it-behind-tls-this-is-not-optional) has the proxy configs;
 publish 8080 to loopback only.
 
+### The bootstrap password is a shared secret until it is rotated
+
+`SCHRODUMP_ADMIN_PASSWORD` provisions the first admin without the setup link. That value is readable
+with `docker inspect`, appears in shell history, and sits in `.env` on disk — so an account still
+using it is not protected by a credential, it is protected by a value several people and one
+process listing already have.
+
+The `mustChangePassword` flag has always been set for that account. It is now **enforced**: while it
+stands, every route behind `requireRole` refuses with `403 password_rotation_required`, whatever the
+role. `GET /me` still answers, so the UI can explain rather than look broken, and Better-Auth's
+change-password endpoint is reachable, so the way out is open. The UI replaces the whole application
+with the rotation form rather than showing a banner over controls that would all fail.
+
+Rotating revokes other sessions. The old password may already have opened one.
+
 ### The login rate limit depends on knowing who is asking
 
 Sign-in is limited to 5 attempts per address per five minutes, counted in Postgres so the limit is
