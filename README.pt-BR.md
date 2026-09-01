@@ -142,11 +142,11 @@ O Schrodump está em desenvolvimento ativo rumo ao **v1**. O modelo de verifica�
 storage, a criptografia, a retenção GFS, a execução de restore, a entrega de notificações (webhook e
 SMTP), o autobackup do próprio catálogo, a interface web e o pipeline completo de CI + release
 assinada estão implementados e testados. O restore cobre artefatos single-stream e staged
-(diretório); o MongoDB restaura apenas em escopo de cluster. Backup físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que não está no v1.
+(diretório), e é escopada onde a engine oferece mecanismo para isso: PostgreSQL até schema ou tabela, MongoDB até banco ou coleção. Backup físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que não está no v1.
 
 ## Contribuindo
 
-Contribuições são bem-vindas sob o Contributor License Agreement do projeto — veja
+Contribuições são bem-vindas sob o [Developer Certificate of Origin](https://developercertificate.org/) — assine seus commits com `git commit -s`. Veja
 [CONTRIBUTING.md](CONTRIBUTING.md). Os commits seguem [Conventional Commits](https://www.conventionalcommits.org/),
 e `pnpm typecheck`, `pnpm lint` e `pnpm test` precisam estar verdes.
 
