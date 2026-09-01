@@ -32,7 +32,13 @@ export type Role = (typeof ROLES)[number];
 export const SEAL_MODES = ["operational", "sealed"] as const;
 export type SealMode = (typeof SEAL_MODES)[number];
 
-export const RESTORE_TARGETS = ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE", "COLLECTION"] as const;
+export const RESTORE_TARGETS = [
+  "FULL_CLUSTER",
+  "DATABASE",
+  "SCHEMA",
+  "TABLE",
+  "COLLECTION",
+] as const;
 export type RestoreTarget = (typeof RESTORE_TARGETS)[number];
 
 // Mirror of the core capability matrix: which restore targets each engine supports. The restore
@@ -41,7 +47,10 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   postgres: ["FULL_CLUSTER", "DATABASE", "SCHEMA", "TABLE"],
   mysql: ["FULL_CLUSTER", "DATABASE", "TABLE"],
   mariadb: ["FULL_CLUSTER", "DATABASE", "TABLE"],
-  mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
+  // FULL_CLUSTER only: mongorestore runs with --drop and no --nsInclude, so a sub-scope restore
+  // would drop and overwrite every namespace in the archive. The server refuses it — this list is
+  // the second lock, kept in sync so the UI never offers a target that will be rejected.
+  mongodb: ["FULL_CLUSTER"],
 };
 
 // Restore works end-to-end for all four engines, but only for a STREAM artifact. The gate is

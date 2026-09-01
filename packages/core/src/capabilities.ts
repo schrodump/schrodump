@@ -60,7 +60,13 @@ const CAPABILITY_MATRIX: Readonly<Record<EngineKind, EngineCapabilities>> = {
   mongodb: {
     engine: "mongodb",
     serverVersionRange: { min: 60000, max: null },
-    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
+    // FULL_CLUSTER only, and this is a safety gate rather than a missing feature. mongorestore is
+    // driven with --drop and NO --nsInclude — buildRestore never reads input.scope — so a DATABASE
+    // or COLLECTION restore would drop and overwrite EVERY namespace in the archive instead of the
+    // one asked for. runRestoreJob validates the requested target against this list, so advertising
+    // sub-scope here is precisely what made that reachable. They return together with --nsInclude
+    // scoping; until then, refusing is the same call already made for STAGED restore.
+    supportedRestoreTargets: ["FULL_CLUSTER"],
     // --archive is a stream.
     // TODO: validar --numParallelCollections vs --archive na doc oficial do MongoDB
     // Database Tools antes de subir maxParallelism acima de 1.
