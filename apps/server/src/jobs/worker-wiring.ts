@@ -638,7 +638,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       return;
     }
 
-    const artifact = await prisma.artifact.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow: the artifact can legitimately be gone by the time this
+    // runs. Verify is enqueued by the worker after a successful backup and RETENTION is chained
+    // after the same backup — so a policy at its keep limit can prune an older artifact while a
+    // verify for it is still queued. OrThrow turned that ordinary race into
+    // "job failed: PrismaClientKnownRequestError", an opaque reason for something entirely
+    // expected, and indistinguishable from a database that broke.
+    const artifact = await prisma.artifact.findUnique({
       where: { id: job.artifactId },
       // The producing job's policy → target carries the origin scope FULL_RESTORE needs to resolve
       // the origin db for the mysql/mongo verify sandbox (postgres ignores it). A policy-less
@@ -648,6 +654,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         job: { include: { policy: { include: { target: true } } } },
       },
     });
+    if (artifact === null) {
+      // Nothing to claim about an artifact that no longer exists — and nothing wrong happened.
+      await failJob(job.id, "the artifact was deleted before this verification could run");
+      return;
+    }
 
     // SECURITY: the VERIFY job must reference an artifact in its OWN organization. This runs on raw
     // prisma (system process), so the check is explicit and happens BEFORE any decrypt — mirroring

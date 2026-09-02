@@ -74,7 +74,7 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
-log "1/15  docker compose up"
+log "1/16  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -83,7 +83,7 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
-log "2/15  a target database and an S3 destination on the deployment's own networks"
+log "2/16  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
@@ -99,7 +99,7 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/15  the one-time setup link"
+log "3/16  the one-time setup link"
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \
@@ -112,11 +112,11 @@ api -o /dev/null -w '   sign-in %{http_code}\n' -X POST -H "$JSON" \
 api "${BASE}/backend/me" | grep -q '"mustChangePassword":false' ||
   fail "a setup-link admin was flagged for password rotation"
 
-log "4/15  encryption keys"
+log "4/16  encryption keys"
 api -o /dev/null -w '   provision %{http_code}\n' -X POST -H "$JSON" \
   -d '{"escrow":{"mode":"generate"}}' "${BASE}/backend/encryption-keys"
 
-log "5/15  destination, target, policy"
+log "5/16  destination, target, policy"
 dest="$(api -X POST -H "$JSON" -d "{\"name\":\"minio\",\"endpoint\":\"http://${PROJECT}-minio:9000\",\"region\":\"us-east-1\",\"bucket\":\"backups\",\"prefix\":\"s\",\"accessKeyId\":\"minio\",\"secretAccessKey\":\"minio123\",\"forcePathStyle\":true,\"sealMode\":\"operational\"}" "${BASE}/backend/destinations" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$dest" ] || fail "the destination was not created"
 # PUT/GET/DELETE against the real bucket: a credential that can write but not manage is a backup
@@ -132,10 +132,10 @@ api "${BASE}/backend/targets/${target}/test-connection" -X POST | grep -q '"ok":
 policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$policy" ] || fail "the policy was not created"
 
-log "6/15  a real backup"
+log "6/16  a real backup"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
-log "7/15  waiting for the artifact to reach VERIFIED"
+log "7/16  waiting for the artifact to reach VERIFIED"
 verified=""
 for attempt in $(seq 1 60); do
   sleep 5
@@ -163,7 +163,7 @@ done
 # Verify restores into a throwaway sandbox; a real restore runs a different code path
 # (runRestoreJob) against a real database with --clean semantics. It was equally broken by the
 # scratch defect and equally invisible to every other test.
-log "8/15  restoring it over the live database"
+log "8/16  restoring it over the live database"
 artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$artifact" ] || fail "could not read the artifact id"
 # Changed AFTER the backup, so "the data came back" is an observation rather than a coincidence.
@@ -191,7 +191,18 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # The documented floor when the metadata database is lost. It aborted on a partly-missing catalog
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
-log "9/15  rebuilding the catalog from the bucket alone"
+log "9/16  rebuilding the catalog from the bucket alone"
+# Let anything already in flight settle first. The scheduler dispatches the most recent past cron
+# window on top of the manual trigger, each chaining a verify, so wiping the table underneath a
+# RUNNING verify is a race of the script's own making. The server now answers that case legibly
+# rather than crashing, but a smoke step should assert the thing it is named after, not the
+# handling of a collision it caused.
+for _ in $(seq 1 40); do
+  case "$(api "${BASE}/backend/jobs")" in
+    *'"state":"RUNNING"'*|*'"state":"PENDING"'*) sleep 3 ;;
+    *) break ;;
+  esac
+done
 compose exec -T db psql -U schrodump -d schrodump -tAc 'DELETE FROM "Artifact"' >/dev/null
 api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog was not emptied"
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
@@ -216,7 +227,7 @@ esac
 # Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
 # it ever stopped keeping it the loss would be silent — pre-rotation artifacts unopenable by the
 # server, discovered at a restore, months later. That is the worst failure this product has.
-log "10/15  rotating the operational key, and re-verifying an artifact sealed to the old one"
+log "10/16  rotating the operational key, and re-verifying an artifact sealed to the old one"
 old_artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$old_artifact" ] || fail "could not read the rebuilt artifact id"
 api -o /dev/null -w '   rotate %{http_code}\n' -X POST -H "$JSON" \
@@ -244,7 +255,7 @@ done
 # mysql carries it: `parallelism > 1` is the explicit way into STAGED (resolveExecutionMode), and
 # mydumper is an image the operator never names — the server resolves schrodump/mydumper:1 by
 # itself, at backup time.
-log "11/15  a STAGED mysql backup, through the executor image nobody types"
+log "11/16  a STAGED mysql backup, through the executor image nobody types"
 
 # Unpublished until the first release cuts a tag, so a fresh checkout builds it. ensureImage
 # inspects before pulling, so a local tag is used as-is and no registry is consulted.
@@ -335,7 +346,7 @@ done
 # only in a --config file, and that file has to sit at a path the Docker daemon can resolve as a
 # bind source. That is precisely what the scratch defect broke — and the engine it broke most
 # completely, since STREAM postgres kept working throughout. Nothing here covered it.
-log "12/15  a mongo backup, whose password only travels in a mounted config file"
+log "12/16  a mongo backup, whose password only travels in a mounted config file"
 docker run -d --name "${PROJECT}-mongo" --network "${PROJECT}_targets" \
   -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8 >/dev/null
 for _ in $(seq 1 90); do
@@ -388,7 +399,7 @@ done
 # family switch picks mariadb-dump/mariadb or the executor exits 127. Nothing here ran that branch,
 # and it is version-sensitive in a way a descriptor test cannot see: the test asserts which string
 # was chosen, not that the string names a binary that exists in the image.
-log "13/15  the same adapter against mariadb, whose client binaries are named differently"
+log "13/16  the same adapter against mariadb, whose client binaries are named differently"
 docker run -d --name "${PROJECT}-maria" --network "${PROJECT}_targets" \
   -e MARIADB_ROOT_PASSWORD=rootpw -e MARIADB_DATABASE=shop mariadb:11 >/dev/null
 for _ in $(seq 1 90); do
@@ -437,7 +448,7 @@ done
 # one — so the service is recreated with it. That is also what an operator does, and it is the only
 # step here that proves the compose plumbing for these three variables works at all: they were
 # documented and, until recently, silently not passed through.
-log "14/15  a self-backup, sealed to escrow, over the internal network"
+log "14/16  a self-backup, sealed to escrow, over the internal network"
 cat >> "${WORK}/.env" <<EOF
 SCHRODUMP_SELF_BACKUP_DESTINATION_ID=${dest}
 SCHRODUMP_SELF_BACKUP_INTERVAL_MS=60000
@@ -478,7 +489,7 @@ done
 # it either — every one of them passes parallelism: 1.
 #
 # Reuses the postgres target from step 2; only the policy differs.
-log "15/15  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
+log "15/16  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
 pg_staged="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-pg-staged\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STAGED\",\"parallelism\":2,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$pg_staged" ] || fail "the STAGED postgres policy was not created"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${pg_staged}/backup"
@@ -524,4 +535,64 @@ for attempt in $(seq 1 72); do
   [ "$attempt" -eq 72 ] && fail "the STAGED postgres restore did not put the data back (found: ${rows})"
 done
 
-printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored three over live data, rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, and dumped its own metadata database to escrow.\n'
+# Retention is the only path here that DELETES, and the only one whose defects cannot be undone.
+# Every other step in this script has left it reporting "kept N, deleted 0" — it has never once been
+# watched removing anything.
+#
+# The claim is not just that it deletes. It is that it deletes EVERYTHING a backup wrote: a postgres
+# backup writes three objects, and pruning two of them leaves the third in the bucket permanently —
+# outside the window the operator configured, holding pg_dumpall's role password hashes.
+log "16/16  retention actually deleting, and leaving nothing behind"
+prune_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-prune\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"NONE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":1,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$prune_policy" ] || fail "the retention policy was not created"
+
+# Two backups under keepLast:1 — the second must prune the first.
+api -o /dev/null -w '   backup 1 %{http_code}\n' -X POST "${BASE}/backend/policies/${prune_policy}/backup"
+sleep 10
+api -o /dev/null -w '   backup 2 %{http_code}\n' -X POST "${BASE}/backend/policies/${prune_policy}/backup"
+
+# Scoped to THIS policy's retention, not any retention. The first version grepped every job for
+# "deleted [1-9]" and passed locally because a different policy — one with keepLast:3 and enough
+# scheduler-dispatched backups to exceed it — happened to prune. An assertion that another
+# policy can satisfy is not an assertion about this one.
+mine() {
+  api "${BASE}/backend/jobs" | tr '}' '\n' |
+    grep '"kind":"RETENTION"' | grep "retention:${prune_policy}"
+}
+for attempt in $(seq 1 72); do
+  sleep 5
+  if mine | grep -q 'deleted [1-9]'; then
+    printf '   retention pruned an artifact after %ss\n' "$((attempt * 5))"
+    break
+  fi
+  if mine | grep -q '"state":"FAILED"'; then
+    printf '\n--- this policy'"'"'s retention jobs ---\n%s\n' "$(mine)" >&2
+    fail "the retention job failed"
+  fi
+  [ "$attempt" -eq 72 ] && {
+    printf '\n--- this policy'"'"'s retention jobs (policy %s) ---\n%s\n' "$prune_policy" "$(mine)" >&2
+    printf '\n--- its artifacts ---\n%s\n' \
+      "$(api "${BASE}/backend/artifacts" | tr '}' '\n' | grep -c '"engine"' || true)" >&2
+    fail "retention never deleted anything under keepLast:1"
+  }
+done
+
+# And nothing orphaned. Every globals.bin in the bucket must still have its artifact.bin beside it:
+# if a prefix holds globals without an artifact, retention removed part of a backup and kept the
+# rest, which is the failure this step exists for.
+listing="$(docker run --rm --network "${PROJECT}_internal" \
+  -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
+  amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" \
+  s3 ls --recursive s3://backups/ 2>/dev/null | awk '{print $NF}')"
+orphans=""
+for g in $(printf '%s\n' "$listing" | grep '/globals\.bin$' || true); do
+  a="${g%globals.bin}artifact.bin"
+  printf '%s\n' "$listing" | grep -qx "$a" || orphans="${orphans} ${g}"
+done
+if [ -n "$orphans" ]; then
+  printf '\n--- orphaned globals objects ---%s\n' "$orphans" >&2
+  fail "retention deleted an artifact and left its globals dump in the bucket"
+fi
+printf '   every globals.bin still has its artifact beside it — no half-deleted backup\n'
+
+printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored three over live data, rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, and pruned an expired backup without leaving part of it behind.\n'

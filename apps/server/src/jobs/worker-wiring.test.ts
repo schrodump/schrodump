@@ -279,6 +279,7 @@ describe("runVerify org-scoping guard", () => {
     const backupPolicyFindUnique = vi.fn(async () => null);
     const prisma = {
       artifact: {
+        findUnique: vi.fn(async () => artifact),
         findUniqueOrThrow: vi.fn(async () => artifact),
         update: artifactUpdate,
       },
@@ -294,6 +295,34 @@ describe("runVerify org-scoping guard", () => {
       backupPolicyFindUnique,
     };
   }
+
+  // Retention is chained after the same successful backup that enqueues verify, so a policy at its
+  // keep limit can prune an older artifact while a verify for it is still queued. findUniqueOrThrow
+  // turned that ordinary race into "job failed: PrismaClientKnownRequestError" — an opaque reason
+  // for something entirely expected, indistinguishable from a database that broke. Seen in CI.
+  it("fails a VERIFY whose artifact was deleted with a reason that says so, not a Prisma error", async () => {
+    const { prisma, backupJobUpdate, artifactUpdate } = fakePrisma({ organizationId: "org-mine" });
+    (prisma as unknown as { artifact: { findUnique: unknown } }).artifact.findUnique = vi.fn(
+      async () => null,
+    );
+    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, env, log: { warn: () => undefined } });
+
+    await executor.runVerify({
+      id: "job-1",
+      organizationId: "org-mine",
+      kind: "VERIFY",
+      policyId: null,
+      artifactId: "gone",
+      correlationId: "verify:gone",
+      restoreParams: null,
+    });
+
+    const call = backupJobUpdate.mock.calls[0]![0];
+    expect(call.data.state).toBe("FAILED");
+    expect(call.data.reason).toBe("the artifact was deleted before this verification could run");
+    // Nothing is claimed about an artifact that is not there.
+    expect(artifactUpdate).not.toHaveBeenCalled();
+  });
 
   it("fails a mis-scoped VERIFY job LOUD, before any policy lookup or decrypt, and leaves the artifact untouched", async () => {
     const {
