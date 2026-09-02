@@ -24,6 +24,20 @@ Docker execution and scratch management. Takes precedence over the root `CLAUDE.
 - **stderr** always captured, truncated and **sanitised** (database client messages leak
   host/user/password).
 
+## Executor images are pulled here, because nothing else pulls them
+
+`dockerode`'s `createContainer` does **not** pull — it answers 404 "No such image" — and neither
+the server nor the entrypoint pulled either. On a fresh host the first backup of every engine
+therefore failed with an opaque `docker run failed`, and an operator could not reliably pre-pull:
+the tag is derived from the server version the probe is about to discover (`mariadb:11.8`,
+`mongo:8`).
+
+`DockerEngine.ensureImage` inspects and pulls when absent, and both `run()` and
+`withEphemeralService()` call it before creating anything — the sandbox needs it too, since a
+FULL_RESTORE verify stands up a throwaway database of the artifact's own engine version. A pull
+failure is its own error (`RUNNER_IMAGE_UNAVAILABLE`) naming the image, because "docker run failed"
+sent people looking at the container when the image was the thing they could act on.
+
 ## Stream composition (`pipeline.ts`)
 
 `composeStreamPipeline` uses `node:stream/promises` `pipeline()` rather than chained `.pipe()`,
