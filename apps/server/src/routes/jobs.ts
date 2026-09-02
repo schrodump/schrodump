@@ -21,6 +21,16 @@ export interface ArtifactRecord {
   // same fact to stop offering a restore the server will refuse. Narrower than the other enum
   // fields on purpose — this one is a control, not a label.
   executionMode: "STREAM" | "STAGED";
+  // Whether this archive carries an oplog, which is what makes a FULL_CLUSTER restore replay it
+  // (`--oplogReplay`) and land every collection on ONE instant. Recorded at dump time and
+  // unrecoverable afterwards: the restore cannot re-derive it without re-probing an origin that may
+  // have changed topology or ceased to exist.
+  //
+  // Exposed because the operator cannot otherwise tell a point-in-time-consistent replica-set
+  // archive from an ordinary one — and that is the whole difference between the two on the day it
+  // matters. `null` for every engine but mongodb, deliberately: false would assert something about
+  // an oplog for a database that has none.
+  sourceHasOplog: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

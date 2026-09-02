@@ -19,6 +19,7 @@ const service: JobsService = {
         manifestKey: "org/backup.manifest.json",
         engine: "postgres",
         executionMode: "STREAM",
+        sourceHasOplog: null,
         serverVersionNum: 160002,
         sizeRawBytes: 9_000_000_000,
         sizeCompressedBytes: 1_500_000_000,
