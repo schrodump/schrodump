@@ -153,11 +153,33 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
             "a STAGED mysql/mariadb restore requires sourcePath",
           );
         }
-        // mydumper output → myloader from a directory. Unreachable while STAGED restore is
-        // gated in v1 (apps/server refuses non-STREAM artifacts); kept for when it ships.
+        // mydumper output → myloader from a directory.
+        //
+        // `--drop-table=DROP` is this engine's `--clean`, and it is not optional. myloader's
+        // default drop mode is FAIL: without it, restoring over a database that still has its
+        // tables dies on the first CREATE TABLE with "Table 'x' already exists", part-way through,
+        // leaving whatever earlier threads had already written. Verify never saw it — verify
+        // restores into a throwaway EMPTY server, so the artifact reaches VERIFIED and only the
+        // restore an operator actually needs, over live data, fails.
+        //
+        // The comment this replaces said the branch was unreachable because apps/server refused
+        // non-STREAM artifacts. That gate is gone (restore-executor.ts unpacks the tar and
+        // restores from the directory); the descriptor was simply never revisited.
+        //
+        // The spelling matters and is pinned to the executor: mydumper 1.0.3 answers
+        // `--overwrite-tables` with "Unknown option". `--drop-table=DROP` names the mode instead of
+        // relying on the bare `-o` default.
         return {
           image: MYDUMPER_IMAGE,
-          command: ["myloader", ...connArgs(connection), "-B", connection.database, "-d", input.sourcePath],
+          command: [
+            "myloader",
+            ...connArgs(connection),
+            "--drop-table=DROP",
+            "-B",
+            connection.database,
+            "-d",
+            input.sourcePath,
+          ],
           env: connEnv(connection),
           outputKind: "directory",
         };
