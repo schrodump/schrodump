@@ -1,60 +1,60 @@
 # Architecture decisions
 
-Decisões já tomadas para o v1, com a justificativa de cada uma. Este documento registra
-o *porquê*; detalhes de implementação vivem no código e nos `CLAUDE.md` de cada pacote.
+Decisions already taken for v1, each with its rationale. This document records the *why*;
+implementation detail lives in the code and in each package's `CLAUDE.md`.
 
-## 1. Backup lógico no v1
+## 1. Logical backup in v1
 
-Só backup **lógico** (dumps via clients nativos) no v1. Backup físico será delegado a
-ferramentas externas por um agent futuro, **não reimplementado**.
-— Reimplementar backup físico duplica ferramentas maduras e específicas de cada engine
-sem ganho para o diferencial do produto (verificação de restore).
+Logical backup only (dumps through native clients) in v1. Physical backup will be delegated to
+external tools by a future agent, **not reimplemented**.
+— Reimplementing physical backup duplicates mature, engine-specific tooling with no gain for what
+actually differentiates this product: restore verification.
 
 ## 2. Agentless
 
-Acesso ao banco alvo por **conexão de rede**, sem instalar agente no host do banco.
-— Reduz atrito de adoção e superfície operacional; não exige acesso privilegiado ao host
-alheio, apenas credencial e rota de rede.
+The target database is reached over a **network connection**, with no agent installed on the
+database host.
+— Lowers adoption friction and operational surface; it requires no privileged access to someone
+else's host, only a credential and a route.
 
-## 3. Docker-first com executores efêmeros
+## 3. Docker-first, with ephemeral executors
 
-Execução **Docker-first**: cada dump/restore roda num executor efêmero com o client da
-versão certa. A imagem do server **não** carrega clients de banco.
-— Isola versões de client conflitantes e mantém a imagem do server pequena, auditável e
-sem binários de terceiros com CVEs próprios.
+Execution is **Docker-first**: every dump and restore runs in an ephemeral executor carrying the
+client of the right version. The server image ships **no** database clients.
+— Isolates conflicting client versions and keeps the server image small, auditable, and free of
+third-party binaries carrying CVEs of their own.
 
-## 4. Destino S3-compatible apenas
+## 4. S3-compatible destinations only
 
-O único destino de armazenamento é **S3-compatible**. O staging local é transitório e
-**sempre apagado** após o uso.
-— Um único contrato de armazenamento simplifica o código e a operação; staging efêmero
-evita acúmulo de dados sensíveis em disco local.
+The only storage destination is **S3-compatible**. Local staging is transient and **always
+deleted** after use.
+— A single storage contract simplifies both the code and the operation; ephemeral staging keeps
+sensitive data from accumulating on local disk.
 
-## 5. Estado de backup ternário
+## 5. Backup state is ternary
 
-O estado de um backup é ternário: `VERIFIED` / `UNOBSERVED` / `FAILED`. **Não existe
-"OK".**
-— Um backup cujo restore nunca foi observado não é confiável; forçar `UNOBSERVED` em vez
-de "OK" impede a falsa sensação de segurança que é o problema central da categoria.
+A backup's state is ternary: `VERIFIED` / `UNOBSERVED` / `FAILED`. **There is no "OK".**
+— A backup whose restore has never been observed is not trustworthy. Forcing `UNOBSERVED` instead
+of "OK" refuses the false confidence that is this category's central problem.
 
-## 6. `organizationId` desde o início
+## 6. `organizationId` from the beginning
 
-`organizationId` está presente em **todo** o modelo de dados desde o começo, mesmo em
-deploy single-tenant.
-— Retrofit de multi-tenancy num modelo já em produção é caro e arriscado; carregar a
-coluna desde o dia zero é barato e evita migração destrutiva depois.
+`organizationId` is present across the **entire** data model from the start, including in a
+single-tenant deployment.
+— Retrofitting multi-tenancy onto a model already in production is expensive and risky; carrying
+the column from day zero is cheap and avoids a destructive migration later.
 
-## 7. Retenção é responsabilidade da aplicação
+## 7. Retention is the application's responsibility
 
-A retenção é aplicada **pela aplicação**. Configurar lifecycle no bucket é **proibido** e
-está documentado como tal.
-— A aplicação é a única que sabe se um backup foi `VERIFIED`; lifecycle no bucket poderia
-apagar o único backup bom por idade, sem consultar o estado de verificação.
+Retention is applied **by the application**. Configuring bucket lifecycle rules is **forbidden**,
+and documented as such.
+— Only the application knows whether a backup is `VERIFIED`. A lifecycle rule could delete the one
+good backup on age alone, without ever consulting its verification state.
 
-## 8. Criptografia client-side com múltiplos recipients
+## 8. Client-side encryption with multiple recipients
 
-Criptografia **client-side** com múltiplos recipients (operacional + escrow); o `keyId` é
-gravado no manifesto para permitir rotação.
-— Cifrar antes de sair do executor mantém o destino zero-knowledge; múltiplos recipients
-evitam ponto único de perda de chave, e o `keyId` no manifesto torna a rotação possível
-sem reprocessar backups antigos.
+**Client-side** encryption with multiple recipients (operational + escrow); the `keyId` is written
+into the manifest so that rotation is possible.
+— Encrypting before anything leaves the executor keeps the destination zero-knowledge; multiple
+recipients avoid a single point of key loss; and the `keyId` in the manifest makes rotation
+possible without reprocessing old backups.
