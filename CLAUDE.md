@@ -106,11 +106,13 @@ environment set — otherwise they are `describe.skipIf`:
 - `docker/executors/` holds **one** file: `mydumper.Dockerfile` (STAGED mysql/mariadb), with the
   version **and digest** pinned. There is **no `age` executor** — artifact encryption is
   in-process via the `age-encryption` library. See `apps/server/CLAUDE.md` for why.
-- CI: `ci.yml` (dco, readme-sync, check, integration, image build/smoke — the last of which now
-  stands the **composed stack** up and drives a real backup to `VERIFIED` through it, because three
-  defects shipped in the seam between the code and `compose.yaml` that no other test could see),
-  `security.yml`
-  (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the
+- CI: `ci.yml` (dco, readme-sync, check, integration, executor images build, image build/smoke — the
+  last of which stands the **composed stack** up and drives seventeen steps through it: all four
+  engines in both execution modes, verified by restore, three restored over live data, a catalog
+  rebuild, a key rotation, a self-backup, retention actually deleting, and a signed notification
+  delivered. It exists because three defects shipped in the seam between the code and
+  `compose.yaml` that no other test could see, and covering the rest found six more),
+  `security.yml` (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the
   executor images, on a `v*` tag). `release.yml` re-runs the full gate on the tagged commit and
   every publishing job `needs:` it — a tag on a red commit must not become a signed image. A
   `preflight` job checks the Docker Hub secrets exist and fails in seconds naming the missing one,
