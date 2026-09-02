@@ -114,6 +114,10 @@ export interface RestoreStep {
   // Builds the engine restore descriptor for this step given the path the decrypted dump is mounted
   // at inside the executor. Deferred because that path only exists once the step has staged the dump.
   readonly buildDescriptor: (sourcePath: string) => ExecutionDescriptor;
+  // Whether THIS object is the tar a STAGED backup produced. Per step, not per pipeline: a postgres
+  // restore has two of them, and only one is ever a tar. `globals.bin` is plain SQL from
+  // `pg_dumpall --globals-only` in every execution mode — untarring it is untarring a text file.
+  readonly staged: boolean;
 }
 
 // The ordered restore steps. Globals (roles/tablespaces) MUST be restored before the per-database
@@ -124,10 +128,14 @@ export function planRestoreSteps(
   buildRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor,
   globalsKey: string | null,
   buildGlobalsRestoreDescriptor: (sourcePath: string) => ExecutionDescriptor | null,
+  staged: boolean,
 ): RestoreStep[] {
   const steps: RestoreStep[] = [];
   if (globalsKey !== null) {
     steps.push({
+      // NEVER staged, whatever the artifact is: pg_dumpall --globals-only emits SQL, and the
+      // archive step only ever tars the directory dump.
+      staged: false,
       key: globalsKey,
       buildDescriptor: (sourcePath): ExecutionDescriptor => {
         const descriptor = buildGlobalsRestoreDescriptor(sourcePath);
@@ -140,7 +148,7 @@ export function planRestoreSteps(
       },
     });
   }
-  steps.push({ key: bucketKey, buildDescriptor: buildRestoreDescriptor });
+  steps.push({ key: bucketKey, buildDescriptor: buildRestoreDescriptor, staged });
   return steps;
 }
 
@@ -248,6 +256,7 @@ export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boo
       deps.buildRestoreDescriptor,
       deps.globalsKey,
       deps.buildGlobalsRestoreDescriptor,
+      deps.executionMode === "STAGED",
     );
     for (const step of steps) {
       // postgres restores globals first, then the database. Starting a second step after the signal
@@ -375,7 +384,12 @@ async function restoreOne(
     // pg_restore reads a directory-format dump when handed a directory, and myloader takes -d, so
     // the engine descriptors need no change — only the thing mounted at RESTORE_DUMP_PATH does.
     let sourcePath = dumpPath;
-    if (deps.executionMode === "STAGED") {
+    // step.staged, NOT deps.executionMode: the mode describes the ARTIFACT, and a postgres restore
+    // stages two different objects. Reading it per pipeline meant a STAGED postgres backup tried to
+    // untar its globals SQL, failed with "tar: invalid tar magic", and could therefore never be
+    // verified OR restored — while mysql STAGED (no globals step) and postgres STREAM (no extract)
+    // both worked, which is why only this combination was broken.
+    if (step.staged) {
       const extractedPath = `${dumpPath}-extracted`;
       await mkdir(extractedPath, { recursive: true, mode: 0o700 });
       // Same image as the restore itself: every engine image ships tar, so unpacking introduces no
@@ -399,10 +413,20 @@ async function restoreOne(
         },
       );
       if (extract.exitCode !== 0) {
-        throw new SchrodumpError(`restore extract failed (exit code ${extract.exitCode})`, {
-          code: "RESTORE_EXTRACT_FAILED",
-          correlationId: deps.correlationId,
-        });
+        // The exit code alone says a STAGED artifact cannot be unpacked and nothing about why —
+        // and this failure surfaces as an INCONCLUSIVE verify, so the artifact stays UNOBSERVED
+        // with no diagnosable cause. RunResult.stderr is already captured, truncated and sanitized
+        // by the runner (env values are redacted there); dropping it was pure loss.
+        const detail = extract.stderr.trim();
+        throw new SchrodumpError(
+          detail === ""
+            ? `restore extract failed (exit code ${extract.exitCode})`
+            : `restore extract failed (exit code ${extract.exitCode}): ${detail}`,
+          {
+            code: "RESTORE_EXTRACT_FAILED",
+            correlationId: deps.correlationId,
+          },
+        );
       }
       sourcePath = extractedPath;
     }

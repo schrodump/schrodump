@@ -297,7 +297,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
   });
 
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -327,7 +327,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
   }
 
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -615,7 +615,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
   });
 
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -645,7 +645,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
   }
 
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
