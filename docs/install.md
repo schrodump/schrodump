@@ -41,6 +41,31 @@ manager, or an offline vault.
 > of the KEK on first boot and refuses to start against a different one, so a silent swap becomes
 > a failed boot rather than a pile of artefacts nobody can open.
 
+### Checking a candidate key
+
+If you end up holding several values and are not sure which one an instance was initialized with,
+you do not have to restart the stack once per guess. Read the recorded fingerprint:
+
+```sh
+docker compose exec -T db psql -qtAX -U schrodump -d schrodump \
+  -c "select value from \"AppConfig\" where key = 'kek_fingerprint'"
+```
+
+and test candidates against it. The key goes in on **stdin**, never as an argument — an argument is
+visible to every process on the host:
+
+```sh
+printf %s "$CANDIDATE" | node scripts/check-kek.mjs --fingerprint <the-hex-above>
+```
+
+It exits 0 on `MATCH`, 1 on `NO MATCH`, and 2 when the value is not a 32-byte key at all — so a
+truncated paste is reported as a truncated paste rather than as the wrong key.
+
+A match means the key is the one this instance recorded. It is not an independent proof that a
+credential will unwrap: the fingerprint is derived from the KEK alone, so it cannot detect a
+fingerprint row that was itself replaced. Booting the server is that proof, and now you only have
+to do it once.
+
 Set a database password too:
 
 ```sh

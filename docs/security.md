@@ -174,6 +174,9 @@ holds the backups defeats the encryption: an attacker who gets the host gets bot
 - Keep it in a secrets manager and inject it at start, or read it from a mount that is not part
   of the backup set.
 - Keep an offline copy. **Losing it loses every artefact**, permanently and by design.
+- Verify the copy is the right one *before* you need it: `scripts/check-kek.mjs` answers that
+  against the fingerprint the instance recorded, without booting it. A backup key you have never
+  checked is in the same epistemic state as a backup you have never restored.
 - Rotating it is a deliberate operation, not a config edit: Schrodump records a fingerprint of the
   KEK at first boot and refuses to start against a different one, precisely so that a wrong or
   swapped key fails loudly instead of producing artefacts nobody can open later.
