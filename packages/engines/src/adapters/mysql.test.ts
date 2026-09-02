@@ -175,13 +175,21 @@ describe("buildRestore", () => {
   };
   const SOURCE_PATH = "/var/lib/schrodump/restore-source";
 
-  it("STAGED restores via myloader from a directory, unchanged", () => {
+  // myloader's default drop mode is FAIL. Without an explicit mode, a restore over a database
+  // that still has its tables dies on the first CREATE TABLE with "Table 'x' already exists" —
+  // part-way through, after earlier threads have already written. Verify cannot catch it: verify
+  // restores into a throwaway EMPTY server, so the artifact reaches VERIFIED and only the restore
+  // an operator actually needs, over live data, fails. Found by the compose smoke doing exactly
+  // that against a real mysql 8.0.
+  it("STAGED passes myloader an explicit drop mode, so a restore over live tables is not a FAIL", () => {
     const descriptor = mysqlAdapter.buildRestore({
       ...restoreInput,
       executionMode: "STAGED",
       sourcePath: SOURCE_PATH,
     });
     expect(descriptor.image).toBe("schrodump/mydumper:1");
+    // Spelling pinned to the executor: mydumper 1.0.3 answers --overwrite-tables with
+    // "Unknown option", and bare -o relies on an unstated default.
     expect(descriptor.command).toEqual([
       "myloader",
       "-h",
@@ -190,6 +198,7 @@ describe("buildRestore", () => {
       "3306",
       "-u",
       "backup",
+      "--drop-table=DROP",
       "-B",
       "app",
       "-d",

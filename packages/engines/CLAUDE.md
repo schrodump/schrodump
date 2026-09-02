@@ -26,9 +26,17 @@ directory.
 - On MongoDB the `database` field of `ProbeConnection` is the **authSource** (`admin`), not the
   database to copy. Passing the scope there authenticates against the wrong database and fails
   with a correct credential.
-- `probeMongodb` calls `listDatabases()`, which requires a **cluster-level privilege**. An ordinary
-  backup user authenticates and then gets `Unauthorized` (code 13). The design tension is recorded:
-  testing a connection today asks for more privilege than backing up a single database would need.
+- `probeMongodb` calls `listDatabases()`, and a **scoped** credential is what it wants. When the
+  user lacks the cluster-wide `listDatabases` action, the server applies `authorizedDatabases: true`
+  implicitly and answers with the databases that user can reach — it does **not** refuse. Measured
+  against mongod 8.2.12: a user created in `admin` with `readWrite` (or plain `read`) on one
+  database gets back exactly `["shop"]`, not `Unauthorized`.
+  That is the behaviour the whole mongo scope design depends on, because the dump's scope comes
+  from what this call returns: an **admin** credential lists `admin`/`config`/`local` too, and the
+  backup then refuses with `MONGODB_SCOPE_TOO_BROAD` rather than guess which database was meant.
+  So the narrow credential is the working configuration, not a compromise — and it is what
+  `scripts/smoke-compose.sh` uses, so the remedy the error message prescribes is exercised rather
+  than merely asserted.
 - **Classifying a driver error is `apps/server`'s job** (`probe/test-connection.ts`), not this
   package's. The probe may propagate the raw error — the server translates it into a code without
   leaking the credential. Do not swallow or rewrite the error here.
