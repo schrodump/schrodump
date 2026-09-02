@@ -22,7 +22,15 @@ services:
       SCHRODUMP_ADMIN_EMAIL:
       SCHRODUMP_ADMIN_PASSWORD:
       DOCKER_HOST: tcp://docker-proxy:2375
-      SCHRODUMP_SCRATCH_PATH: /scratch
+      # The SAME absolute path inside this container and on the host, and that is not cosmetic.
+      # Executors mount files out of scratch — the decrypted artifact for a restore, the staging
+      # directory for a STAGED dump, the --config file mongo needs — and the bind source of those
+      # mounts is resolved by the DOCKER DAEMON, on the host, not inside this container. With a
+      # named volume mounted at /scratch, the daemon was asked for a host path /scratch that does
+      # not exist, and answered "mounts denied: the path is not shared from the host". STREAM
+      # backups still worked (stdout, nothing mounted) while verify, restore, STAGED and every
+      # mongo job could not run at all — a deployment that takes backups and can never check one.
+      SCHRODUMP_SCRATCH_PATH: ${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}
       SCHRODUMP_SCRATCH_MAX_BYTES: ${SCRATCH_MAX_BYTES:-107374182400}
       SCHRODUMP_MAX_CONCURRENT_STAGED: ${MAX_STAGED:-2}
       SCHRODUMP_EXECUTOR_NETWORK: ${EXECUTOR_NETWORK:-schrodump_targets}
@@ -42,7 +50,8 @@ services:
       # customer-database executors run on, and this is the one dump that has to cross that line.
       SCHRODUMP_SELF_BACKUP_NETWORK: ${SELF_BACKUP_NETWORK:-schrodump_internal}
     volumes:
-      - scratch:/scratch
+      # Bind, not a named volume, and mounted at its own path: see SCHRODUMP_SCRATCH_PATH above.
+      - ${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}:${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}
     ports:
       # Bound to loopback: the server speaks plain HTTP and authenticates with a session cookie, so
       # the only supported way to reach it from a network is through a TLS-terminating reverse
@@ -102,7 +111,6 @@ services:
 
 volumes:
   db:
-  scratch:
 
 networks:
   internal:
