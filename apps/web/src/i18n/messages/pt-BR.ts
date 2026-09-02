@@ -194,6 +194,7 @@ export const ptBR: Record<MessageKey, string> = {
   "artifacts.title": "Catálogo de artefatos",
   "artifacts.size": "Tamanho: {size}",
   "artifacts.key": "Chave: {key}",
+  "artifacts.oplog": "Ponto no tempo (oplog)",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
   "artifacts.empty": "Nenhum artefato ainda.",

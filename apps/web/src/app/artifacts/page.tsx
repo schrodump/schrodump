@@ -17,7 +17,10 @@ import { formatBytes } from "@/lib/format";
 import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 
-function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
+// Exported so the row can be asserted directly. The page around it needs the resource hooks; the
+// question this component answers — what does the operator actually SEE about an artifact — does
+// not, and it is the question that matters.
+export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
   const t = useT();
   const verify = useTriggerVerify();
   const key = artifact.keyIds[0] ?? "—";
@@ -31,6 +34,12 @@ function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
             {t(`engine.${artifact.engine}`)} ·{" "}
             {t("artifacts.size", { size: formatBytes(artifact.sizeCompressedBytes) })} ·{" "}
             {t("artifacts.key", { key })}
+            {/* Only when true. An archive WITH an oplog restores to a single instant; one without
+                restores collection by collection, and nothing else on this row says which it is.
+                null (a non-mongo engine) and false (a mongo dump with none) both stay silent —
+                claiming "no oplog" for postgres would assert something about a database that has
+                none. */}
+            {artifact.sourceHasOplog === true ? <> · {t("artifacts.oplog")}</> : null}
           </p>
         </div>
         <div className="ml-auto flex gap-2">

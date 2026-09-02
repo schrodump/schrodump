@@ -196,6 +196,7 @@ export const es: Record<MessageKey, string> = {
   "artifacts.title": "Catálogo de artefactos",
   "artifacts.size": "Tamaño: {size}",
   "artifacts.key": "Clave: {key}",
+  "artifacts.oplog": "Punto en el tiempo (oplog)",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
   "artifacts.empty": "Todavía no hay artefactos.",
