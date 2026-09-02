@@ -31,8 +31,20 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
     },
     importArtifact: async (manifest) => {
       // Preserve the original jobId as the BackupJob id so the artifact keeps its identity.
-      await db.backupJob.create({
-        data: {
+      //
+      // upsert, not create, and `update: {}` so an existing row is left exactly as it is. The skip
+      // list above is built from Artifact.jobId, which answers "is this manifest already imported"
+      // — a different question from "does a BackupJob with this id exist". They come apart whenever
+      // the artifact row is gone and the job row is not, which is the ordinary shape of a PARTIAL
+      // catalog loss and is precisely when a rebuild gets run.
+      //
+      // With create() that collision threw a unique-constraint error, and because importArtifact is
+      // awaited per manifest the whole rebuild aborted on the first one: a single stale job row made
+      // the documented recovery floor unusable, with a 500 and no explanation. Rebuilding has to be
+      // safe to run twice, and safe to run against a catalog that is only partly missing.
+      await db.backupJob.upsert({
+        where: { id: manifest.jobId },
+        create: {
           id: manifest.jobId,
           organizationId: deps.organizationId,
           kind: "BACKUP",
@@ -40,6 +52,9 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
           correlationId: `rebuild:${manifest.jobId}`,
           reason: "reconstructed from bucket manifest",
         },
+        // Deliberately empty: an existing job carries its own history, and a manifest proving the
+        // artifact was written is not a reason to overwrite the state that job recorded.
+        update: {},
         select: { id: true },
       });
       await db.artifact.create({

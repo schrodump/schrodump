@@ -261,7 +261,10 @@ time and is never limited at all.
 
 Every artifact in the bucket carries a manifest written in clear beside it, so the catalog can
 always be rebuilt from the bucket alone (Settings -> catalog rebuild). That is the floor, and it
-holds. But rebuilding is a long day: it walks every object in the bucket, and until it finishes
+holds — including when the loss is only partial, and including when you run it twice: importing is
+idempotent, and a rebuilt artifact comes back **UNOBSERVED**, never VERIFIED. The verification
+record lived in the database that was lost, and a rebuild does not get to inherit a green state it
+cannot substantiate. But rebuilding is a long day: it walks every object in the bucket, and until it finishes
 you cannot answer "which backups do I have".
 
 A self-backup makes that a short day instead. Point it at a destination:
