@@ -55,6 +55,7 @@ chmod 0777 "$SCRATCH"
 cat > "${WORK}/.env" <<EOF
 DB_PASSWORD=smoke-$(openssl rand -hex 6)
 SCHRODUMP_KEK=$(openssl rand -base64 32)
+SCHRODUMP_IMAGE=${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}
 PORT=${PORT}
 EXECUTOR_NETWORK=${PROJECT}_targets
 SCRATCH_HOST_PATH=${SCRATCH}
