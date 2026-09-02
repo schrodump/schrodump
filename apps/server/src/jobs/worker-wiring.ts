@@ -49,6 +49,8 @@ import { createRetentionPorts } from "./retention-wiring.js";
 import { runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 import { runRestoreJob } from "./restore.js";
+import { SchrodumpError } from "@schrodump/core/errors";
+import { driverCodeOf } from "../probe/test-connection.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
 import { runVerifyJob, type VerifyLevel, type VerifyProof } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
@@ -328,6 +330,12 @@ export interface JobExecutorDeps {
   // optional: an executor that cannot record what it read should not be reading it.
   audit: CredentialAuditSink;
   env: Env;
+  // Required for the same reason `audit` is: an executor that cannot say WHY a verify was
+  // inconclusive should not be running verifies. The catch below defaults every unrecognized throw
+  // to INCONCLUSIVE — correct, because condemning an artifact on a surprise is worse — but that
+  // makes a bug in our own code indistinguishable from a Docker daemon that blinked, and an
+  // artifact nothing can ever verify is the worst state this product has.
+  log: { warn: (obj: Record<string, unknown>, msg: string) => void };
   // The shutdown signal (Task 4 constructs the real AbortController and passes it here). A
   // construction-time dependency, bound once and forwarded into every container-creating call this
   // executor makes — directly and through the backup/restore ports — never threaded through the
@@ -893,7 +901,33 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         } catch (err) {
           // TOTAL catch: typed restore/runner codes → FAILED (artifact) vs INCONCLUSIVE (our infra);
           // any unrecognized throw defaults to INCONCLUSIVE (never condemn a backup on a surprise).
-          return classifyVerifyError(err);
+          const proof = classifyVerifyError(err);
+          if (proof === "INCONCLUSIVE") {
+            // Without this the cause is gone. The operator is told "the sandbox could not run" and
+            // so are we: the catch defaults every unrecognized throw to INCONCLUSIVE, so a genuine
+            // bug in this code is indistinguishable from a Docker daemon that blinked. An artifact
+            // that can never be verified is the worst state this product has, and until now the
+            // only way to find out WHY was to reproduce it by hand.
+            //
+            // Class and code only — never the message. A driver error here embeds the connection
+            // string, and this is the same rule probe/test-connection.ts follows for the same
+            // reason.
+            deps.log.warn(
+              {
+                jobId: job.id,
+                artifactId: artifact.id,
+                engine,
+                executionMode: artifact.executionMode,
+                cause: driverCodeOf(err),
+                // The typed code says WHICH step broke; this says what the step reported. Both are
+                // already sanitized upstream — SchrodumpError messages are built from the runner's
+                // redacted stderr, never from raw driver prose.
+                detail: err instanceof SchrodumpError ? err.message : null,
+              },
+              "verify inconclusive — the artifact is unchanged and nothing was claimed about it",
+            );
+          }
+          return proof;
         }
       },
       // Surface the downgrade: verify.ts marks a passing CHECKSUM as ("SUCCEEDED", undefined); when

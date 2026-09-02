@@ -108,8 +108,16 @@ describe("planRestoreSteps", () => {
       (sourcePath) => descriptor("restore", sourcePath),
       "k/globals.bin",
       (sourcePath) => descriptor("globals", sourcePath),
+      true,
     );
     expect(steps.map((s) => s.key)).toEqual(["k/globals.bin", "k/artifact.bin"]);
+
+    // The point of the flag. A STAGED postgres artifact means the ARTIFACT is a tar; globals.bin is
+    // pg_dumpall SQL in every mode. Reading STAGED per pipeline instead of per step made the globals
+    // step untar a text file — "tar: invalid tar magic" — so a STAGED postgres backup could never be
+    // verified or restored, while mysql STAGED (no globals) and postgres STREAM (no extract) both
+    // worked. Only the combination broke, and nothing exercised it.
+    expect(steps.map((s) => s.staged)).toEqual([false, true]);
 
     // The builders are deferred: each step wires the mount path THROUGH to its descriptor.
     const globals = steps[0]?.buildDescriptor("/stage/globals");
@@ -127,9 +135,25 @@ describe("planRestoreSteps", () => {
       (sourcePath) => descriptor("restore", sourcePath),
       null,
       () => null,
+      false,
     );
     expect(steps.map((s) => s.key)).toEqual(["k/artifact.bin"]);
+    expect(steps[0]?.staged).toBe(false);
     expect(steps[0]?.buildDescriptor("/stage/x").command).toEqual(["restore", "/stage/x"]);
+  });
+
+  it("never marks the globals step staged, whatever the artifact is", () => {
+    for (const staged of [true, false]) {
+      const steps = planRestoreSteps(
+        "k/artifact.bin",
+        (p) => descriptor("restore", p),
+        "k/globals.bin",
+        (p) => descriptor("globals", p),
+        staged,
+      );
+      expect(steps[0]?.staged).toBe(false);
+      expect(steps[1]?.staged).toBe(staged);
+    }
   });
 });
 

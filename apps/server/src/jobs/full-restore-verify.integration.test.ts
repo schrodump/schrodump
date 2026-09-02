@@ -261,7 +261,7 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
   // Runs the REAL backup pipeline (createJobExecutor.runBackup) against the throwaway origin,
   // producing a genuine gzip+age-encrypted postgres artifact in MinIO. Returns its id.
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -293,7 +293,7 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
   // Runs the REAL verify pipeline (createJobExecutor.runVerify) against a seeded artifact. Returns
   // the VERIFY job's id so the caller can assert its terminal state/reason.
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,

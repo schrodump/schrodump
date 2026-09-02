@@ -179,6 +179,7 @@ export async function main(): Promise<void> {
     audit: credentialAudit,
     env,
     signal: shutdownController.signal,
+    log: logger,
   });
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startLoop({
