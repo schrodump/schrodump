@@ -13,6 +13,21 @@ import { evaluateNotifications, type DeliveredState, type FleetSnapshot } from "
 import { deliverEmail, type SmtpDeps } from "./smtp.js";
 import { deliverWebhook } from "./webhook.js";
 
+// NotificationChannel stores its two credentials in String columns, not Json like every other
+// encrypted credential in the schema, and the store writes them with JSON.stringify. The read path
+// handed that string straight to readCredential -> parseEncryptedCredential, which validates an
+// OBJECT, so every delivery failed with "Invalid input: expected object, received string".
+//
+// Permanently, and for both kinds: webhook and SMTP notifications had never delivered anything.
+// The channel row recorded the failure in lastFailure exactly as designed — which is how it was
+// finally seen, on a running deployment — but nothing read that row until someone looked.
+//
+// Parsed here rather than migrated to Json: the column shape is the store's business, and a
+// migration would have to rewrite existing rows to fix a bug that is one JSON.parse wide.
+function envelopeFrom(stored: string): unknown {
+  return JSON.parse(stored) as unknown;
+}
+
 export interface NotificationDeps {
   prisma: PrismaClient;
   kek: Buffer;
@@ -132,7 +147,7 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
                 host: smtpHost,
                 port: smtpPort,
                 username: smtpUsername,
-                password: readCredential(deps, encryptedSmtpPassword, {
+                password: readCredential(deps, envelopeFrom(encryptedSmtpPassword), {
                   organizationId: channel.organizationId,
                   resource: "notificationChannel",
                   resourceId: channel.id,
@@ -153,7 +168,7 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
               { fetch: deps.fetch },
               {
                 url,
-                secret: readCredential(deps, encryptedSecret, {
+                secret: readCredential(deps, envelopeFrom(encryptedSecret), {
                   organizationId: channel.organizationId,
                   resource: "notificationChannel",
                   resourceId: channel.id,
