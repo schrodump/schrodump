@@ -364,9 +364,20 @@ product: artifacts accumulating that nothing can ever check. Verified end to end
 stack; with the path matched, a backup and its chained `FULL_RESTORE` verify both succeed and the
 artifact reaches `VERIFIED`.
 
-If you point `SCRATCH_HOST_PATH` somewhere else, it must be a path the Docker daemon can see, and
-it must be mounted at that same path inside the container. It holds dumps in clear while a job
-runs — put it on an encrypted filesystem.
+**It must be writable by the container's user, which is uid 100.** A named volume is chowned by
+Docker; a bind mount is not, so a directory created as root is one the server cannot write — and
+the failure is quiet in the worst way: STREAM backups keep succeeding while verify, restore, STAGED
+and every mongo job fail, because only those mount anything. The server refuses to boot rather than
+let that happen, and says what to run:
+
+```sh
+sudo mkdir -p /var/lib/schrodump/scratch
+sudo chown -R 100 /var/lib/schrodump/scratch
+```
+
+If you point `SCRATCH_HOST_PATH` somewhere else, it must be a path the Docker daemon can see, it
+must be mounted at that same path inside the container, and it must be owned by uid 100. It holds
+dumps in clear while a job runs — put it on an encrypted filesystem.
 
 ### MongoDB targets need a narrow credential
 

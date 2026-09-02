@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
+import { access as fsAccess, constants as fsConstants } from "node:fs/promises";
 import { setMaxListeners } from "node:events";
 import { buildApp } from "./app.js";
 import { rebuildCatalog } from "./jobs/catalog-rebuild.js";
@@ -10,6 +11,7 @@ import { driverForDestination } from "./jobs/destination-driver.js";
 import { drainQueue } from "./jobs/worker.js";
 import { startLoop, installShutdown } from "./jobs/loop.js";
 import { runScheduledSelfBackup } from "./jobs/self-backup-scheduler.js";
+import { assertScratchWritable } from "./jobs/scratch-preflight.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
 import { defaultSmtpDeps } from "./notifications/smtp.js";
 import { runNotifications } from "./notifications/wiring.js";
@@ -83,6 +85,14 @@ export async function main(): Promise<void> {
   // Every credential decryption in this process is recorded through this sink. It is threaded
   // rather than reached for globally so that a call site cannot decrypt without one.
   const credentialAudit = createCredentialAuditSink(prisma, logger);
+
+  // Scratch before the KEK: both are boot-time refusals, and this one is cheap and local.
+  if (env.SCHRODUMP_SCRATCH_PATH !== undefined) {
+    await assertScratchWritable(env.SCHRODUMP_SCRATCH_PATH, {
+      access: (path) => fsAccess(path, fsConstants.W_OK | fsConstants.X_OK),
+      uid: () => process.getuid?.() ?? -1,
+    });
+  }
 
   // Fail the boot if the KEK differs from the one this instance was initialized with.
   await assertKekFingerprint(prisma, kek);
