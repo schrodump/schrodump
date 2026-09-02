@@ -60,7 +60,14 @@ export const mongodbAdapter: EngineAdapter = {
     if (input.scope.databases.length > 1 || input.scope.collections.length > 1) {
       throw new EngineDescriptorError(
         "MONGODB_SCOPE_TOO_BROAD",
-        "mongodump handles at most one --db and one --collection per invocation",
+        // Names the remedy, not just the limitation. This is the FIRST thing an operator hits
+        // after pointing Schrodump at MongoDB with an admin credential, because the scope comes
+        // from what the probe's credential can list — and an admin sees admin/config/local too.
+        // "mongodump takes one --db" sends them to mongodump's manual; the credential is the
+        // thing they can actually change.
+        "this credential can read more than one database, and mongodump dumps one at a time. " +
+          "Use a user restricted to the database being backed up (readWrite on that database " +
+          "alone): listDatabases then returns only it, and the dump is unambiguous.",
       );
     }
 

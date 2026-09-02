@@ -365,6 +365,32 @@ If you point `SCRATCH_HOST_PATH` somewhere else, it must be a path the Docker da
 it must be mounted at that same path inside the container. It holds dumps in clear while a job
 runs — put it on an encrypted filesystem.
 
+### MongoDB targets need a narrow credential
+
+Point Schrodump at MongoDB with a root user and the first backup fails. That is correct behaviour
+and it is worth understanding before it happens.
+
+Schrodump dumps the databases the target's credential can see, and `mongodump` takes one database
+per invocation. A root user can list `admin`, `config` and `local` alongside yours, so the dump has
+no unambiguous subject and is refused rather than guessed at.
+
+Create a user restricted to the database you are backing up:
+
+```js
+db.getSiblingDB("admin").createUser({
+  user: "backup",
+  pwd: "<password>",
+  roles: [{ role: "readWrite", db: "shop" }],
+})
+```
+
+`listDatabases` then returns only `shop`, the connection test passes, and the dump is unambiguous.
+Authenticate against `admin` (where the user lives) and set the target's scope to `shop`.
+
+One user per database you back up. That is more setup than a single root credential, and it is the
+same posture the rest of this tool takes: the thing holding your credentials should hold the
+narrowest ones that work.
+
 ### Reaching your databases
 
 Executors join the network named by `EXECUTOR_NETWORK`. If your databases run in Docker on the
