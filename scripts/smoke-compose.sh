@@ -51,7 +51,7 @@ cleanup() {
     return 0
   fi
   docker compose -p "$PROJECT" --env-file "${WORK}/.env" down -v >/dev/null 2>&1 || true
-  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" "${PROJECT}-maria" "${PROJECT}-hook" >/dev/null 2>&1 || true
+  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" "${PROJECT}-maria" "${PROJECT}-hook" "${PROJECT}-rs" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -74,7 +74,7 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
-log "1/17  docker compose up"
+log "1/18  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -83,7 +83,7 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
-log "2/17  a target database and an S3 destination on the deployment's own networks"
+log "2/18  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
@@ -99,7 +99,7 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/17  the one-time setup link"
+log "3/18  the one-time setup link"
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \
@@ -112,11 +112,11 @@ api -o /dev/null -w '   sign-in %{http_code}\n' -X POST -H "$JSON" \
 api "${BASE}/backend/me" | grep -q '"mustChangePassword":false' ||
   fail "a setup-link admin was flagged for password rotation"
 
-log "4/17  encryption keys"
+log "4/18  encryption keys"
 api -o /dev/null -w '   provision %{http_code}\n' -X POST -H "$JSON" \
   -d '{"escrow":{"mode":"generate"}}' "${BASE}/backend/encryption-keys"
 
-log "5/17  destination, target, policy"
+log "5/18  destination, target, policy"
 dest="$(api -X POST -H "$JSON" -d "{\"name\":\"minio\",\"endpoint\":\"http://${PROJECT}-minio:9000\",\"region\":\"us-east-1\",\"bucket\":\"backups\",\"prefix\":\"s\",\"accessKeyId\":\"minio\",\"secretAccessKey\":\"minio123\",\"forcePathStyle\":true,\"sealMode\":\"operational\"}" "${BASE}/backend/destinations" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$dest" ] || fail "the destination was not created"
 # PUT/GET/DELETE against the real bucket: a credential that can write but not manage is a backup
@@ -132,10 +132,10 @@ api "${BASE}/backend/targets/${target}/test-connection" -X POST | grep -q '"ok":
 policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$policy" ] || fail "the policy was not created"
 
-log "6/17  a real backup"
+log "6/18  a real backup"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
-log "7/17  waiting for the artifact to reach VERIFIED"
+log "7/18  waiting for the artifact to reach VERIFIED"
 verified=""
 for attempt in $(seq 1 60); do
   sleep 5
@@ -163,7 +163,7 @@ done
 # Verify restores into a throwaway sandbox; a real restore runs a different code path
 # (runRestoreJob) against a real database with --clean semantics. It was equally broken by the
 # scratch defect and equally invisible to every other test.
-log "8/17  restoring it over the live database"
+log "8/18  restoring it over the live database"
 artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$artifact" ] || fail "could not read the artifact id"
 # Changed AFTER the backup, so "the data came back" is an observation rather than a coincidence.
@@ -191,7 +191,7 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # The documented floor when the metadata database is lost. It aborted on a partly-missing catalog
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
-log "9/17  rebuilding the catalog from the bucket alone"
+log "9/18  rebuilding the catalog from the bucket alone"
 # Let anything already in flight settle first. The scheduler dispatches the most recent past cron
 # window on top of the manual trigger, each chaining a verify, so wiping the table underneath a
 # RUNNING verify is a race of the script's own making. The server now answers that case legibly
@@ -227,7 +227,7 @@ esac
 # Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
 # it ever stopped keeping it the loss would be silent — pre-rotation artifacts unopenable by the
 # server, discovered at a restore, months later. That is the worst failure this product has.
-log "10/17  rotating the operational key, and re-verifying an artifact sealed to the old one"
+log "10/18  rotating the operational key, and re-verifying an artifact sealed to the old one"
 old_artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$old_artifact" ] || fail "could not read the rebuilt artifact id"
 api -o /dev/null -w '   rotate %{http_code}\n' -X POST -H "$JSON" \
@@ -255,7 +255,7 @@ done
 # mysql carries it: `parallelism > 1` is the explicit way into STAGED (resolveExecutionMode), and
 # mydumper is an image the operator never names — the server resolves schrodump/mydumper:1 by
 # itself, at backup time.
-log "11/17  a STAGED mysql backup, through the executor image nobody types"
+log "11/18  a STAGED mysql backup, through the executor image nobody types"
 
 # Unpublished until the first release cuts a tag, so a fresh checkout builds it. ensureImage
 # inspects before pulling, so a local tag is used as-is and no registry is consulted.
@@ -346,7 +346,7 @@ done
 # only in a --config file, and that file has to sit at a path the Docker daemon can resolve as a
 # bind source. That is precisely what the scratch defect broke — and the engine it broke most
 # completely, since STREAM postgres kept working throughout. Nothing here covered it.
-log "12/17  a mongo backup, whose password only travels in a mounted config file"
+log "12/18  a mongo backup, whose password only travels in a mounted config file"
 docker run -d --name "${PROJECT}-mongo" --network "${PROJECT}_targets" \
   -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8 >/dev/null
 for _ in $(seq 1 90); do
@@ -399,7 +399,7 @@ done
 # family switch picks mariadb-dump/mariadb or the executor exits 127. Nothing here ran that branch,
 # and it is version-sensitive in a way a descriptor test cannot see: the test asserts which string
 # was chosen, not that the string names a binary that exists in the image.
-log "13/17  the same adapter against mariadb, whose client binaries are named differently"
+log "13/18  the same adapter against mariadb, whose client binaries are named differently"
 docker run -d --name "${PROJECT}-maria" --network "${PROJECT}_targets" \
   -e MARIADB_ROOT_PASSWORD=rootpw -e MARIADB_DATABASE=shop mariadb:11 >/dev/null
 for _ in $(seq 1 90); do
@@ -448,7 +448,7 @@ done
 # one — so the service is recreated with it. That is also what an operator does, and it is the only
 # step here that proves the compose plumbing for these three variables works at all: they were
 # documented and, until recently, silently not passed through.
-log "14/17  a self-backup, sealed to escrow, over the internal network"
+log "14/18  a self-backup, sealed to escrow, over the internal network"
 cat >> "${WORK}/.env" <<EOF
 SCHRODUMP_SELF_BACKUP_DESTINATION_ID=${dest}
 SCHRODUMP_SELF_BACKUP_INTERVAL_MS=60000
@@ -489,7 +489,7 @@ done
 # it either — every one of them passes parallelism: 1.
 #
 # Reuses the postgres target from step 2; only the policy differs.
-log "15/17  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
+log "15/18  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
 pg_staged="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-pg-staged\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STAGED\",\"parallelism\":2,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$pg_staged" ] || fail "the STAGED postgres policy was not created"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${pg_staged}/backup"
@@ -542,7 +542,7 @@ done
 # The claim is not just that it deletes. It is that it deletes EVERYTHING a backup wrote: a postgres
 # backup writes three objects, and pruning two of them leaves the third in the bucket permanently —
 # outside the window the operator configured, holding pg_dumpall's role password hashes.
-log "16/17  retention actually deleting, and leaving nothing behind"
+log "16/18  retention actually deleting, and leaving nothing behind"
 prune_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-prune\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"NONE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":1,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$prune_policy" ] || fail "the retention policy was not created"
 
@@ -603,7 +603,7 @@ printf '   every globals.bin still has its artifact beside it — no half-delete
 # So this is the delivery path end to end, through the deployment: the secret decrypted from the
 # database, the body signed, and an HTTP request arriving at a real listener on the internal
 # network. The receiver is busybox nc from an image already present — no new dependency to pin.
-log "17/17  a notification actually arriving, signed, at a real listener"
+log "17/18  a notification actually arriving, signed, at a real listener"
 docker run -d --name "${PROJECT}-hook" --network "${PROJECT}_internal" postgres:18-alpine \
   sh -c 'while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" | nc -l -p 9999; done' >/dev/null
 for _ in $(seq 1 30); do
@@ -668,4 +668,106 @@ case "$(api "${BASE}/backend/notification-channels")" in
      fail "the notification was delivered but the channel is recording a failure" ;;
 esac
 
-printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored three over live data, rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, pruned an expired backup without leaving part of it behind, and delivered a signed notification to a listener that was really there.\n'
+# The oplog chain, which docs/roadmap.md calls the single fact everything else hangs from:
+# isReplicaSet decides whether buildDump emits --oplog, whether that is recorded on the artifact,
+# and whether a FULL_CLUSTER restore replays it with --oplogReplay. None of it could run before the
+# dump scope came from the TARGET: probeMongodb lists every database the credential can see, so
+# `scoped` was always true and every replica set was refused. This step is the reason that changed.
+#
+# It has to be a RESTORE, not a verify: an UNSCOPED mongo artifact is deliberately downgraded to
+# CHECKSUM by resolveVerifyPlan, because a multi-database archive has no single origin db to assert
+# against. The only way to prove --oplogReplay is to put the data back and look at it.
+log "18/18  a replica set, and the oplog actually replayed"
+# A --keyFile is not optional: mongod refuses to start a replica set with authorization enabled
+# without one. It is generated INSIDE the container because mongod rejects a key readable by anyone
+# but its owner, and a host-created file arrives owned by the wrong uid.
+docker run -d --name "${PROJECT}-rs" --network "${PROJECT}_targets" \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8 \
+  sh -c 'openssl rand -base64 756 > /tmp/k && chmod 400 /tmp/k && chown mongodb /tmp/k &&
+         exec docker-entrypoint.sh mongod --replSet rs0 --keyFile /tmp/k --bind_ip_all' >/dev/null
+
+# Wait for the REAL server, not the temporary one the entrypoint runs to create the root user: that
+# init-phase mongod has neither replication nor auth, so an UNauthenticated ping answers from it and
+# rs.initiate against it fails with "This node was not started with replication enabled".
+for _ in $(seq 1 60); do
+  docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+    --eval 'db.adminCommand({ping:1}).ok' 2>/dev/null | grep -q 1 && break
+  sleep 2
+done
+# The member must advertise a name the executor can reach; "localhost" sends the driver nowhere.
+docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+  --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'${PROJECT}-rs:27017'}]})" >/dev/null 2>&1 || true
+for _ in $(seq 1 60); do
+  docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+    --eval 'db.hello().setName === "rs0" && !db.hello().secondary' 2>/dev/null | grep -q true && break
+  sleep 2
+done
+docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+  --eval 'db.hello().setName === "rs0"' 2>/dev/null | grep -q true ||
+  fail "the replica set never became primary"
+docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+  --eval 'db.getSiblingDB("shop").orders.insertOne({_id:1,v:"before-the-backup"})' >/dev/null 2>&1 ||
+  fail "could not seed the replica set"
+
+# UNSCOPED, and that is the whole point: scope.databases empty now reaches buildDump as an empty
+# scope, so --oplog is emitted instead of the dump being refused.
+rs_target="$(api -X POST -H "$JSON" -d "{\"name\":\"shop-rs\",\"engine\":\"mongodb\",\"host\":\"${PROJECT}-rs\",\"port\":27017,\"username\":\"root\",\"password\":\"rootpw\",\"tls\":false,\"scope\":{\"databases\":[],\"schemas\":[],\"collections\":[]}}" "${BASE}/backend/targets" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$rs_target" ] || fail "the replica-set target was not created"
+api "${BASE}/backend/targets/${rs_target}/test-connection" -X POST | grep -q '"ok":true' ||
+  fail "the connection test did not reach the replica set"
+
+rs_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-rs\",\"targetId\":\"${rs_target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 5 * * *\",\"verifyLevel\":\"CHECKSUM\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$rs_policy" ] || fail "the replica-set policy was not created"
+api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${rs_policy}/backup"
+
+# sourceHasOplog is recorded at dump time and unrecoverable later — it is what makes the restore
+# emit --oplogReplay. Read from the DATABASE, not the API: toArtifactRecord does not expose the
+# column, so `GET /artifacts` cannot answer "did this dump carry an oplog?" at all. Asserting on the
+# column is the only way to see the first half of the chain, and the restore below is the second.
+# `|| true` because the query returns nothing until the artifact exists, and pipefail would
+# otherwise kill the script silently before fail() could say anything.
+for attempt in $(seq 1 72); do
+  sleep 5
+  rs_artifact="$(compose exec -T db psql -U schrodump -d schrodump -tAc \
+    "select id from \"Artifact\" where engine='mongodb' and \"sourceHasOplog\"=true limit 1" \
+    2>/dev/null | tr -d '\r\n ' || true)"
+  if [ -n "$rs_artifact" ]; then
+    printf '   backed up with --oplog after %ss\n' "$((attempt * 5))"
+    break
+  fi
+  case "$(api "${BASE}/backend/jobs")" in
+    *'"state":"FAILED"'*)
+      printf '\n--- jobs ---\n%s\n' "$(api "${BASE}/backend/jobs")" >&2
+      fail "a job failed during the replica-set backup"
+      ;;
+  esac
+  [ "$attempt" -eq 72 ] && {
+    printf '\n--- artifacts ---\n%s\n' "$(api "${BASE}/backend/artifacts")" >&2
+    fail "no artifact recorded sourceHasOplog — --oplog never reached mongodump"
+  }
+done
+
+# Changed AFTER the dump, so "the data came back" is an observation rather than a coincidence.
+docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet --eval \
+  'db.getSiblingDB("shop").orders.updateOne({_id:1},{$set:{v:"written-after-the-backup"}})' >/dev/null 2>&1
+api -o /dev/null -w '   restore enqueue %{http_code}\n' -X POST -H "$JSON" \
+  -d '{"target":"FULL_CLUSTER","confirmExistingDatabase":true}' \
+  "${BASE}/backend/artifacts/${rs_artifact}/restore"
+for attempt in $(seq 1 72); do
+  sleep 5
+  v="$(docker exec "${PROJECT}-rs" mongosh -u root -p rootpw --quiet \
+    --eval 'db.getSiblingDB("shop").orders.findOne({_id:1}).v' 2>/dev/null | tr -d '\r\n ' || true)"
+  if [ "$v" = "before-the-backup" ]; then
+    printf '   --oplogReplay put the pre-backup value back on a live replica set\n'
+    break
+  fi
+  case "$(api "${BASE}/backend/jobs")" in
+    *'"kind":"RESTORE","state":"FAILED"'*)
+      printf '\n--- jobs ---\n%s\n' "$(api "${BASE}/backend/jobs")" >&2
+      fail "the replica-set restore failed"
+      ;;
+  esac
+  [ "$attempt" -eq 72 ] && fail "the replica-set restore did not put the data back (found: ${v:-nothing})"
+done
+
+printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored four over live data — one of them a replica set whose oplog was replayed — rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, pruned an expired backup without leaving part of it behind, and delivered a signed notification to a listener that was really there.\n'

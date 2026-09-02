@@ -256,6 +256,35 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
 // the authSource, whereas THIS is the real data db the verify assertion must inspect. Only the unscoped
 // mongo fallback is "admin" (a full-instance archive has no single origin db — the multi-db case is a
 // deferred follow-up), so a scoped mongo target resolves its actual db here.
+// The scope the DUMP runs with, which is not always what the probe discovered.
+//
+// For the SQL engines the probe's scope is the right answer: it reports the databases the
+// credential can reach, and that is what gets dumped.
+//
+// MongoDB is different, and the difference made replica sets impossible to back up. probeMongodb
+// reports scope.databases as EVERY database the credential can list, and buildDump refuses
+// `isReplicaSet && scoped` — a replica set needs --oplog, which cannot be combined with a --db
+// filter. So every credential produced a non-empty scope, every replica set was refused, and
+// --oplog, sourceHasOplog and --oplogReplay were unreachable in production. The descriptor test
+// that covered --oplog built isReplicaSet: true with an EMPTY scope, which the wiring could not
+// produce.
+//
+// The target's `scope` is the field that exists to answer this, and it now does: empty means the
+// full instance, which is what a replica set requires and what "I did not scope this target" plainly
+// means. A scoped target still narrows the dump, and is still refused on a replica set — correctly,
+// because that combination cannot produce a consistent snapshot.
+//
+// SQL engines keep reading the probe: their scope is discovery, not intent, and narrowing them from
+// the target row is a separate decision with its own consequences.
+export function dumpScopeFor(
+  engine: EngineKind,
+  probeScope: DumpScope,
+  targetDatabases: string[],
+): DumpScope {
+  if (engine !== "mongodb") return probeScope;
+  return { databases: targetDatabases, schemas: [], collections: [] };
+}
+
 // Whether the archive this dump is about to produce carries an oplog. mongodb's buildDump emits
 // --oplog exactly when the target is a replica set, and hard-refuses a SCOPED dump there — so a
 // replica-set mongo artifact is always full-instance and oplog-bearing. Recorded at dump time
@@ -529,7 +558,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           serverVersionNum: probe.serverVersionNum,
           executionMode: mode,
           parallelism,
-          scope: probe.scope,
+          scope: dumpScopeFor(engine, probe.scope, scopedDatabases),
           facts,
           ...(stagingPath !== undefined ? { stagingPath } : {}),
         });

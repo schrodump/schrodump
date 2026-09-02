@@ -14,6 +14,7 @@ import {
   sourceHasOplogFor,
   toBackupProbe,
   toRetentionPolicy,
+  dumpScopeFor,
   verifyEngineWiring,
 } from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
@@ -414,5 +415,37 @@ describe("createWorkerStore — shutdown signal guards claiming", () => {
 
     await expect(store.claimNextJob()).resolves.toBeNull();
     expect(queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+// The mongo dump scope comes from the TARGET, not from what the probe happened to discover.
+//
+// probeMongodb lists every database the credential can see. Feeding that into buildDump made
+// `scoped` true for every credential, and buildDump refuses `isReplicaSet && scoped` — so NO
+// replica set could be backed up, and --oplog / sourceHasOplog / --oplogReplay were unreachable.
+describe("dumpScopeFor", () => {
+  const probeFound = { databases: ["admin", "config", "local", "shop"], schemas: [], collections: [] };
+
+  it("gives mongodb an EMPTY scope for an unscoped target, which is what --oplog requires", () => {
+    expect(dumpScopeFor("mongodb", probeFound, [])).toEqual({
+      databases: [],
+      schemas: [],
+      collections: [],
+    });
+  });
+
+  it("still narrows mongodb to a scoped target", () => {
+    expect(dumpScopeFor("mongodb", probeFound, ["shop"])).toEqual({
+      databases: ["shop"],
+      schemas: [],
+      collections: [],
+    });
+  });
+
+  it("leaves the SQL engines reading the probe, where scope is discovery rather than intent", () => {
+    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
+      expect(dumpScopeFor(engine, probeFound, [])).toBe(probeFound);
+      expect(dumpScopeFor(engine, probeFound, ["ignored"])).toBe(probeFound);
+    }
   });
 });
