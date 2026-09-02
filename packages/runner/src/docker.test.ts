@@ -58,6 +58,15 @@ class FakeEngine implements DockerEngine {
     this.#readyAfter = options.readyAfter;
   }
 
+  // Records what the runner asked for, so a test can assert the image is obtained BEFORE the
+  // container is created — which is the whole point of the call.
+  ensured: string[] = [];
+
+  ensureImage(image: string): Promise<void> {
+    this.ensured.push(image);
+    return Promise.resolve();
+  }
+
   async networkExists(): Promise<boolean> {
     return this.networkOk;
   }
@@ -375,5 +384,42 @@ describe("sanitizeStderr", () => {
     });
     expect(out).not.toContain("s3cret");
     expect(out).toContain("require");
+  });
+});
+
+// Nothing pulled executor images. dockerode's createContainer does not, and neither did the server
+// or the entrypoint — so on a fresh host the FIRST backup of every engine failed with an opaque
+// "docker run failed", and the operator could not reliably pre-pull because the tag is derived from
+// the server version Schrodump is about to probe (mariadb:11.8, mongo:8). Observed on the shipped
+// deployment: postgres and mongo only worked because those images happened to be on the host.
+describe("obtaining the executor image", () => {
+  it("obtains the image before creating the container", async () => {
+    const engine = new FakeEngine();
+    const runner = new DockerRunner(engine);
+
+    await runner.run(DESCRIPTOR, opts());
+
+    expect(engine.ensured).toEqual([DESCRIPTOR.image]);
+  });
+
+  it("obtains the sandbox image before starting an ephemeral service", async () => {
+    const engine = new FakeEngine();
+    const runner = new DockerRunner(engine);
+
+    await runner.withEphemeralService(SERVICE_SPEC, () => Promise.resolve("done"));
+
+    expect(engine.ensured).toContain(SERVICE_SPEC.image);
+  });
+
+  it("fails with the image named, not with a generic run failure", async () => {
+    const engine = new FakeEngine();
+    engine.ensureImage = () => Promise.reject(new Error("manifest unknown"));
+    const runner = new DockerRunner(engine);
+
+    // "docker run failed" sent an operator looking at the container; the image is the thing they
+    // can act on, and on a fresh host it is the overwhelmingly likely cause.
+    await expect(runner.run(DESCRIPTOR, opts())).rejects.toThrow(
+      /could not obtain the executor image/,
+    );
   });
 });

@@ -50,6 +50,13 @@ export interface StartedService {
 
 export interface DockerEngine {
   networkExists(name: string): Promise<boolean>;
+  // Pulls the executor image if the host does not already have it. dockerode's createContainer
+  // does NOT pull — it answers 404 "No such image" — and nothing else in the product pulled
+  // either, so on a fresh host the FIRST backup of every engine failed with an opaque "docker run
+  // failed". The image tag is derived from the probed server version (mariadb:11.8, mongo:8), so
+  // an operator cannot reliably pre-pull it either: they would have to know the version Schrodump
+  // is about to discover.
+  ensureImage(image: string): Promise<void>;
   start(spec: ContainerSpec): Promise<StartedContainer>;
   startService(spec: EphemeralServiceSpec): Promise<StartedService>;
 }
@@ -67,6 +74,20 @@ export class DockerRunner implements Runner {
     if (opts.signal?.aborted === true) {
       endStdout(opts.stdout);
       throw abortedError(opts.correlationId);
+    }
+
+    // The image before the network: a pull is the slow, network-dependent step, and failing it with
+    // its own message beats surfacing it as the generic "docker run failed" the catch below emits.
+    try {
+      await this.#engine.ensureImage(descriptor.image);
+    } catch (err) {
+      endStdout(opts.stdout);
+      throw new SchrodumpError(`could not obtain the executor image ${descriptor.image}`, {
+        code: "RUNNER_IMAGE_UNAVAILABLE",
+        correlationId: opts.correlationId,
+        context: {},
+        cause: err,
+      });
     }
 
     // Fail clearly on a missing network — never fall back to the default network.
@@ -207,6 +228,10 @@ export class DockerRunner implements Runner {
       throw abortedError(spec.correlationId);
     }
 
+    await this.#engine.ensureImage(spec.image);
+    // The sandbox image too: FULL_RESTORE verify pulls a throwaway database of the artifact's own
+    // engine version, which on a fresh host is exactly as absent as the dump image was.
+    await this.#engine.ensureImage(spec.image);
     const svc = await this.#engine.startService(spec);
 
     try {
@@ -336,6 +361,22 @@ class DockerodeEngine implements DockerEngine {
     } catch {
       return false;
     }
+  }
+
+  async ensureImage(image: string): Promise<void> {
+    try {
+      await this.#docker.getImage(image).inspect();
+      return;
+    } catch {
+      // Absent, so pull it. Any other inspect failure surfaces from the pull below with a better
+      // message than a swallowed inspect error would carry.
+    }
+    const stream = await this.#docker.pull(image);
+    await new Promise<void>((resolve, reject) => {
+      this.#docker.modem.followProgress(stream, (err: Error | null) =>
+        err === null ? resolve() : reject(err),
+      );
+    });
   }
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
