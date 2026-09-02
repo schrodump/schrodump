@@ -551,25 +551,28 @@ api -o /dev/null -w '   backup 1 %{http_code}\n' -X POST "${BASE}/backend/polici
 sleep 10
 api -o /dev/null -w '   backup 2 %{http_code}\n' -X POST "${BASE}/backend/policies/${prune_policy}/backup"
 
+# Scoped to THIS policy's retention, not any retention. The first version grepped every job for
+# "deleted [1-9]" and passed locally because a different policy — one with keepLast:3 and enough
+# scheduler-dispatched backups to exceed it — happened to prune. An assertion that another
+# policy can satisfy is not an assertion about this one.
+mine() {
+  api "${BASE}/backend/jobs" | tr '}' '\n' |
+    grep '"kind":"RETENTION"' | grep "retention:${prune_policy}"
+}
 for attempt in $(seq 1 72); do
   sleep 5
-  case "$(api "${BASE}/backend/jobs")" in
-    *'"kind":"RETENTION","state":"SUCCEEDED","correlationId":"retention:'"${prune_policy}"'"'*) : ;;
-  esac
-  # The reason string carries the counts; a deletion is what we are waiting for.
-  if api "${BASE}/backend/jobs" | tr '}' '\n' | grep '"kind":"RETENTION"' |
-       grep -q 'deleted [1-9]'; then
+  if mine | grep -q 'deleted [1-9]'; then
     printf '   retention pruned an artifact after %ss\n' "$((attempt * 5))"
     break
   fi
-  case "$(api "${BASE}/backend/jobs")" in
-    *'"kind":"RETENTION","state":"FAILED"'*)
-      printf '\n--- jobs ---\n%s\n' "$(api "${BASE}/backend/jobs")" >&2
-      fail "the retention job failed"
-      ;;
-  esac
+  if mine | grep -q '"state":"FAILED"'; then
+    printf '\n--- this policy'"'"'s retention jobs ---\n%s\n' "$(mine)" >&2
+    fail "the retention job failed"
+  fi
   [ "$attempt" -eq 72 ] && {
-    printf '\n--- jobs ---\n%s\n' "$(api "${BASE}/backend/jobs")" >&2
+    printf '\n--- this policy'"'"'s retention jobs (policy %s) ---\n%s\n' "$prune_policy" "$(mine)" >&2
+    printf '\n--- its artifacts ---\n%s\n' \
+      "$(api "${BASE}/backend/artifacts" | tr '}' '\n' | grep -c '"engine"' || true)" >&2
     fail "retention never deleted anything under keepLast:1"
   }
 done
