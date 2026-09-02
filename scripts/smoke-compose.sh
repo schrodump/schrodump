@@ -721,16 +721,17 @@ rs_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-rs\",\"targetId\":\"${
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${rs_policy}/backup"
 
 # sourceHasOplog is recorded at dump time and unrecoverable later — it is what makes the restore
-# emit --oplogReplay. Read from the DATABASE, not the API: toArtifactRecord does not expose the
-# column, so `GET /artifacts` cannot answer "did this dump carry an oplog?" at all. Asserting on the
-# column is the only way to see the first half of the chain, and the restore below is the second.
-# `|| true` because the query returns nothing until the artifact exists, and pipefail would
-# otherwise kill the script silently before fail() could say anything.
+# emit --oplogReplay. Read through the API on purpose: that is the operator's view, and until the
+# field was exposed there this step had to query the database directly, which meant the catalog
+# could not answer "did this dump carry an oplog?" for anyone.
+#
+# `|| true` because grep returns 1 until the artifact exists, and pipefail would otherwise kill the
+# script silently before fail() could say anything.
 for attempt in $(seq 1 72); do
   sleep 5
-  rs_artifact="$(compose exec -T db psql -U schrodump -d schrodump -tAc \
-    "select id from \"Artifact\" where engine='mongodb' and \"sourceHasOplog\"=true limit 1" \
-    2>/dev/null | tr -d '\r\n ' || true)"
+  rs_artifact="$(api "${BASE}/backend/artifacts" | tr '}' '\n' |
+    grep '"engine":"mongodb"' | grep '"sourceHasOplog":true' |
+    sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)"
   if [ -n "$rs_artifact" ]; then
     printf '   backed up with --oplog after %ss\n' "$((attempt * 5))"
     break

@@ -19,6 +19,7 @@ const row = {
   manifestKey: "org/backup.manifest.json",
   engine: "postgres",
   executionMode: "STAGED",
+  sourceHasOplog: null,
   serverVersionNum: 160002,
   sizeRawBytes: 9_000_000_000n,
   sizeCompressedBytes: 1_500_000_000n,
@@ -174,5 +175,17 @@ describe("createEncryptionKeyService.provision", () => {
       mode: "generate",
     });
     expect(t.created).toHaveLength(2);
+  });
+});
+
+// The operator cannot otherwise tell a point-in-time-consistent replica-set archive from an
+// ordinary one, and that is the whole difference between them on the day it matters. It was
+// recorded on the row and dropped by the mapper, so `GET /artifacts` could not answer the question
+// at all — which is how the compose smoke ended up reading the column straight from the database.
+describe("toArtifactRecord carries the oplog fact", () => {
+  it("passes sourceHasOplog through, including the null that means 'not a mongo dump'", () => {
+    expect(toArtifactRecord({ ...row, sourceHasOplog: true }).sourceHasOplog).toBe(true);
+    expect(toArtifactRecord({ ...row, sourceHasOplog: false }).sourceHasOplog).toBe(false);
+    expect(toArtifactRecord({ ...row, sourceHasOplog: null }).sourceHasOplog).toBe(null);
   });
 });

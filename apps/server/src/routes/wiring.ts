@@ -233,6 +233,7 @@ export function toArtifactRecord(row: {
   manifestKey: string;
   engine: string;
   executionMode: string;
+  sourceHasOplog: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: bigint;
   sizeCompressedBytes: bigint;
@@ -254,6 +255,10 @@ export function toArtifactRecord(row: {
     // Anything the DB does not spell STAGED is treated as STREAM — the same default the column
     // carries. A widened mode would have to opt into the gate explicitly, not inherit a pass.
     executionMode: row.executionMode === "STAGED" ? "STAGED" : "STREAM",
+    // Passed through unchanged, null included: null means "this engine has no oplog", which is a
+    // different statement from false ("a mongo dump that carries none") and must stay tellable
+    // apart. Coercing either into the other would make the field say something the dump did not.
+    sourceHasOplog: row.sourceHasOplog,
     serverVersionNum: row.serverVersionNum,
     sizeRawBytes: Number(row.sizeRawBytes),
     sizeCompressedBytes: Number(row.sizeCompressedBytes),
