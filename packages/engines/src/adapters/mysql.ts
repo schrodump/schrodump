@@ -54,6 +54,13 @@ function clientBinary(family: SqlFamily): string {
 function dumpBinary(family: SqlFamily): string {
   return family === "mariadb" ? "mariadb-dump" : "mysqldump";
 }
+// The third name that splits with the family, and the one that was missed. mariadb:11 ships
+// `mariadb-admin` and NOT `mysqladmin`; mysql:8 ships `mysqladmin` and not the other. Verified by
+// running both images, because this is the kind of claim a descriptor test restates rather than
+// checks.
+function adminBinary(family: SqlFamily): string {
+  return family === "mariadb" ? "mariadb-admin" : "mysqladmin";
+}
 
 // Single-quote a value for safe interpolation into a POSIX shell command string: close the
 // quote, emit an escaped literal quote, reopen. Used only for buildRestore's STREAM branch,
@@ -263,11 +270,21 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
           MYSQL_ROOT_PASSWORD: password,
           MYSQL_DATABASE: database,
         },
-        // -h 127.0.0.1 forces mysqladmin ping to probe TCP, not the local unix socket: the mysql
-        // entrypoint runs a socket-only bootstrap server for its init scripts before stopping it
-        // and starting the real TCP-listening server — same lesson as postgres's pg_isready -h
-        // 127.0.0.1 fix (see postgres.ts buildVerifySandbox).
-        readinessCommand: ["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"],
+        // -h 127.0.0.1 forces the ping to probe TCP, not the local unix socket: the entrypoint
+        // runs a socket-only bootstrap server for its init scripts before stopping it and starting
+        // the real TCP-listening server — same lesson as postgres's pg_isready -h 127.0.0.1 fix
+        // (see postgres.ts buildVerifySandbox).
+        //
+        // The BINARY has to follow the family. This said "mysqladmin" for both, and mariadb:11
+        // does not ship it — so the readiness probe never succeeded, withEphemeralService gave up,
+        // and every mariadb artifact came back "verify inconclusive: the sandbox could not run".
+        // Which is the honest answer, and the worst possible outcome: artifacts accumulating that
+        // NOTHING can ever check, on an engine the capability matrix advertises. The dump and
+        // restore binaries were already family-switched; this one was not.
+        //
+        // The env vars below are NOT a second instance of this: MYSQL_ROOT_PASSWORD and
+        // MYSQL_DATABASE are still honoured by mariadb:11 — confirmed by running it.
+        readinessCommand: [adminBinary(family), "ping", "-h", "127.0.0.1", "--silent"],
         port: 3306,
         username,
         password,

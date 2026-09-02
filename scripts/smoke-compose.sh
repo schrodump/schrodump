@@ -42,7 +42,7 @@ fail() {
 
 cleanup() {
   docker compose -p "$PROJECT" --env-file "${WORK}/.env" down -v >/dev/null 2>&1 || true
-  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" >/dev/null 2>&1 || true
+  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" "${PROJECT}-maria" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -65,7 +65,7 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
-log "1/12  docker compose up"
+log "1/14  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -74,7 +74,7 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
-log "2/12  a target database and an S3 destination on the deployment's own networks"
+log "2/14  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
@@ -90,7 +90,7 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/12  the one-time setup link"
+log "3/14  the one-time setup link"
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \
@@ -103,11 +103,11 @@ api -o /dev/null -w '   sign-in %{http_code}\n' -X POST -H "$JSON" \
 api "${BASE}/backend/me" | grep -q '"mustChangePassword":false' ||
   fail "a setup-link admin was flagged for password rotation"
 
-log "4/12  encryption keys"
+log "4/14  encryption keys"
 api -o /dev/null -w '   provision %{http_code}\n' -X POST -H "$JSON" \
   -d '{"escrow":{"mode":"generate"}}' "${BASE}/backend/encryption-keys"
 
-log "5/12  destination, target, policy"
+log "5/14  destination, target, policy"
 dest="$(api -X POST -H "$JSON" -d "{\"name\":\"minio\",\"endpoint\":\"http://${PROJECT}-minio:9000\",\"region\":\"us-east-1\",\"bucket\":\"backups\",\"prefix\":\"s\",\"accessKeyId\":\"minio\",\"secretAccessKey\":\"minio123\",\"forcePathStyle\":true,\"sealMode\":\"operational\"}" "${BASE}/backend/destinations" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$dest" ] || fail "the destination was not created"
 # PUT/GET/DELETE against the real bucket: a credential that can write but not manage is a backup
@@ -123,10 +123,10 @@ api "${BASE}/backend/targets/${target}/test-connection" -X POST | grep -q '"ok":
 policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$policy" ] || fail "the policy was not created"
 
-log "6/12  a real backup"
+log "6/14  a real backup"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
-log "7/12  waiting for the artifact to reach VERIFIED"
+log "7/14  waiting for the artifact to reach VERIFIED"
 verified=""
 for attempt in $(seq 1 60); do
   sleep 5
@@ -154,7 +154,7 @@ done
 # Verify restores into a throwaway sandbox; a real restore runs a different code path
 # (runRestoreJob) against a real database with --clean semantics. It was equally broken by the
 # scratch defect and equally invisible to every other test.
-log "8/12  restoring it over the live database"
+log "8/14  restoring it over the live database"
 artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$artifact" ] || fail "could not read the artifact id"
 # Changed AFTER the backup, so "the data came back" is an observation rather than a coincidence.
@@ -182,7 +182,7 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # The documented floor when the metadata database is lost. It aborted on a partly-missing catalog
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
-log "9/12  rebuilding the catalog from the bucket alone"
+log "9/14  rebuilding the catalog from the bucket alone"
 compose exec -T db psql -U schrodump -d schrodump -tAc 'DELETE FROM "Artifact"' >/dev/null
 api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog was not emptied"
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
@@ -207,7 +207,7 @@ esac
 # Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
 # it ever stopped keeping it the loss would be silent — pre-rotation artifacts unopenable by the
 # server, discovered at a restore, months later. That is the worst failure this product has.
-log "10/12  rotating the operational key, and re-verifying an artifact sealed to the old one"
+log "10/14  rotating the operational key, and re-verifying an artifact sealed to the old one"
 old_artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$old_artifact" ] || fail "could not read the rebuilt artifact id"
 api -o /dev/null -w '   rotate %{http_code}\n' -X POST -H "$JSON" \
@@ -235,7 +235,7 @@ done
 # mysql carries it: `parallelism > 1` is the explicit way into STAGED (resolveExecutionMode), and
 # mydumper is an image the operator never names — the server resolves schrodump/mydumper:1 by
 # itself, at backup time.
-log "11/12  a STAGED mysql backup, through the executor image nobody types"
+log "11/14  a STAGED mysql backup, through the executor image nobody types"
 
 # Unpublished until the first release cuts a tag, so a fresh checkout builds it. ensureImage
 # inspects before pulling, so a local tag is used as-is and no registry is consulted.
@@ -326,7 +326,7 @@ done
 # only in a --config file, and that file has to sit at a path the Docker daemon can resolve as a
 # bind source. That is precisely what the scratch defect broke — and the engine it broke most
 # completely, since STREAM postgres kept working throughout. Nothing here covered it.
-log "12/12  a mongo backup, whose password only travels in a mounted config file"
+log "12/14  a mongo backup, whose password only travels in a mounted config file"
 docker run -d --name "${PROJECT}-mongo" --network "${PROJECT}_targets" \
   -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8 >/dev/null
 for _ in $(seq 1 90); do
@@ -374,4 +374,92 @@ for attempt in $(seq 1 72); do
   [ "$attempt" -eq 72 ] && fail "no mongo artifact reached VERIFIED within 6 minutes"
 done
 
-printf '\nsmoke: the deployment we ship backed up postgres, mysql and mongo, verified every one by restoring it, restored two of them over live data, rebuilt its catalog from the bucket, and kept an artifact readable across a key rotation.\n'
+# mariadb shares ONE adapter with mysql — two entries in the same table — but not one set of
+# binaries: mariadb:11 dropped the mysql/mysqldump compat symlinks that 10.x still had, so the
+# family switch picks mariadb-dump/mariadb or the executor exits 127. Nothing here ran that branch,
+# and it is version-sensitive in a way a descriptor test cannot see: the test asserts which string
+# was chosen, not that the string names a binary that exists in the image.
+log "13/14  the same adapter against mariadb, whose client binaries are named differently"
+docker run -d --name "${PROJECT}-maria" --network "${PROJECT}_targets" \
+  -e MARIADB_ROOT_PASSWORD=rootpw -e MARIADB_DATABASE=shop mariadb:11 >/dev/null
+for _ in $(seq 1 90); do
+  docker exec "${PROJECT}-maria" mariadb -uroot -prootpw shop -e 'select 1' >/dev/null 2>&1 && break
+  sleep 2
+done
+docker exec "${PROJECT}-maria" mariadb -uroot -prootpw shop \
+  -e "CREATE TABLE orders(id int primary key, v text); INSERT INTO orders VALUES (1,'smoke');" \
+  >/dev/null 2>&1 || fail "could not seed the mariadb target"
+
+ma_target="$(api -X POST -H "$JSON" -d "{\"name\":\"shop-maria\",\"engine\":\"mariadb\",\"host\":\"${PROJECT}-maria\",\"port\":3306,\"username\":\"root\",\"password\":\"rootpw\",\"tls\":false,\"scope\":{\"databases\":[\"shop\"],\"schemas\":[],\"collections\":[]}}" "${BASE}/backend/targets" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$ma_target" ] || fail "the mariadb target was not created"
+api "${BASE}/backend/targets/${ma_target}/test-connection" -X POST | grep -q '"ok":true' ||
+  fail "the connection test did not reach the mariadb target"
+
+ma_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-maria\",\"targetId\":\"${ma_target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$ma_policy" ] || fail "the mariadb policy was not created"
+api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${ma_policy}/backup"
+
+maria_verified() {
+  api "${BASE}/backend/artifacts" | tr '}' '\n' | grep '"engine":"mariadb"' |
+    grep -c '"state":"VERIFIED"' || true
+}
+for attempt in $(seq 1 72); do
+  sleep 5
+  if [ "$(maria_verified)" -ge 1 ]; then
+    printf '   VERIFIED after %ss — mariadb-dump ran and mariadb restored it\n' "$((attempt * 5))"
+    break
+  fi
+  case "$(api "${BASE}/backend/jobs")" in
+    *'"state":"FAILED"'*)
+      printf '\n--- jobs ---\n%s\n' "$(api "${BASE}/backend/jobs")" >&2
+      fail "a job failed during the mariadb backup"
+      ;;
+  esac
+  [ "$attempt" -eq 72 ] && fail "no mariadb artifact reached VERIFIED within 6 minutes"
+done
+
+# The dump of Schrodump's OWN metadata database, which crosses a line no other job crosses: its
+# executor joins the INTERNAL network, where the metadata database lives and where nothing that
+# talks to a customer database is allowed. It has integration tests, including one driving a real
+# executor over a real network; none of them go through the socket proxy and the host-bind scratch
+# that this deployment puts in between.
+#
+# The destination id is read at BOOT, and the destination does not exist until the run has created
+# one — so the service is recreated with it. That is also what an operator does, and it is the only
+# step here that proves the compose plumbing for these three variables works at all: they were
+# documented and, until recently, silently not passed through.
+log "14/14  a self-backup, sealed to escrow, over the internal network"
+cat >> "${WORK}/.env" <<EOF
+SCHRODUMP_SELF_BACKUP_DESTINATION_ID=${dest}
+SCHRODUMP_SELF_BACKUP_INTERVAL_MS=60000
+SELF_BACKUP_NETWORK=${PROJECT}_internal
+EOF
+compose up -d schrodump >/dev/null 2>&1
+for _ in $(seq 1 60); do
+  case "$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null)" in
+    *"schrodump Up"*"healthy"*) break ;;
+  esac
+  sleep 3
+done
+
+for attempt in $(seq 1 72); do
+  sleep 5
+  body="$(api "${BASE}/backend/self-backups")"
+  case "$body" in
+    *'"state":"SUCCEEDED"'*)
+      printf '   SUCCEEDED after %ss — the executor reached the metadata database on the\n' "$((attempt * 5))"
+      printf '   internal network and the artifact is sealed to the escrow key\n'
+      break
+      ;;
+    *'"state":"FAILED"'*)
+      printf '\n--- self-backups ---\n%s\n' "$body" >&2
+      fail "the self-backup failed"
+      ;;
+  esac
+  [ "$attempt" -eq 72 ] && {
+    printf '\n--- self-backups ---\n%s\n' "$body" >&2
+    fail "no self-backup ran within 6 minutes"
+  }
+done
+
+printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo, verified every one by restoring it, restored two over live data, rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, and dumped its own metadata database to escrow.\n'
