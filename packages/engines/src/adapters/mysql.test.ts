@@ -354,12 +354,19 @@ describe("buildVerifySandbox", () => {
     expect(s.password).toBe("pw");
   });
 
-  it("describes a mariadb sandbox using the mariadb:<maj.min> image", () => {
+  // This test used to assert "mysqladmin" here, and passed. It restated the implementation instead
+  // of checking the world: `docker run --rm mariadb:11 command -v mysqladmin` finds nothing — the
+  // image ships mariadb-admin alone. So the readiness probe never succeeded, withEphemeralService
+  // gave up, and every mariadb artifact came back "verify inconclusive: the sandbox could not run"
+  // and stayed UNOBSERVED. Found by the compose smoke against a real mariadb:11.
+  it("describes a mariadb sandbox whose readiness probe names a binary mariadb:11 actually ships", () => {
     const s = mariadbAdapter.buildVerifySandbox!(110402, "pw", "shop");
     expect(s.image).toBe("mariadb:11.4");
+    // NOT a second instance of the same bug: mariadb:11 still honours the MYSQL_* variables,
+    // confirmed by running it.
     expect(s.env.MYSQL_ROOT_PASSWORD).toBe("pw");
     expect(s.env.MYSQL_DATABASE).toBe("shop");
-    expect(s.readinessCommand).toEqual(["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]);
+    expect(s.readinessCommand).toEqual(["mariadb-admin", "ping", "-h", "127.0.0.1", "--silent"]);
     expect(s.port).toBe(3306);
     expect(s.username).toBe("root");
     expect(s.database).toBe("shop");
