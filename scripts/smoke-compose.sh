@@ -192,6 +192,17 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
 log "9/16  rebuilding the catalog from the bucket alone"
+# Let anything already in flight settle first. The scheduler dispatches the most recent past cron
+# window on top of the manual trigger, each chaining a verify, so wiping the table underneath a
+# RUNNING verify is a race of the script's own making. The server now answers that case legibly
+# rather than crashing, but a smoke step should assert the thing it is named after, not the
+# handling of a collision it caused.
+for _ in $(seq 1 40); do
+  case "$(api "${BASE}/backend/jobs")" in
+    *'"state":"RUNNING"'*|*'"state":"PENDING"'*) sleep 3 ;;
+    *) break ;;
+  esac
+done
 compose exec -T db psql -U schrodump -d schrodump -tAc 'DELETE FROM "Artifact"' >/dev/null
 api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog was not emptied"
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
