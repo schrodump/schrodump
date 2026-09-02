@@ -23,6 +23,10 @@ export interface Artifact {
   manifestKey: string;
   engine: EngineKind;
   executionMode: ExecutionMode;
+  // Whether this archive carries an oplog, which is what makes a FULL_CLUSTER restore land every
+  // collection on ONE instant. null means the engine has none — a different statement from false,
+  // "a mongo dump that carries none", and the interface must not blur them.
+  sourceHasOplog: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

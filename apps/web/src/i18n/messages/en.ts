@@ -192,6 +192,10 @@ export const en = {
   "artifacts.title": "Artifact catalog",
   "artifacts.size": "Size: {size}",
   "artifacts.key": "Key: {key}",
+  // Shown only when true. An archive with an oplog restores to a single instant; one
+  // without restores collection by collection, and the operator cannot tell them apart
+  // from anything else on the row.
+  "artifacts.oplog": "Point-in-time (oplog)",
   "artifacts.verify": "Verify",
   "artifacts.restore": "Restore",
   "artifacts.empty": "No artifacts yet.",

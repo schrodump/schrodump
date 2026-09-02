@@ -20,6 +20,7 @@ const artifact: Artifact = {
   manifestKey: "org/shop/2026-01-01.manifest.json",
   engine: "postgres",
   executionMode: "STREAM",
+  sourceHasOplog: null,
   serverVersionNum: 160_002,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
