@@ -187,9 +187,20 @@ api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog wa
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
   -d "{\"destinationId\":\"${dest}\"}" "${BASE}/backend/catalog/rebuild"
 rebuilt="$(api "${BASE}/backend/artifacts")"
+# Not a fixed count: a newly created policy makes the scheduler dispatch the most recent past cron
+# window as well, so the number of artifacts depends on timing. The claim that matters does not —
+# they came back, and NONE of them inherited a VERIFIED state, because the verification record
+# lived in the database that was lost.
 case "$rebuilt" in
-  *'"UNOBSERVED":1'*|*'"UNOBSERVED": 1'*) printf '   recovered, and UNOBSERVED rather than VERIFIED\n' ;;
-  *) printf '\n--- artifacts ---\n%s\n' "$rebuilt" >&2; fail "the catalog did not come back as one UNOBSERVED artifact" ;;
+  *'"VERIFIED":0'*) : ;;
+  *) printf '\n--- artifacts ---\n%s\n' "$rebuilt" >&2
+     fail "a rebuilt artifact came back VERIFIED — a rebuild cannot inherit a state it cannot substantiate" ;;
+esac
+case "$rebuilt" in
+  *'"UNOBSERVED":0'*|*'"items":[]'*)
+     printf '\n--- artifacts ---\n%s\n' "$rebuilt" >&2
+     fail "the catalog did not come back from the bucket" ;;
+  *) printf '   recovered, and every one UNOBSERVED rather than VERIFIED\n' ;;
 esac
 
 # Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
