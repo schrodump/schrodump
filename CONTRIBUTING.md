@@ -96,6 +96,27 @@ It needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, alo
 so an absent secret costs seconds and publishes nothing, rather than surfacing as a
 `docker/login-action` failure minutes deep in a multi-arch build.
 
+### Before the first release: claim the Docker Hub namespace
+
+The workflow pushes to `schrodump/schrodump` and `schrodump/mydumper`. **The credentials must own
+the `schrodump` namespace**, and owning a token is not owning a namespace: with a valid token for
+an account that does not, `docker/login-action` succeeds and the push fails with
+`denied: requested access to the resource is denied` — after the multi-arch build.
+
+The preflight cannot check this. It sees that both secrets exist; whether they can write to that
+namespace is only answered by a registry that refuses.
+
+1. Create the account or organization named exactly `schrodump` at hub.docker.com. A free personal
+   account carries the namespace; an organization needs a paid plan.
+2. Account Settings → Security → **Personal access tokens** → Generate. Scope **Read & Write** —
+   read-only cannot push, and the first push has to *create* both repositories.
+3. Add `DOCKERHUB_USERNAME` (the account name) and `DOCKERHUB_TOKEN` under repository
+   Settings → Secrets and variables → Actions.
+
+After the first push, check both repositories' visibility on Docker Hub. Do not assume it: what a
+push-created repository defaults to has changed with plan and over time, and a private one fails
+for everyone but you — the same failure mode as the GHCR step below, from the opposite direction.
+
 ### Installing a release candidate
 
 Because `latest` does not move, the shipped `compose.yaml` will not pull an `-rc.N` on its own.
