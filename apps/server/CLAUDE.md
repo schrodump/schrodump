@@ -187,6 +187,17 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   that fails must never fail a backup. The last delivery failure is stored and shown in the UI: a
   notifier that stopped delivering is indistinguishable from a healthy one unless the interface
   says so.
+- **With no channel configured, nothing is evaluated at all** — no snapshot row, no state row, no
+  work. Correct (there is nowhere to deliver), and worth knowing before debugging: an operator
+  looking for evidence that notifications run will find an empty `NotificationSnapshot` table and
+  reasonably conclude the loop is broken. It starts on the first channel.
+- **State moves whether or not delivery succeeded**, and the trade-off is deliberate: otherwise an
+  unreachable channel turns every tick into a fresh "opened" for the same condition. The cost is
+  that a condition alerted while the channel was down is not re-alerted when it comes back — which
+  is why `lastFailure` on the channel is the thing that must be watched, not the absence of alerts.
+- Verified end to end on a deployment: `POLICY_QUIET` reached a real receiver as
+  `{"trigger":"POLICY_QUIET","kind":"opened","summary":"policy \"q\" has never produced a
+  successful backup"}` with an `X-Schrodump-Signature` header.
 
 ## Self-backup (`jobs/self-backup*.ts`)
 
