@@ -89,6 +89,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       stable: ${{ steps.version.outputs.stable }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -162,21 +163,45 @@ jobs:
             cosign sign --yes "${image}@${DIGEST}"
           done
 
+  # The release notes are the announcement, and they must not appear until everything they
+  # announce exists. `image` and `executors` publish in parallel; when the executor build fails,
+  # the server image is already pushed, and creating the release there would advertise a version
+  # whose STAGED mysql/mariadb path cannot run — the server resolves schrodump/mydumper:1 at backup
+  # time and would find nothing. Waiting for both costs nothing: it is the same wall clock.
+  release:
+    needs: [image, executors]
+    name: publish the release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog is built from the commit range since the previous tag.
+          fetch-depth: 0
+
+      # A newly created GHCR package is PRIVATE until someone makes it public, and this job does
+      # not inherit the login from `image`. Without this the SBOM step below fails to pull the very
+      # digest we just pushed.
+      - uses: docker/login-action@v4.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # A second, downloadable copy of the SBOM. The registry attestation serves tooling; this
       # serves the operator who wants to read it before pulling anything.
       - name: SBOM file
         uses: anchore/sbom-action@v0.24.0
         with:
-          image: ghcr.io/schrodump/schrodump@${{ steps.build.outputs.digest }}
+          image: ghcr.io/schrodump/schrodump@${{ needs.image.outputs.digest }}
           format: spdx-json
-          output-file: schrodump-${{ steps.version.outputs.version }}.spdx.json
+          output-file: schrodump-${{ needs.image.outputs.version }}.spdx.json
 
       # Both the tag and the digest go through env rather than being interpolated straight into
       # the shell: a tag name is attacker-chosen the moment anyone can push one.
       - name: Changelog
         env:
           TAG: ${{ github.ref_name }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ needs.image.outputs.digest }}
         run: |
           previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
           {
@@ -208,8 +233,8 @@ jobs:
       - uses: softprops/action-gh-release@v3.0.2
         with:
           body_path: CHANGELOG_RELEASE.md
-          prerelease: ${{ steps.version.outputs.stable == 'false' }}
-          files: schrodump-${{ steps.version.outputs.version }}.spdx.json
+          prerelease: ${{ needs.image.outputs.stable == 'false' }}
+          files: schrodump-${{ needs.image.outputs.version }}.spdx.json
 
   executors:
     needs: [preflight, verify]
@@ -245,6 +270,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.name }}
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -258,3 +284,22 @@ jobs:
             ghcr.io/schrodump/${{ matrix.name }}:1
             schrodump/${{ matrix.name }}:${{ matrix.version }}
             schrodump/${{ matrix.name }}:1
+
+      # This image needs the signature MORE than the server image does, not less.
+      #
+      # An operator types `schrodump/schrodump` once, deliberately, and can check it before pulling.
+      # Nobody ever types this one: the server resolves `schrodump/mydumper:1` — a FLOATING tag —
+      # by itself at backup time, pulls it, and hands the container the target database's password.
+      # Publishing it unsigned meant the image a human chooses was verifiable and the image the
+      # product silently fetches on their behalf was not, which is exactly backwards.
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign the published digests
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          for image in "ghcr.io/schrodump/${NAME}" "schrodump/${NAME}"; do
+            cosign sign --yes "${image}@${DIGEST}"
+          done
