@@ -64,7 +64,7 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
-log "1/9  docker compose up"
+log "1/10  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -73,7 +73,7 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
-log "2/9  a target database and an S3 destination on the deployment's own networks"
+log "2/10  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
@@ -89,7 +89,7 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/9  the one-time setup link"
+log "3/10  the one-time setup link"
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \
@@ -102,11 +102,11 @@ api -o /dev/null -w '   sign-in %{http_code}\n' -X POST -H "$JSON" \
 api "${BASE}/backend/me" | grep -q '"mustChangePassword":false' ||
   fail "a setup-link admin was flagged for password rotation"
 
-log "4/9  encryption keys"
+log "4/10  encryption keys"
 api -o /dev/null -w '   provision %{http_code}\n' -X POST -H "$JSON" \
   -d '{"escrow":{"mode":"generate"}}' "${BASE}/backend/encryption-keys"
 
-log "5/9  destination, target, policy"
+log "5/10  destination, target, policy"
 dest="$(api -X POST -H "$JSON" -d "{\"name\":\"minio\",\"endpoint\":\"http://${PROJECT}-minio:9000\",\"region\":\"us-east-1\",\"bucket\":\"backups\",\"prefix\":\"s\",\"accessKeyId\":\"minio\",\"secretAccessKey\":\"minio123\",\"forcePathStyle\":true,\"sealMode\":\"operational\"}" "${BASE}/backend/destinations" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$dest" ] || fail "the destination was not created"
 # PUT/GET/DELETE against the real bucket: a credential that can write but not manage is a backup
@@ -122,10 +122,10 @@ api "${BASE}/backend/targets/${target}/test-connection" -X POST | grep -q '"ok":
 policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$policy" ] || fail "the policy was not created"
 
-log "6/9  a real backup"
+log "6/10  a real backup"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
-log "7/9  waiting for the artifact to reach VERIFIED"
+log "7/10  waiting for the artifact to reach VERIFIED"
 verified=""
 for attempt in $(seq 1 60); do
   sleep 5
@@ -153,7 +153,7 @@ done
 # Verify restores into a throwaway sandbox; a real restore runs a different code path
 # (runRestoreJob) against a real database with --clean semantics. It was equally broken by the
 # scratch defect and equally invisible to every other test.
-log "8/9  restoring it over the live database"
+log "8/10  restoring it over the live database"
 artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$artifact" ] || fail "could not read the artifact id"
 # Changed AFTER the backup, so "the data came back" is an observation rather than a coincidence.
@@ -181,7 +181,7 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # The documented floor when the metadata database is lost. It aborted on a partly-missing catalog
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
-log "9/9  rebuilding the catalog from the bucket alone"
+log "9/10  rebuilding the catalog from the bucket alone"
 compose exec -T db psql -U schrodump -d schrodump -tAc 'DELETE FROM "Artifact"' >/dev/null
 api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog was not emptied"
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
@@ -192,4 +192,26 @@ case "$rebuilt" in
   *) printf '\n--- artifacts ---\n%s\n' "$rebuilt" >&2; fail "the catalog did not come back as one UNOBSERVED artifact" ;;
 esac
 
-printf '\nsmoke: the deployment we ship took a backup, proved it restores, restored it, and rebuilt its catalog.\n' 
+# Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
+# it ever stopped keeping it the loss would be silent — pre-rotation artifacts unopenable by the
+# server, discovered at a restore, months later. That is the worst failure this product has.
+log "10/10  rotating the operational key, and re-verifying an artifact sealed to the old one"
+old_artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
+[ -n "$old_artifact" ] || fail "could not read the rebuilt artifact id"
+api -o /dev/null -w '   rotate %{http_code}\n' -X POST -H "$JSON" \
+  -d '{"type":"operational"}' "${BASE}/backend/encryption-keys/rotate"
+# The retired row must still hold its identity; serverCanDecrypt is that column, derived.
+api "${BASE}/backend/encryption-keys" |
+  grep -q '"type":"operational","state":"retired","publicRecipient":"[^"]*","serverCanDecrypt":true' ||
+  fail "the retired operational key lost its identity — every artifact sealed to it is now unopenable"
+api -o /dev/null -w '   re-verify the pre-rotation artifact %{http_code}\n' -X POST \
+  "${BASE}/backend/artifacts/${old_artifact}/verify"
+for attempt in $(seq 1 60); do
+  sleep 5
+  case "$(api "${BASE}/backend/artifacts")" in
+    *'"VERIFIED":1'*|*'"VERIFIED": 1'*) printf '   still VERIFIED, decrypted with the retired key\n'; break ;;
+  esac
+  [ "$attempt" -eq 60 ] && fail "an artifact sealed to the retired key could not be verified after rotation"
+done
+
+printf '\nsmoke: the deployment we ship took a backup, proved it restores, restored it, rebuilt its catalog, and kept the old artifact readable across a key rotation.\n' 
