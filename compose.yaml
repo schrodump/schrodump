@@ -2,7 +2,16 @@ name: schrodump
 
 services:
   schrodump:
-    image: schrodump/schrodump:latest
+    # `latest` is only published for a STABLE version — a release candidate deliberately does not
+    # move it. Hardcoding the tag here meant the quickstart in the README could not install the
+    # first thing this project ever shipped: `docker compose up -d` against a v0.1.0-rc.1 fails with
+    # "manifest not found", which reads like a broken install rather than a tag that was never
+    # meant to exist yet.
+    #
+    # It also gives production the pin the docs already ask for, in the file operators actually
+    # edit: SCHRODUMP_IMAGE=schrodump/schrodump:0.1.0 in .env beats editing this file and losing
+    # the change on the next `git pull`.
+    image: ${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}
     restart: unless-stopped
     # Give the server time to abort an in-flight job and remove its scratch (cleartext dump) before
     # SIGKILL. Matches SCHRODUMP_SHUTDOWN_GRACE_MS (8s) with margin.
@@ -13,8 +22,8 @@ services:
       docker-proxy:
         condition: service_started
     environment:
-      DATABASE_URL: postgres://schrodump:${DB_PASSWORD:?defina DB_PASSWORD no .env}@db:5432/schrodump
-      SCHRODUMP_KEK: ${SCHRODUMP_KEK:?gere com 'openssl rand -base64 32' e guarde fora deste host}
+      DATABASE_URL: postgres://schrodump:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/schrodump
+      SCHRODUMP_KEK: ${SCHRODUMP_KEK:?generate with 'openssl rand -base64 32' and keep a copy off this host}
       SCHRODUMP_URL: ${SCHRODUMP_URL:-http://localhost:8080}
       # Passed through only when actually set. The server validates these as non-empty strings, so
       # handing it an empty value is not "unset" — it is an invalid value, and it refuses to boot.

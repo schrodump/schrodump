@@ -296,8 +296,11 @@ jobs:
       # restore. The suite talks to Docker and PostgreSQL directly; the deployment puts a proxy, a
       # volume layout and a network topology in between, and none of it was exercised until now.
       - name: The deployment takes a backup and proves it restores
+        # Pointing this at the tag the build produced, rather than retagging it to `latest`, means
+        # the smoke exercises SCHRODUMP_IMAGE itself — the override an operator needs to install a
+        # release candidate, since `latest` is only ever published for a stable version.
+        env:
+          SCHRODUMP_IMAGE: schrodump/schrodump:ci
         run: |
-          # compose.yaml pins `schrodump/schrodump:latest`; the build above tagged :ci.
-          docker tag schrodump/schrodump:ci schrodump/schrodump:latest
           docker rm -f app pg >/dev/null 2>&1 || true
           scripts/smoke-compose.sh
