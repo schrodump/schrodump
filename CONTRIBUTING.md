@@ -92,7 +92,42 @@ attaches an SBOM and publishes the executor images, and none of that has an oppo
 until a tag exists.
 
 It needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, alongside the
-`GITHUB_TOKEN` that GHCR uses. Without them the Docker Hub login fails and nothing publishes.
+`GITHUB_TOKEN` that GHCR uses. The `preflight` job reads them first and names whichever is missing,
+so an absent secret costs seconds and publishes nothing, rather than surfacing as a
+`docker/login-action` failure minutes deep in a multi-arch build.
+
+### Installing a release candidate
+
+Because `latest` does not move, the shipped `compose.yaml` will not pull an `-rc.N` on its own.
+Name it in `.env`:
+
+```sh
+SCHRODUMP_IMAGE=schrodump/schrodump:0.1.0-rc.1
+```
+
+That is the same variable production should use to pin an exact version, so the path is exercised
+by every CI run rather than only by whoever tries the candidate.
+
+### After the FIRST tag only
+
+A GitHub Container Registry package is created **private**, and nothing in the workflow can change
+that — the package does not exist until the first push. So until someone flips it, every
+`docker pull ghcr.io/schrodump/schrodump:...` from outside the organization fails, which looks
+exactly like a release that did not publish.
+
+Once the first release finishes, for **each** of `schrodump`, `mydumper`:
+
+> Packages → the package → Package settings → Danger Zone → Change visibility → Public
+
+Then verify from a logged-out client, because the org's own credentials cannot tell you whether a
+stranger can pull:
+
+```sh
+docker logout ghcr.io
+docker pull ghcr.io/schrodump/schrodump:0.1.0-rc.1
+```
+
+Docker Hub repositories are public by default and need no equivalent step.
 
 ## Reporting security issues
 
