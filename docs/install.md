@@ -464,6 +464,16 @@ cosign verify ghcr.io/schrodump/schrodump:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+The executor images are signed the same way, and they are the ones worth checking: you never type
+their names. The server resolves `schrodump/mydumper:1` — a floating tag — by itself at backup
+time, pulls it, and hands the container a target database's password.
+
+```sh
+cosign verify ghcr.io/schrodump/mydumper:1 \
+  --certificate-identity-regexp '^https://github.com/schrodump/schrodump/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Uninstalling
 
 ```sh
