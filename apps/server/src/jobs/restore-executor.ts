@@ -94,6 +94,16 @@ export function restoreScopeOf(raw: unknown): RestoreScope {
 const ARTIFACT_OBJECT = "artifact.bin";
 const GLOBALS_OBJECT = "globals.bin";
 
+// The globals object that sits beside an artifact key, without asking whether the engine writes
+// one. globalsKeyFor (below) answers "should this restore read globals?" and needs the engine for
+// that; retention asks the different question "what did this backup write?", where the safe answer
+// is to name the object and let an absent key be a no-op delete.
+export function globalsObjectKey(artifactBucketKey: string): string {
+  const idx = artifactBucketKey.lastIndexOf(ARTIFACT_OBJECT);
+  if (idx === -1) return artifactBucketKey;
+  return artifactBucketKey.slice(0, idx) + GLOBALS_OBJECT;
+}
+
 // Postgres is the only engine that uploads a separate globals.bin (pg_dumpall --globals-only),
 // stored as a sibling of artifact.bin under the same job prefix (see backup-wiring objectKey()).
 // For every other engine there is no globals object. Derived from the capability matrix, not a

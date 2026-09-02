@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 // Real RetentionPorts wiring. Not run in CI (needs S3 + DB). Loads manifests from the bucket
-// (the source of truth) and deletes both the artifact object and its manifest sidecar.
+// (the source of truth) and deletes every object a backup wrote: the artifact, its manifest
+// sidecar, and — for postgres — the globals dump beside them.
 
 import type { Manifest } from "@schrodump/core/manifest";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { artifactKey, manifestKey, readManifest } from "@schrodump/storage/manifest-sidecar";
+import { globalsObjectKey } from "./restore-executor.js";
 import type { RetentionPorts } from "./retention.js";
 
 export interface RetentionWiringDeps {
@@ -45,9 +47,25 @@ export function createRetentionPorts(deps: RetentionWiringDeps): RetentionPorts 
       return { manifests, unreadable };
     },
     deleteArtifact: async (jobId) => {
+      const artifact = artifactKey(deps.prefix, deps.organizationId, jobId);
       await deps.driver.delete([
-        artifactKey(deps.prefix, deps.organizationId, jobId),
+        artifact,
         manifestKey(deps.prefix, deps.organizationId, jobId),
+        // A postgres backup writes a THIRD object beside those two, and nothing ever deleted it.
+        // Every pruned backup left one behind, permanently: storage the operator pays for outside
+        // the window they configured, and `pg_dumpall --globals-only` emits
+        // `CREATE ROLE ... PASSWORD 'SCRAM-SHA-256$...'` — role password hashes surviving the
+        // retention they were supposed to age out of. ARCHITECTURE.md's seventh decision puts
+        // retention in the application precisely because only the application knows what a backup
+        // consists of; knowing and then deleting two thirds of it is the same failure as not
+        // knowing.
+        //
+        // Unconditional rather than gated on the engine, and that is the more careful choice:
+        // DeleteObjects treats an absent key as a successful delete (S3 reports per-object failures
+        // in the body, and a missing object is not one), so this costs nothing for mysql/mongo —
+        // whereas deriving it from the manifest would leave the object orphaned forever in exactly
+        // the case this code already handles, an unreadable manifest.
+        globalsObjectKey(artifact),
       ]);
       await deps.deleteArtifactRow(jobId);
     },
