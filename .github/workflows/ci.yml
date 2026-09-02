@@ -219,6 +219,47 @@ jobs:
           SCHRODUMP_TEST_POSTGRES_IMAGE: postgres:18-alpine
         run: pnpm --filter @schrodump/engines test -- src/probe/probe.integration.test.ts
 
+  # Nothing built this until a tag did.
+  #
+  # docker/executors/*.Dockerfile is referenced ONLY by release.yml, so the first execution of
+  # these instructions would have been the release itself — against a pinned upstream URL and two
+  # per-architecture SHA-256 digests that no job had ever resolved. An asset moved or re-cut
+  # upstream fails the release, and now that `release` needs `executors`, it fails it after the
+  # server image is already published.
+  #
+  # The image matters more than that ordering, though: the server resolves schrodump/mydumper:1 by
+  # itself at backup time to run every STAGED mysql/mariadb dump. A broken executor is not a broken
+  # build, it is a backup that cannot be taken, discovered by an operator.
+  #
+  # Both platforms, because the arm64 digest is a different constant and an amd64-only build would
+  # leave half of it unverified until a tag. Nothing is pushed — release.yml publishes; this only
+  # proves the instructions still work.
+  executors:
+    name: executor images build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mydumper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v4.2.0
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The Dockerfile verifies itself: it checks the .deb against the pinned digest and then runs
+      # `mydumper --version` and `myloader --version`, so a build that completes has proved the
+      # download resolved, matched, installed, and produced working binaries.
+      - name: Build ${{ matrix.name }} for both platforms
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/executors/${{ matrix.name }}.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+
   image:
     name: image (build and smoke test)
     runs-on: ubuntu-latest
