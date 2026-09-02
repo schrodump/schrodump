@@ -47,7 +47,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The container runs unprivileged (uid 100) and this is a bind mount, so the directory has to be
+# writable by it. Docker chowns a named volume; it does not chown a bind mount. Getting this wrong
+# is what the boot-time preflight now refuses, and what CI hit the first time this job ran.
 mkdir -p "$SCRATCH"
+chmod 0777 "$SCRATCH"
 cat > "${WORK}/.env" <<EOF
 DB_PASSWORD=smoke-$(openssl rand -hex 6)
 SCHRODUMP_KEK=$(openssl rand -base64 32)
