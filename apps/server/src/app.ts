@@ -3,10 +3,10 @@
 
 import Fastify, { type FastifyBaseLogger } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { ZodError } from "zod";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
 import type { SessionResolver } from "./auth/rbac.js";
 import { registerAuditTrail } from "./observability/audit.js";
+import { registerErrorHandler } from "./observability/errors.js";
 import { registerHealth } from "./observability/health.js";
 import { newCorrelationId } from "./observability/pino.js";
 import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js";
@@ -58,13 +58,7 @@ export function buildApp(deps: AppDeps) {
     done();
   });
 
-  app.setErrorHandler((error, request, reply) => {
-    if (error instanceof ZodError) {
-      return reply.status(400).send({ error: "invalid request" });
-    }
-    request.log.error({ err: error }, "request failed");
-    return reply.status(500).send({ error: "internal error", correlationId: request.id });
-  });
+  registerErrorHandler(app);
 
   registerAuditTrail(app, deps.prisma);
 
