@@ -284,3 +284,20 @@ jobs:
               console.log(u, "->", r.status);
               if (!r.ok) process.exit(1);
             }'
+
+      # Everything above proves the IMAGE runs. This proves the DEPLOYMENT does, which is a
+      # different claim and the one that kept being wrong: three defects shipped that no unit or
+      # integration test could catch, all of them in the seam between the code and compose.yaml —
+      # the socket proxy denying `exec` so verify could never run, scratch on a path only the
+      # server's own container could see so every mounted-file operation failed, and nothing
+      # pulling executor images so the first backup of every engine failed on a fresh host.
+      #
+      # Each alone was enough for a new installation to take backups it could never verify or
+      # restore. The suite talks to Docker and PostgreSQL directly; the deployment puts a proxy, a
+      # volume layout and a network topology in between, and none of it was exercised until now.
+      - name: The deployment takes a backup and proves it restores
+        run: |
+          # compose.yaml pins `schrodump/schrodump:latest`; the build above tagged :ci.
+          docker tag schrodump/schrodump:ci schrodump/schrodump:latest
+          docker rm -f app pg >/dev/null 2>&1 || true
+          scripts/smoke-compose.sh
