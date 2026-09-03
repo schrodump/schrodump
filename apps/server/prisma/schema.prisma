@@ -411,6 +411,13 @@ model Artifact {
   // needs it to decide whether --oplogReplay is safe; it cannot be re-derived later, because the
   // origin's topology may have changed or the origin may be gone.
   sourceHasOplog      Boolean?
+  // mysql/mariadb only: whether the dump script carries more than one database (mysqldump
+  // --databases with two or more names). NULL means unknown — either an engine whose restore is not
+  // a replayed script, or an artifact written before the fact was tracked. Restore reads it to
+  // decide whether a sub-cluster target can be confined at all: for these engines DATABASE and
+  // FULL_CLUSTER build the same command, so a multi-database script rewrites every database it
+  // carries regardless of which one was asked for.
+  dumpIsMultiDatabase Boolean?
   // jobIds this artifact depends on (full/incremental chain).
   dependsOn           String[]
   createdAt           DateTime             @default(now())

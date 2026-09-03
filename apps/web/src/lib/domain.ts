@@ -69,6 +69,27 @@ export function canRestoreArtifact(artifact: {
   return artifact.engine !== undefined && artifact.executionMode !== undefined;
 }
 
+// Whether a restore of this artifact can be confined to a single database at all.
+//
+// mysql/mariadb replay the dump as a SQL script, and their buildRestore emits no scoping flag —
+// there is no equivalent of pg_restore's -t or mongorestore's --nsInclude. A script dumped with
+// `--databases a b` carries CREATE DATABASE / USE / DROP TABLE for both, so it rewrites both
+// whichever one was asked for. Measured on mysql 8.4.10: the neighbour lost a row and the client
+// exited 0.
+//
+// Only a recorded `false` clears this. `null` means the artifact predates the fact being tracked,
+// which is a weaker claim than false — and the failure direction decides how to read it, because
+// permitting the hazard costs a database while refusing costs a label (a full-cluster restore of
+// the same artifact runs the identical command and says what it does). This mirrors the server's
+// gate; it does not replace it — the server stays the lock.
+export function canConfineRestore(artifact: {
+  engine: EngineKind;
+  dumpIsMultiDatabase: boolean | null;
+}): boolean {
+  if (artifact.engine !== "mysql" && artifact.engine !== "mariadb") return true;
+  return artifact.dumpIsMultiDatabase === false;
+}
+
 // Why the server answers with a code and not a message: driver errors embed the credential they
 // failed with. The wording lives in the translation files.
 export const PROBE_FAILURE_CODES = [

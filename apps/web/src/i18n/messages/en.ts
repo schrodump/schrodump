@@ -205,6 +205,8 @@ export const en = {
     "Restore is deliberate. Pick a scope — scopes this engine cannot restore are disabled.",
   "restore.scope": "Restore scope",
   "restore.unsupported": "Not supported for {engine}",
+  "restore.notConfinable":
+    "This dump carries more than one database, and no flag confines the restore to one of them — restore it as a full cluster",
   "restore.targetDatabase": "Target database",
   "restore.overExisting": "Restore over an existing database (overwrites data)",
   "restore.confirmPrompt": "To confirm, type the target database name exactly.",

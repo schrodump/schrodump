@@ -234,6 +234,7 @@ export function toArtifactRecord(row: {
   engine: string;
   executionMode: string;
   sourceHasOplog: boolean | null;
+  dumpIsMultiDatabase: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: bigint;
   sizeCompressedBytes: bigint;
@@ -259,6 +260,10 @@ export function toArtifactRecord(row: {
     // different statement from false ("a mongo dump that carries none") and must stay tellable
     // apart. Coercing either into the other would make the field say something the dump did not.
     sourceHasOplog: row.sourceHasOplog,
+    // Passed through unchanged, null included: null means the fact was never recorded, which the
+    // restore gate treats as unproven rather than as safe. Coercing it to false would hand the UI
+    // permission the server does not give.
+    dumpIsMultiDatabase: row.dumpIsMultiDatabase,
     serverVersionNum: row.serverVersionNum,
     sizeRawBytes: Number(row.sizeRawBytes),
     sizeCompressedBytes: Number(row.sizeCompressedBytes),

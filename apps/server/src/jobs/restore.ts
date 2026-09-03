@@ -24,6 +24,38 @@ export interface ArtifactForRestore {
   // mongodb only: whether the archive was dumped with an oplog. undefined means unknown — either a
   // non-mongo engine, or an artifact written before the fact was recorded.
   sourceHasOplog?: boolean;
+  // mysql/mariadb only: whether the dump script carries more than one database (mysqldump
+  // --databases with two or more names). undefined means unknown — either an engine whose restore
+  // is not a replayed script, or an artifact written before the fact was recorded.
+  dumpIsMultiDatabase?: boolean;
+}
+
+// Engines whose restore replays a SQL script the dump wrote, rather than handing an archive to a
+// tool that can filter it. Their buildRestore emits NO scoping flag, so the script's own USE
+// statements decide where the writes land — there is no per-engine equivalent of pg_restore's -t or
+// mongorestore's --nsInclude to confine them with.
+const SCRIPT_RESTORE_ENGINES = ["mysql", "mariadb"];
+
+// The producer side of `ArtifactForRestore.dumpIsMultiDatabase`, kept in the same file as the gate
+// that reads it so the two cannot drift: a rule stated in one place and applied in another is how
+// the capability matrix came to advertise a TABLE restore no adapter could perform.
+//
+// Recorded at dump time because it describes the ARTIFACT, not the origin — the origin's set of
+// databases changes, and re-deriving the fact later would answer a question about today's server
+// rather than about the script in the bucket.
+export function dumpIsMultiDatabaseFor(
+  engine: string,
+  executionMode: "STREAM" | "STAGED",
+  scopeDatabases: readonly string[],
+): boolean | undefined {
+  if (!SCRIPT_RESTORE_ENGINES.includes(engine)) return undefined;
+  // STAGED is mydumper, and `mydumper -B <db>` dumps ONE database — myloader replays it into one
+  // with the same flag. A staged artifact is single-database by construction, whatever the dump
+  // scope listed, so it keeps the DATABASE restore that genuinely works for it.
+  if (executionMode === "STAGED") return false;
+  // STREAM is mysqldump: `--databases a b` is what puts CREATE DATABASE / USE / DROP TABLE for
+  // more than one database into the script. One name (or none) cannot.
+  return scopeDatabases.length >= 2;
 }
 
 export interface RestorePorts {
@@ -66,7 +98,39 @@ export async function runRestoreJob(
       );
     }
 
-    // 2. Resolve the decryption key from the manifest's keyIds (retired keys included), never from
+    // 2. A script-restore artifact carrying more than one database cannot be restored INTO one of
+    //    them. For these engines DATABASE and FULL_CLUSTER build the identical command, so the
+    //    narrower target is a claim with no mechanism behind it: the script's CREATE DATABASE / USE
+    //    / DROP TABLE run for every database it was dumped with. Measured on mysql 8.4.10 — two
+    //    databases dumped together, the script restored "into" the first, and the second lost a row
+    //    with the client exiting 0. Refusing costs the label, not the capability: FULL_CLUSTER runs
+    //    the same command and says what it actually does.
+    //
+    //    Only a recorded `false` clears this gate. `undefined` is a WEAKER claim than false, and
+    //    the failure direction decides how to treat it — permitting the hazard silently costs a
+    //    neighbouring database, while refusing costs a word. Unlike oplog provenance this fact is
+    //    recoverable without re-probing an origin that may be gone: the manifest in the bucket
+    //    already carries the dump scope, so a catalog rebuild fills it in.
+    if (SCRIPT_RESTORE_ENGINES.includes(artifact.engine) && req.target !== "FULL_CLUSTER") {
+      if (artifact.dumpIsMultiDatabase === true) {
+        return await fail(
+          ports,
+          `a ${req.target} restore of this ${artifact.engine} artifact cannot be confined: its dump ` +
+            `script carries more than one database and would rewrite every one of them — restore it ` +
+            `as FULL_CLUSTER if that is what you intend`,
+        );
+      }
+      if (artifact.dumpIsMultiDatabase === undefined) {
+        return await fail(
+          ports,
+          `whether this ${artifact.engine} artifact's dump script carries more than one database was ` +
+            `never recorded, so a ${req.target} restore cannot be proven safe — restore it as ` +
+            `FULL_CLUSTER, or rebuild the catalog to recover the fact from the manifest`,
+        );
+      }
+    }
+
+    // 3. Resolve the decryption key from the manifest's keyIds (retired keys included), never from
     //    global config.
     const keyId = resolveDecryptionKeyId(artifact.manifestKeyIds, await ports.availableKeys());
     if (keyId === null) {
@@ -76,12 +140,12 @@ export async function runRestoreJob(
       );
     }
 
-    // 3. Restore over existing data requires explicit confirmation.
+    // 4. Restore over existing data requires explicit confirmation.
     if ((await ports.targetHasExistingData()) && !req.confirmExistingDatabase) {
       return await fail(ports, "restore over an existing database requires explicit confirmation");
     }
 
-    // 4. Audit the restore, then execute.
+    // 5. Audit the restore, then execute.
     await ports.audit({
       action: "restore.execute",
       artifactId: req.artifactId,
@@ -90,7 +154,7 @@ export async function runRestoreJob(
       keyId,
     });
     const ok = await ports.runRestore(keyId);
-    // 5. A mongo FULL_CLUSTER restore of an archive whose provenance we never recorded runs without
+    // 6. A mongo FULL_CLUSTER restore of an archive whose provenance we never recorded runs without
     //    --oplogReplay, because emitting it against an archive that has no oplog crashes the whole
     //    restore. The restore still happens — refusing it would strand the operator mid-incident —
     //    but the cost is written down rather than swallowed: without replay, each collection lands

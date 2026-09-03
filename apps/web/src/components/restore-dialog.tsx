@@ -14,6 +14,7 @@ import { useT } from "@/i18n/provider";
 import {
   RESTORE_TARGETS,
   RESTORE_TARGETS_BY_ENGINE,
+  canConfineRestore,
   canRestore,
   canRestoreArtifact,
   type RestoreTarget,
@@ -33,6 +34,11 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
   const t = useT();
   const restore = useTriggerRestore();
   const supported = RESTORE_TARGETS_BY_ENGINE[artifact.engine];
+  // Per-ARTIFACT, unlike `supported`, which is per-engine: the same engine restores one database
+  // perfectly well when its script carries only one. A dump that carries several cannot be aimed at
+  // one of them by any flag mysql provides, so every sub-cluster target is withheld with its own
+  // reason rather than looking like something the engine cannot do.
+  const confinable = canConfineRestore(artifact);
 
   const [target, setTarget] = useState<RestoreTarget>(supported[0] ?? "FULL_CLUSTER");
   const [database, setDatabase] = useState("");
@@ -85,6 +91,8 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
           <legend className="text-sm font-medium">{t("restore.scope")}</legend>
           {RESTORE_TARGETS.map((option) => {
             const isSupported = supported.includes(option);
+            const unconfinable = !confinable && option !== "FULL_CLUSTER";
+            const available = isSupported && !unconfinable;
             return (
               <div key={option} className="flex items-center gap-2">
                 <input
@@ -93,18 +101,22 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
                   name="restore-target"
                   value={option}
                   checked={target === option}
-                  disabled={!isSupported}
+                  disabled={!available}
                   onChange={() => setTarget(option)}
                 />
                 <Label
                   htmlFor={`target-${option}`}
-                  className={isSupported ? "" : "text-muted-foreground"}
+                  className={available ? "" : "text-muted-foreground"}
                 >
                   {t(targetLabel[option])}
                 </Label>
                 {!isSupported ? (
                   <span className="text-xs text-muted-foreground">
                     {t("restore.unsupported", { engine: t(`engine.${artifact.engine}`) })}
+                  </span>
+                ) : unconfinable ? (
+                  <span className="text-xs text-muted-foreground">
+                    {t("restore.notConfinable")}
                   </span>
                 ) : null}
               </div>
@@ -184,10 +196,11 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   const t = useT();
   const [open, setOpen] = useState(false);
   if (!canRestore(role)) return null;
-  // A STAGED artifact has no restore pipeline in v1, for any engine. Show the trigger disabled
-  // with the reason rather than hiding it: the artifact exists, and why it cannot be restored yet
-  // is the useful part. The server refuses it too — this only stops us enqueuing a job that is
-  // certain to fail.
+  // Kept as a gate, not as dead code: restore now works for all four engines in BOTH execution
+  // modes (the server unpacks a staged tar before handing the directory to pg_restore / myloader),
+  // so canRestoreArtifact answers yes today. When a future engine or mode cannot be restored at
+  // all, the trigger shows disabled with the reason rather than vanishing — the artifact exists,
+  // and why it cannot be restored is the useful part.
   if (!canRestoreArtifact(artifact)) {
     return (
       <Button size="sm" variant="outline" disabled title={t("restore.stagedUnavailable")}>

@@ -17,6 +17,7 @@ export interface RestoreWiringDeps {
     serverVersionNum: number;
     destinationName: string;
     sourceHasOplog?: boolean;
+    dumpIsMultiDatabase?: boolean;
   }>;
   availableKeys(): Promise<EncryptionKeyRecord[]>;
   targetHasExistingData(): Promise<boolean>;
@@ -43,6 +44,9 @@ export function createRestorePorts(deps: RestoreWiringDeps): RestorePorts {
         supportedRestoreTargets: [...caps.supportedRestoreTargets],
         destinationName: row.destinationName,
         ...(row.sourceHasOplog !== undefined ? { sourceHasOplog: row.sourceHasOplog } : {}),
+        ...(row.dumpIsMultiDatabase !== undefined
+          ? { dumpIsMultiDatabase: row.dumpIsMultiDatabase }
+          : {}),
       };
     },
     availableKeys: deps.availableKeys,
