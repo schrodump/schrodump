@@ -139,7 +139,8 @@ encryption, GFS retention, restore execution, notification delivery (webhook and
 of its own catalog, the web UI, and the full CI + signed-release pipeline are implemented and
 tested. Restore covers both single-stream and staged (directory) artifacts, and is scoped where the
 engine provides a mechanism for it: PostgreSQL to a schema or a table, MongoDB to a database or a
-collection. Physical/PITR backups are on the roadmap.
+collection. A MongoDB replica set is dumped with its oplog, and a full-cluster restore replays it,
+so every collection lands on a single instant. Physical/PITR backups are on the roadmap.
 [docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1.
 
 ## Contributing

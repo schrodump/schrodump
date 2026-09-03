@@ -142,7 +142,11 @@ O Schrodump está em desenvolvimento ativo rumo ao **v1**. O modelo de verifica�
 storage, a criptografia, a retenção GFS, a execução de restore, a entrega de notificações (webhook e
 SMTP), o autobackup do próprio catálogo, a interface web e o pipeline completo de CI + release
 assinada estão implementados e testados. O restore cobre artefatos single-stream e staged
-(diretório), e é escopada onde a engine oferece mecanismo para isso: PostgreSQL até schema ou tabela, MongoDB até banco ou coleção. Backup físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que não está no v1.
+(diretório), e é escopado onde a engine oferece mecanismo para isso: PostgreSQL até schema ou
+tabela, MongoDB até banco ou coleção. Um replica set MongoDB tem o oplog incluído no dump, e um
+restore full-cluster o reaplica, de modo que todas as coleções chegam a um único instante. Backup
+físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que
+não está no v1.
 
 ## Contribuindo
 
