@@ -153,7 +153,15 @@ jobs:
           provenance: mode=max
 
       # Signed by digest, not by tag: a tag can be moved, a digest cannot.
+      # Pinned, because the client version decides the SIGNATURE FORMAT, not just the tool. v3
+      # writes an OCI 1.1 bundle; v2 wrote a `<digest>.sig` tag, and a v2 client cannot read a v3
+      # signature — it answers "no signatures found", which on a supply-chain check is
+      # indistinguishable from an unsigned image. Taking whatever the installer defaults to would
+      # let that flip under us between releases, silently changing what an operator has to run.
+      # docs/install.md states the requirement; this is the other half of it.
       - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.0.6
 
       - name: Sign the published digests
         env:
@@ -292,7 +300,15 @@ jobs:
       # by itself at backup time, pulls it, and hands the container the target database's password.
       # Publishing it unsigned meant the image a human chooses was verifiable and the image the
       # product silently fetches on their behalf was not, which is exactly backwards.
+      # Pinned, because the client version decides the SIGNATURE FORMAT, not just the tool. v3
+      # writes an OCI 1.1 bundle; v2 wrote a `<digest>.sig` tag, and a v2 client cannot read a v3
+      # signature — it answers "no signatures found", which on a supply-chain check is
+      # indistinguishable from an unsigned image. Taking whatever the installer defaults to would
+      # let that flip under us between releases, silently changing what an operator has to run.
+      # docs/install.md states the requirement; this is the other half of it.
       - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.0.6
 
       - name: Sign the published digests
         env:

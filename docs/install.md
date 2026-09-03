@@ -456,7 +456,18 @@ Migrations run automatically on start. For production, pin the image to an exact
 `compose.yaml` rather than tracking `latest`, so that an upgrade is something you decide and not
 something a `pull` decides for you.
 
-Every published image is signed. Verify before you run it:
+Every published image is signed. Verify before you run it — **with cosign v3 or newer**:
+
+```sh
+cosign version   # must be 3.x
+```
+
+> **A v2 client reports `Error: no signatures found` on these images, and that is not what it
+> sounds like.** The release signs with cosign v3, whose default is the OCI 1.1 bundle format
+> rather than the legacy `<digest>.sig` tag a v2 client looks for. So v2 cannot see a signature
+> that is there — and on a supply-chain check, "no signatures found" is indistinguishable from an
+> unsigned image. If your package manager still ships v2, take the binary from
+> [the cosign releases page](https://github.com/sigstore/cosign/releases) instead.
 
 ```sh
 cosign verify ghcr.io/schrodump/schrodump:<version> \
