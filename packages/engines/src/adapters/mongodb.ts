@@ -60,14 +60,16 @@ export const mongodbAdapter: EngineAdapter = {
     if (input.scope.databases.length > 1 || input.scope.collections.length > 1) {
       throw new EngineDescriptorError(
         "MONGODB_SCOPE_TOO_BROAD",
-        // Names the remedy, not just the limitation. This is the FIRST thing an operator hits
-        // after pointing Schrodump at MongoDB with an admin credential, because the scope comes
-        // from what the probe's credential can list — and an admin sees admin/config/local too.
-        // "mongodump takes one --db" sends them to mongodump's manual; the credential is the
-        // thing they can actually change.
-        "this credential can read more than one database, and mongodump dumps one at a time. " +
-          "Use a user restricted to the database being backed up (readWrite on that database " +
-          "alone): listDatabases then returns only it, and the dump is unambiguous.",
+        // Names the remedy, not just the limitation. The remedy MOVED: this scope used to arrive
+        // from probe discovery, so the fix was to narrow the credential until listDatabases
+        // returned one name. Since dumpScopeFor (apps/server jobs/worker-wiring.ts) it arrives
+        // from the TARGET row, so the credential is no longer the thing to change — the target's
+        // scope is, and an empty one is the deliberate way to ask for the whole instance.
+        // Pointing at the credential now would send an operator to edit something that has
+        // stopped deciding this.
+        "this target's scope names more than one database, and mongodump copies one at a time. " +
+          "Name the single database to back up, or leave the scope empty to dump the whole " +
+          "instance (which is also what a replica set requires).",
       );
     }
 

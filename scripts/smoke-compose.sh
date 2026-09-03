@@ -354,11 +354,11 @@ for _ in $(seq 1 90); do
     >/dev/null 2>&1 && break
   sleep 2
 done
-# A scoped credential, NOT root — and this is the product being right rather than a workaround.
-# mongodump copies one database at a time, so a credential that can see several leaves the scope
-# ambiguous, and the backup refuses with MONGODB_SCOPE_TOO_BROAD rather than guessing. Pointing
-# this at root is exactly the mistake an operator makes first; using the remedy the error message
-# names is what proves that advice actually works.
+# A least-privilege credential, NOT root: readWrite on the one database this target scopes to.
+# It no longer decides the dump's scope — the TARGET does, and this one names "shop" explicitly
+# (see below), which is what step 18 contrasts against with an unscoped replica-set target. What
+# the credential still proves is that a backup runs without cluster-wide rights, which is the
+# configuration the docs tell an operator to use.
 docker exec "${PROJECT}-mongo" mongosh -u root -p rootpw --quiet --eval '
   db.getSiblingDB("shop").orders.insertOne({_id:1,v:"smoke"});
   db.getSiblingDB("admin").createUser({user:"backup",pwd:"backuppw",roles:[{role:"readWrite",db:"shop"}]});
