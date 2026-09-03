@@ -9,6 +9,7 @@ import type { StorageDriver } from "@schrodump/storage/driver";
 import { scanManifests } from "@schrodump/storage/manifest-sidecar";
 import { scopedPrisma } from "../data/scope.js";
 import type { CatalogRebuildPorts } from "./catalog-rebuild.js";
+import { dumpIsMultiDatabaseFor } from "./restore.js";
 
 export interface CatalogRebuildWiringDeps {
   prisma: PrismaClient;
@@ -66,10 +67,24 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
           bucketKey: `${deps.prefix}/${deps.organizationId}/${manifest.jobId}/artifact.bin`,
           manifestKey: `${deps.prefix}/${deps.organizationId}/${manifest.jobId}/manifest.json`,
           engine: manifest.engine,
+          // From the manifest, not from the column default: a STAGED artifact is a tar, and the
+          // restore pipeline only unpacks it when the row says so. Omitting this left every staged
+          // artifact relabelled STREAM by the very rebuild that was supposed to recover it.
+          executionMode: manifest.executionMode,
           serverVersionNum: manifest.serverVersionNum,
           // A rebuild must not silently downgrade a known-oplog artifact to unknown provenance:
           // that would make every later restore of it record a caveat it does not deserve.
           sourceHasOplog: manifest.sourceHasOplog ?? null,
+          // Derived here rather than stored in the manifest, because the manifest already answers
+          // it: the dump scope is what mysqldump's --databases list was. This is why an artifact
+          // predating the column is not stranded — a rebuild recovers the fact from the bucket
+          // without going anywhere near the origin.
+          dumpIsMultiDatabase:
+            dumpIsMultiDatabaseFor(
+              manifest.engine,
+              manifest.executionMode,
+              manifest.scope.databases,
+            ) ?? null,
           sizeRawBytes: BigInt(manifest.sizeRawBytes),
           sizeCompressedBytes: BigInt(manifest.sizeCompressedBytes),
           checksumAlgorithm: manifest.checksumAlgorithm,
