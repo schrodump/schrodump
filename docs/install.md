@@ -106,6 +106,19 @@ every backup job will fail, so it is worth alerting on.
 curl -i http://127.0.0.1:8080/health     # 200 {"status":"ok"} — or 503 {"status":"degraded"}
 ```
 
+`/health` deliberately does not say which build answered it: the endpoint needs no session, and a
+version banner on it tells an unauthenticated caller which advisories apply to your deployment. Ask
+the image instead — no process required — or read the first line the server logs:
+
+```sh
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+  schrodump/schrodump:0.1.0-rc.1
+docker compose logs schrodump | grep 'server listening'   # {"version":"0.1.0-rc.1",...}
+```
+
+Every artifact carries the same answer for itself, in its manifest's `toolVersion` — which is the
+one that matters during a recovery, when the container that wrote the backup no longer exists.
+
 The container is deliberately **not** restarted when this goes red. A restart would abort whatever
 backup is running — and with it the cleartext scratch directory that the shutdown handler would
 otherwise clean up — to fix a condition that is usually a brief database blip and is not Schrodump's

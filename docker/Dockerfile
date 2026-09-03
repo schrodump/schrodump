@@ -15,6 +15,12 @@
 # runtime of a backup tool without anyone deciding it.
 ARG NODE_IMAGE=node:22.23.1-alpine
 
+# Which build this is. release.yml passes the git tag; a local build gets the dev default rather
+# than an empty string, because "" would land as the producer of every artifact the image writes.
+# Declared before the first FROM so every stage can reference it (each still needs its own ARG line
+# to consume it — a global ARG is visible to stages, not inherited by them).
+ARG VERSION=0.0.0-dev
+
 # ---------------------------------------------------------------------------
 # manifests — the copy set every install stage starts from
 # ---------------------------------------------------------------------------
@@ -117,6 +123,18 @@ RUN node /tmp/prune-store.mjs && rm /tmp/prune-store.mjs && du -sh /app/node_mod
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
 
+# Re-declared to pull the global ARG into this stage. The labels are how `docker inspect` answers
+# "what did I pull" with no process running and no endpoint to call — the deployed answer to a
+# question an operator asks mid-incident. Kept out of earlier stages so a rebuild with a new
+# VERSION only invalidates this layer.
+ARG VERSION
+LABEL org.opencontainers.image.title="Schrodump" \
+      org.opencontainers.image.description="Scheduled, verified logical database backups" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.vendor="ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA" \
+      org.opencontainers.image.source="https://github.com/schrodump/schrodump"
+
 # dumb-init reaps zombies and forwards signals; openssl is what the Prisma engines link against.
 RUN apk add --no-cache dumb-init openssl && \
     addgroup -S schrodump && \
@@ -132,11 +150,15 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
            /opt/yarn-v* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 WORKDIR /app
+# SCHRODUMP_VERSION is read by apps/server/src/version.ts: it is what the boot log reports and what
+# Manifest.toolVersion records, so an artifact in a bucket names the build that wrote it long after
+# that container is gone.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=8081 \
     WEB_PORT=8080 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    SCHRODUMP_VERSION=${VERSION}
 
 # API: dependency tree first, then the compiled output laid over it. The tree is copied whole
 # because the workspace links inside it are relative — splitting it would break resolution.

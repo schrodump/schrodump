@@ -145,6 +145,12 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          # The tag IS the version. It reaches the image twice, for two different readers: as an
+          # OCI label (`docker inspect`, no process needed) and as SCHRODUMP_VERSION, which the boot
+          # log reports and every manifest records as the producer of its artifact. Without it the
+          # image says 0.0.0-dev and so does every backup it writes.
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Attached to the image in the registry, so `docker buildx imagetools inspect` answers
