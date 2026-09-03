@@ -6,64 +6,128 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.15 0 0);
+  /* Neutrals carry a cool hue (286) rather than a pure grey. A pure mid-grey reads as
+     unconsidered; the bias is small enough to be felt rather than seen, and it is the same hue
+     the interactive chrome sits on.
+
+     `background` is an off-white and `card` is pure white, so an elevated surface has somewhere
+     to go. Before this they were both #fff, which is why every panel needed a border to exist at
+     all — and why sixteen files reach for <Card>. */
+  --background: oklch(0.985 0.002 286);
+  --foreground: oklch(0.17 0.006 286);
+  /* Secondary body text. Absent before, which is why prose that should recede was written with
+     muted-foreground — a label colour — and came out too faint to read comfortably. */
+  --foreground-soft: oklch(0.44 0.012 286);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0 0);
-  --primary: oklch(0.21 0.006 285.9);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.967 0.001 286.4);
-  --secondary-foreground: oklch(0.21 0.006 285.9);
-  --muted: oklch(0.967 0.001 286.4);
-  --muted-foreground: oklch(0.52 0.016 285.9);
-  --accent: oklch(0.967 0.001 286.4);
-  --accent-foreground: oklch(0.21 0.006 285.9);
+  --card-foreground: oklch(0.17 0.006 286);
+  --primary: oklch(0.21 0.006 286);
+  --primary-foreground: oklch(0.985 0.002 286);
+  --secondary: oklch(0.962 0.003 286);
+  --secondary-foreground: oklch(0.21 0.006 286);
+  --muted: oklch(0.962 0.003 286);
+  /* 0.52, not the 0.6 this started as: measured 3.79:1 on the page and 3.54:1 on a muted row,
+     both under AA. At 0.52 it is 5.29:1 and 4.94:1. Small uppercase labels are the most common
+     use of this token, which is the worst place to be under the line. */
+  --muted-foreground: oklch(0.52 0.012 286);
+  --accent: oklch(0.962 0.003 286);
+  --accent-foreground: oklch(0.21 0.006 286);
   --destructive: oklch(0.577 0.245 27.3);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.92 0.004 286.3);
-  --input: oklch(0.92 0.004 286.3);
-  --ring: oklch(0.7 0.015 286.1);
+  --border: oklch(0.92 0.004 286);
+  /* A second, heavier rule for the edges that separate regions rather than rows. Spending one
+     border weight on everything is what flattens a hierarchy. */
+  --border-strong: oklch(0.85 0.006 286);
+  --input: oklch(0.92 0.004 286);
+  --ring: oklch(0.7 0.015 286);
   --radius: 0.625rem;
 
-  /* Ternary backup state. UNOBSERVED is deliberately amber — never gray, never green. */
-  --state-verified: oklch(0.52 0.14 152);
+  /* Ternary backup state. UNOBSERVED is deliberately amber — never gray, never green.
+     Every pair below was measured against WCAG AA (4.5:1) as chip text on its own chip, and
+     against the page:
+       verified   5.31:1 on chip · 5.78:1 on page   (was 4.52:1 on chip — passing by 0.02)
+       unobserved 4.86:1 on chip · 5.40:1 on page
+       failed     5.01:1 on chip · 5.89:1 on page
+     The colours are NOT reassigned, only given headroom: what they mean is a product decision,
+     not a design one. */
+  --state-verified: oklch(0.48 0.14 152);
   --state-verified-bg: oklch(0.95 0.05 152);
-  --state-unobserved: oklch(0.5 0.13 75);
-  --state-unobserved-bg: oklch(0.95 0.07 85);
+  --state-unobserved: oklch(0.52 0.13 72);
+  --state-unobserved-bg: oklch(0.955 0.07 85);
   --state-failed: oklch(0.52 0.21 27);
-  --state-failed-bg: oklch(0.95 0.06 25);
+  --state-failed-bg: oklch(0.955 0.06 25);
+}
+
+
+/* The dark palette was written and then never reached: nothing in the application has ever set
+   the `.dark` class, so eighteen carefully chosen tokens were dead code and every deployment
+   shipped light-only. It now follows the operating system, which is the setting an operator has
+   already made — and `.dark` stays as the override hook a future toggle will use.
+
+   Ratios measured the same way: verified 8.40:1 on chip, unobserved 8.62:1, failed 5.81:1;
+   muted-foreground 4.75:1 on a muted row. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: oklch(0.145 0.005 286);
+    --foreground: oklch(0.97 0 0);
+    --foreground-soft: oklch(0.76 0.012 286);
+    --card: oklch(0.185 0.006 286);
+    --card-foreground: oklch(0.97 0 0);
+    --primary: oklch(0.92 0.004 286);
+    --primary-foreground: oklch(0.21 0.006 286);
+    --secondary: oklch(0.22 0.006 286);
+    --secondary-foreground: oklch(0.97 0 0);
+    --muted: oklch(0.22 0.006 286);
+    --muted-foreground: oklch(0.62 0.012 286);
+    --accent: oklch(0.22 0.006 286);
+    --accent-foreground: oklch(0.97 0 0);
+    --destructive: oklch(0.7 0.19 22.2);
+    --destructive-foreground: oklch(0.98 0 0);
+    --border: oklch(1 0 0 / 12%);
+    --border-strong: oklch(1 0 0 / 22%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.55 0.015 286);
+    --state-verified: oklch(0.8 0.16 152);
+    --state-verified-bg: oklch(0.27 0.055 152);
+    --state-unobserved: oklch(0.84 0.15 85);
+    --state-unobserved-bg: oklch(0.29 0.06 80);
+    --state-failed: oklch(0.76 0.18 25);
+    --state-failed-bg: oklch(0.29 0.075 25);
+  }
 }
 
 .dark {
-  --background: oklch(0.15 0 0);
-  --foreground: oklch(0.98 0 0);
-  --card: oklch(0.19 0.006 285.9);
-  --card-foreground: oklch(0.98 0 0);
-  --primary: oklch(0.92 0.004 286.3);
-  --primary-foreground: oklch(0.21 0.006 285.9);
-  --secondary: oklch(0.27 0.006 286);
-  --secondary-foreground: oklch(0.98 0 0);
-  --muted: oklch(0.27 0.006 286);
-  --muted-foreground: oklch(0.71 0.013 286.1);
-  --accent: oklch(0.27 0.006 286);
-  --accent-foreground: oklch(0.98 0 0);
+  --background: oklch(0.145 0.005 286);
+  --foreground: oklch(0.97 0 0);
+  --foreground-soft: oklch(0.76 0.012 286);
+  --card: oklch(0.185 0.006 286);
+  --card-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.92 0.004 286);
+  --primary-foreground: oklch(0.21 0.006 286);
+  --secondary: oklch(0.22 0.006 286);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.22 0.006 286);
+  --muted-foreground: oklch(0.62 0.012 286);
+  --accent: oklch(0.22 0.006 286);
+  --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.7 0.19 22.2);
   --destructive-foreground: oklch(0.98 0 0);
   --border: oklch(1 0 0 / 12%);
+  --border-strong: oklch(1 0 0 / 22%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.55 0.015 286.1);
-
-  --state-verified: oklch(0.78 0.16 152);
-  --state-verified-bg: oklch(0.28 0.06 152);
-  --state-unobserved: oklch(0.82 0.15 85);
-  --state-unobserved-bg: oklch(0.3 0.06 80);
-  --state-failed: oklch(0.75 0.18 25);
-  --state-failed-bg: oklch(0.3 0.08 25);
+  --ring: oklch(0.55 0.015 286);
+  --state-verified: oklch(0.8 0.16 152);
+  --state-verified-bg: oklch(0.27 0.055 152);
+  --state-unobserved: oklch(0.84 0.15 85);
+  --state-unobserved-bg: oklch(0.29 0.06 80);
+  --state-failed: oklch(0.76 0.18 25);
+  --state-failed-bg: oklch(0.29 0.075 25);
 }
+
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-primary: var(--primary);
@@ -77,6 +141,7 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-state-verified: var(--state-verified);

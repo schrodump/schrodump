@@ -15,6 +15,40 @@ function renderBadge(state: ArtifactState) {
   );
 }
 
+describe("StatusBadge — state survives without colour", () => {
+  // Colour alone fails anyone who cannot separate the hues, and fails everyone in greyscale. Each
+  // state carries a distinct shape as well, and the marker is a real element rather than a
+  // ::before, so this property is assertable instead of merely intended.
+  it.each([
+    ["VERIFIED", "disc"],
+    ["UNOBSERVED", "diamond"],
+    ["FAILED", "triangle"],
+  ] as const)("marks %s with a %s", (state, shape) => {
+    renderBadge(state);
+    const badge = screen.getByTestId(`state-${state}`);
+    const marker = badge.querySelector("[data-marker]");
+    expect(marker).toHaveAttribute("data-marker", shape);
+  });
+
+  it("gives the three states three different shapes, not one repeated", () => {
+    const shapes = new Set<string>();
+    for (const state of ["VERIFIED", "UNOBSERVED", "FAILED"] as const) {
+      const { container, unmount } = renderBadge(state);
+      shapes.add(container.querySelector("[data-marker]")?.getAttribute("data-marker") ?? "");
+      unmount();
+    }
+    expect(shapes.size).toBe(3);
+  });
+
+  it("hides the marker from assistive tech — the label already says the state", () => {
+    renderBadge("UNOBSERVED");
+    expect(screen.getByTestId("state-UNOBSERVED").querySelector("[data-marker]")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
+});
+
 describe("StatusBadge", () => {
   it("renders VERIFIED in green", () => {
     renderBadge("VERIFIED");
