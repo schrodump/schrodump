@@ -16,7 +16,6 @@ import {
   RESTORE_TARGETS_BY_ENGINE,
   canConfineRestore,
   canRestore,
-  canRestoreArtifact,
   type RestoreTarget,
   type Role,
 } from "@/lib/domain";
@@ -196,18 +195,6 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   const t = useT();
   const [open, setOpen] = useState(false);
   if (!canRestore(role)) return null;
-  // Kept as a gate, not as dead code: restore now works for all four engines in BOTH execution
-  // modes (the server unpacks a staged tar before handing the directory to pg_restore / myloader),
-  // so canRestoreArtifact answers yes today. When a future engine or mode cannot be restored at
-  // all, the trigger shows disabled with the reason rather than vanishing — the artifact exists,
-  // and why it cannot be restored is the useful part.
-  if (!canRestoreArtifact(artifact)) {
-    return (
-      <Button size="sm" variant="outline" disabled title={t("restore.stagedUnavailable")}>
-        {t("artifacts.restore")}
-      </Button>
-    );
-  }
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>

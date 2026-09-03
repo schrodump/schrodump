@@ -24,16 +24,12 @@ export const ptBR: Record<MessageKey, string> = {
   "common.create": "Criar",
   "common.edit": "Editar",
   "common.delete": "Excluir",
-  "common.close": "Fechar",
   "common.retry": "Tentar de novo",
   "common.loading": "Carregando…",
   "common.error": "Algo deu errado",
   "common.errorDetail": "A requisição falhou: {message}",
-  "common.empty": "Nada por aqui ainda",
-  "common.required": "Campo obrigatório",
   "common.configured": "Configurado",
   "common.replace": "Substituir",
-  "common.notAvailable": "Indisponível ainda",
   "common.endpointPending": "Estes dados dependem de um endpoint do servidor ainda não disponível.",
 
   "locale.label": "Idioma",
@@ -44,7 +40,6 @@ export const ptBR: Record<MessageKey, string> = {
   "state.verified": "Verificado",
   "state.unobserved": "Não observado",
   "state.failed": "Falhou",
-  "state.unobserved.hint": "Nenhum verify rodou — este backup é uma pergunta em aberto.",
 
   "dashboard.title": "Painel",
   "dashboard.unobservedBackups": "{count} backups não observados",
@@ -213,8 +208,6 @@ export const ptBR: Record<MessageKey, string> = {
   "restore.mismatch": "O nome não confere com o banco de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore enfileirado",
-  "restore.stagedUnavailable":
-    "Este artefato foi escrito em modo staged (diretório), que não pode ser restaurado nesta versão",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Banco",
   "restoreTarget.SCHEMA": "Schema",
@@ -233,9 +226,6 @@ export const ptBR: Record<MessageKey, string> = {
   "guided.done": "Feito",
 
   "settings.title": "Configurações",
-  "settings.keys": "Chaves de criptografia",
-  "settings.keys.description":
-    "Recipients do age e o fingerprint da KEK que o servidor fixa no primeiro boot.",
   "settings.members": "Membros",
   "settings.members.description": "Membros da organização e seus papéis: admin, operator, viewer.",
   "settings.instance": "Instância",
@@ -297,7 +287,6 @@ export const ptBR: Record<MessageKey, string> = {
   "keys.type.escrow": "Custódia",
   "keys.serverHolds": "O servidor guarda a identidade",
   "keys.offline": "Identidade mantida offline",
-  "keys.created": "Chaves criadas.",
   "keys.escrowIdentity": "Identidade privada de custódia",
   "keys.escrowWarning": "Guarde isto agora, em algum lugar que não seja este servidor. É exibido uma única vez e nunca armazenado. Sem ele, um self-backup jamais poderá ser recuperado — e é justamente esse o backup que importa depois que você perde este banco.",
   "keys.escrowSaved": "Guardei em lugar seguro",
