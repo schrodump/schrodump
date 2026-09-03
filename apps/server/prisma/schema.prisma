@@ -222,6 +222,14 @@ model DatabaseTarget {
   encryptedCredential Json
   tls                 Boolean    @default(true)
   scope               Json // { databases, schemas, collections }
+  // The last operator-triggered connection probe. All three NULL means it has never been run,
+  // which the guided setup must tell apart from "run and refused" — one still has something to
+  // ask for, the other has an answer. lastProbeFailure holds the CODE the probe returned, never
+  // the driver's message: driver errors embed the credential they failed with, and this row is
+  // handed to every viewer.
+  lastProbeAt         DateTime?
+  lastProbeOk         Boolean?
+  lastProbeFailure    String?
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
@@ -247,6 +255,11 @@ model StorageDestination {
   // operational: server holds the identity (full verify). sealed: server holds only the
   // public recipient (verify degrades to checksum; restore needs an operator-supplied identity).
   sealMode                 DestinationSealMode @default(operational)
+  // The last operator-triggered canary (put/get/delete against the bucket). NULL means never run.
+  // Written only by the canary endpoint, never by PATCH: whether a destination has been proven
+  // writable is something the server observed, not something a client may assert.
+  lastCanaryAt             DateTime?
+  lastCanaryOk             Boolean?
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
 
@@ -349,7 +362,7 @@ model NotificationChannel {
   smtpUsername          String?
   encryptedSmtpPassword String?
   fromAddress           String?
-  toAddresses           String[]      @default([])
+  toAddresses           String[]                @default([])
   enabled               Boolean                 @default(true)
   // Set when a delivery fails, so a notifier that cannot reach its channel is visible rather than
   // silently useless — which would be worse than having no notifications at all.

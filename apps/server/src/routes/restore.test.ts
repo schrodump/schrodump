@@ -15,7 +15,8 @@ function serviceWith(enqueueRestore = vi.fn(() => Promise.resolve("job-r"))): Jo
     enqueueBackup: () => Promise.resolve("b"),
     enqueueVerify: () => Promise.resolve("v"),
     enqueueRestore,
-    testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 1, failure: null, driverCode: null }),
+    recordProbe: () => Promise.resolve(),
+  testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 1, failure: null, driverCode: null }),
   };
 }
 

@@ -76,6 +76,15 @@ export function prismaDestinationStore(
       await db.storageDestination.deleteMany({ where: { id } });
       return { ok: true };
     },
+    // updateMany, not update: organizationId stays in the filter, so a destination belonging to
+    // another organization is a miss rather than a cross-tenant write — the same shape every other
+    // scoped mutation here uses.
+    recordCanary: async (id, ok) => {
+      await prisma.storageDestination.updateMany({
+        where: { id, organizationId },
+        data: { lastCanaryAt: new Date(), lastCanaryOk: ok },
+      });
+    },
   };
 }
 
@@ -348,6 +357,16 @@ export function createJobsService(
     },
     testConnection: (organizationId, targetId) =>
       probeTarget(prisma, kek, audit, organizationId, targetId),
+    // updateMany with organizationId in the filter: a target in another organization is a miss,
+    // not a cross-tenant write. Only the CODE is stored — `driverCode` and the driver's message
+    // stay out of the row, because this column is returned to every viewer and a driver error
+    // embeds the credential it failed with.
+    recordProbe: async (organizationId, targetId, result) => {
+      await prisma.databaseTarget.updateMany({
+        where: { id: targetId, organizationId },
+        data: { lastProbeAt: new Date(), lastProbeOk: result.ok, lastProbeFailure: result.failure },
+      });
+    },
   };
 }
 

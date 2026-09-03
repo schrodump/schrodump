@@ -68,6 +68,11 @@ export interface Target {
   // to show the databases already configured instead of silently clearing them.
   scope: { databases: string[]; schemas: string[]; collections: string[] };
   createdAt: string;
+  // The last operator-triggered connection probe. All three null means it has never run, which is
+  // NOT the same as having run and been refused — the setup checklist only stops asking for one.
+  lastProbeAt: string | null;
+  lastProbeOk: boolean | null;
+  lastProbeFailure: string | null;
 }
 
 export interface Destination {
@@ -80,6 +85,9 @@ export interface Destination {
   accessKeyId: string;
   forcePathStyle: boolean;
   sealMode: SealMode;
+  // The last canary (put/get/delete against the bucket). null means never run.
+  lastCanaryAt: string | null;
+  lastCanaryOk: boolean | null;
 }
 
 export interface Policy {

@@ -27,6 +27,9 @@ const TARGET: Target = {
   tls: true,
   scope: { databases: ["app", "shop"], schemas: [], collections: [] },
   createdAt: "2026-01-01T00:00:00.000Z",
+  lastProbeAt: null,
+  lastProbeOk: null,
+  lastProbeFailure: null,
 };
 
 const DESTINATION: Destination = {
@@ -39,6 +42,8 @@ const DESTINATION: Destination = {
   accessKeyId: "AKIAEXAMPLE",
   forcePathStyle: false,
   sealMode: "operational",
+  lastCanaryAt: null,
+  lastCanaryOk: null,
 };
 
 const POLICY: Policy = {

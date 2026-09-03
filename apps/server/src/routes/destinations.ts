@@ -43,6 +43,11 @@ export interface DestinationRecord {
   encryptedSecretAccessKey: unknown;
   forcePathStyle: boolean;
   sealMode: string;
+  // The last time an operator ran the canary against this destination, and whether it passed.
+  // null means it has never been run — which is a different state from "run and failed", and the
+  // setup checklist has to tell them apart to know whether it still has something to ask for.
+  lastCanaryAt: Date | null;
+  lastCanaryOk: boolean | null;
 }
 
 // Editable fields only, all optional, `.strict()` so a withheld field is a 400 rather than a silent
@@ -84,6 +89,10 @@ export interface DestinationStore {
   // null when no row with that id exists in the caller's organization.
   update(id: string, data: UpdateDestinationData): Promise<DestinationRecord | null>;
   remove(id: string): Promise<RemoveDestinationResult>;
+  // Deliberately not part of UpdateDestinationData: the canary outcome is something the server
+  // observed, not something a client may assert. A PATCH must never be able to claim a destination
+  // was proven writable.
+  recordCanary(id: string, ok: boolean): Promise<void>;
 }
 
 function toPublic(destination: DestinationRecord) {
@@ -97,6 +106,8 @@ function toPublic(destination: DestinationRecord) {
     accessKeyId: destination.accessKeyId,
     forcePathStyle: destination.forcePathStyle,
     sealMode: destination.sealMode,
+    lastCanaryAt: destination.lastCanaryAt,
+    lastCanaryOk: destination.lastCanaryOk,
   };
 }
 
@@ -147,6 +158,10 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
         if (!params.success) return reply.status(400).send({ error: "invalid id" });
         const health = await deps.canary(contextOf(request).organizationId, params.data.id);
+        // Recorded before answering, and recorded on failure too: the question the checklist asks
+        // is "has this been proven", and a canary that ran and failed answers it as definitely as
+        // one that passed.
+        await deps.store(contextOf(request).organizationId).recordCanary(params.data.id, health.ok);
         return reply.send(health);
       },
     );

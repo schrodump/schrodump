@@ -224,8 +224,6 @@ export const es: Record<MessageKey, string> = {
   "guided.step.target": "Crear una base de datos objetivo",
   "guided.step.probe": "Probar la conexión con el objetivo",
   "guided.step.policy": "Crear una política con verify activado",
-  "guided.manual":
-    "Ejecútalo en la propia página — el servidor no guarda registro de que se ejecutó.",
   "guided.open": "Abrir",
   "guided.done": "Hecho",
 
