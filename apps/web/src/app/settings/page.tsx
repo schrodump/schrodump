@@ -5,17 +5,17 @@
 
 import { AppShell } from "@/components/app-shell";
 import { EncryptionKeysPanel } from "@/components/encryption-keys";
+import { InstancePanel } from "@/components/instance-panel";
 import { SelfBackupPanel } from "@/components/self-backup-panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
 
-// Keys and self-backup are real and have endpoints. The two below still need one; the page states
-// that plainly instead of inventing data.
+// Keys, self-backup and instance configuration are real and have endpoints. Members is the one
+// left; the page states that plainly instead of inventing data.
 const PANELS: { title: MessageKey; description: MessageKey }[] = [
   { title: "settings.members", description: "settings.members.description" },
-  { title: "settings.instance", description: "settings.instance.description" },
 ];
 
 export default function SettingsPage() {
@@ -27,6 +27,7 @@ export default function SettingsPage() {
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <EncryptionKeysPanel canEdit={role === "admin"} />
         <SelfBackupPanel />
+        <InstancePanel />
       </div>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         {PANELS.map((panel) => (
