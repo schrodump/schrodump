@@ -189,6 +189,13 @@ export const en = {
   // Shown only when true. An archive with an oplog restores to a single instant; one
   // without restores collection by collection, and the operator cannot tell them apart
   // from anything else on the row.
+  "artifacts.detail.bucketKey": "Bucket key",
+  "artifacts.detail.checksum": "Checksum",
+  "artifacts.detail.sealedTo": "Sealed to",
+  "artifacts.detail.compression": "Compression",
+  "artifacts.detail.server": "Server",
+  "artifacts.detail.provenance": "Provenance",
+  "artifacts.detail.raw": "Original size",
   "artifacts.oplog": "Point-in-time (oplog)",
   "artifacts.verify": "Verify",
   "artifacts.restore": "Restore",
