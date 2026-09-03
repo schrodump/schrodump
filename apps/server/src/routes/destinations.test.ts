@@ -18,6 +18,8 @@ const RECORD: DestinationRecord = {
   encryptedSecretAccessKey: { v: 1, dek: "WRAPPED-DEK", data: "CIPHERTEXT" },
   forcePathStyle: false,
   sealMode: "operational",
+  lastCanaryAt: new Date("2026-09-03T12:00:00.000Z"),
+  lastCanaryOk: true,
 };
 
 const STORE: DestinationStore = {
@@ -26,9 +28,14 @@ const STORE: DestinationStore = {
   get: () => Promise.resolve(RECORD),
   update: () => Promise.resolve(RECORD),
   remove: () => Promise.resolve({ ok: true }),
+  recordCanary: () => Promise.resolve(),
 };
 
-async function appWith(role: Role | null, over: Partial<DestinationStore> = {}) {
+async function appWith(
+  role: Role | null,
+  over: Partial<DestinationStore> = {},
+  canaryResult: { ok: boolean; failedOperation: string | null } = { ok: true, failedOperation: null },
+) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
@@ -36,7 +43,7 @@ async function appWith(role: Role | null, over: Partial<DestinationStore> = {}) 
       resolver: () => Promise.resolve(ctx),
       kek: randomBytes(32),
       store: () => ({ ...STORE, ...over }),
-      canary: () => Promise.resolve({ ok: true, failedOperation: null }),
+      canary: () => Promise.resolve(canaryResult),
     })(instance);
     return Promise.resolve();
   });
@@ -191,6 +198,59 @@ describe("DELETE /destinations/:id", () => {
     const app = await appWith("viewer");
     const res = await app.inject({ method: "DELETE", url: "/destinations/d1" });
     expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+// The guided setup asks the operator to run the canary and then cannot tick it off, because the
+// outcome was returned to one browser and forgotten. A check whose result nothing keeps is a check
+// the deployment cannot be asked about later — and this one is the difference between a destination
+// that has been proven writable and one that merely has credentials in a form.
+describe("destinations — the canary outcome is recorded, not only returned", () => {
+  it("records a passing canary against the destination that ran it", async () => {
+    const recorded: { id: string; ok: boolean }[] = [];
+    const app = await appWith("operator", {
+      recordCanary: (id, ok) => {
+        recorded.push({ id, ok });
+        return Promise.resolve();
+      },
+    });
+    const res = await app.inject({ method: "POST", url: "/destinations/d1/canary" });
+    expect(res.statusCode).toBe(200);
+    expect(recorded).toEqual([{ id: "d1", ok: true }]);
+    await app.close();
+  });
+
+  it("records a failing canary too — one that ran and failed is not one that never ran", async () => {
+    const recorded: { id: string; ok: boolean }[] = [];
+    const app = await appWith(
+      "operator",
+      {
+        recordCanary: (id, ok) => {
+          recorded.push({ id, ok });
+          return Promise.resolve();
+        },
+      },
+      { ok: false, failedOperation: "put" },
+    );
+    await app.inject({ method: "POST", url: "/destinations/d1/canary" });
+    expect(recorded).toEqual([{ id: "d1", ok: false }]);
+    await app.close();
+  });
+
+  it("exposes the last canary on the list, which is what the checklist reads", async () => {
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "GET", url: "/destinations" });
+    const [first] = res.json() as { lastCanaryOk: boolean | null; lastCanaryAt: string | null }[];
+    expect(first?.lastCanaryOk).toBe(true);
+    expect(first?.lastCanaryAt).toBe("2026-09-03T12:00:00.000Z");
+    await app.close();
+  });
+
+  it("still answers the caller with the health result, unchanged", async () => {
+    const app = await appWith("operator", {}, { ok: false, failedOperation: "delete" });
+    const res = await app.inject({ method: "POST", url: "/destinations/d1/canary" });
+    expect(res.json()).toEqual({ ok: false, failedOperation: "delete" });
     await app.close();
   });
 });

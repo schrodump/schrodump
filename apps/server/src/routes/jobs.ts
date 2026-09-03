@@ -95,6 +95,14 @@ export interface JobsService {
     failure: string | null;
     driverCode: string | null;
   }>;
+  // Stores what the probe found, so the deployment can be asked later whether this target was ever
+  // proven reachable. The CODE is stored, never the driver's message — see testConnection above,
+  // and the column it would otherwise leak the credential into.
+  recordProbe(
+    organizationId: string,
+    targetId: string,
+    result: { ok: boolean; serverVersionNum: number | null; failure: string | null },
+  ): Promise<void>;
 }
 
 export interface JobsRoutesDeps {
@@ -147,7 +155,11 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
       async (request, reply) => {
         const params = IdParams.safeParse(request.params);
         if (!params.success) return reply.status(400).send({ error: "invalid id" });
-        const result = await deps.service.testConnection(contextOf(request).organizationId, params.data.id);
+        const organizationId = contextOf(request).organizationId;
+        const result = await deps.service.testConnection(organizationId, params.data.id);
+        // Recorded on a refusal as well: "probed and refused" and "never probed" are different
+        // answers, and the setup checklist only stops asking for one of them.
+        await deps.service.recordProbe(organizationId, params.data.id, result);
         return reply.send(result);
       },
     );

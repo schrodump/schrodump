@@ -221,7 +221,6 @@ export const ptBR: Record<MessageKey, string> = {
   "guided.step.target": "Criar um banco alvo",
   "guided.step.probe": "Testar a conexão com o alvo",
   "guided.step.policy": "Criar uma política com verify ligado",
-  "guided.manual": "Rode na própria página — o servidor não guarda registro de que isso rodou.",
   "guided.open": "Abrir",
   "guided.done": "Feito",
 

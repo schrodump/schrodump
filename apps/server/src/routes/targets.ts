@@ -91,6 +91,13 @@ export interface TargetRecord {
   encryptedCredential: unknown;
   createdAt: Date;
   updatedAt: Date;
+  // The last operator-triggered connection probe. null across all three means it has never been
+  // run — a different state from "run and refused", which the setup checklist must tell apart.
+  // The failure is the CODE, never the driver's message: driver errors embed the credential they
+  // failed with, and this column is handed to every viewer.
+  lastProbeAt: Date | null;
+  lastProbeOk: boolean | null;
+  lastProbeFailure: string | null;
 }
 
 export interface TargetStore {
@@ -113,6 +120,9 @@ interface PublicTarget {
   scope: unknown;
   createdAt: Date;
   updatedAt: Date;
+  lastProbeAt: Date | null;
+  lastProbeOk: boolean | null;
+  lastProbeFailure: string | null;
 }
 
 function toPublicTarget(target: TargetRecord): PublicTarget {
@@ -127,6 +137,9 @@ function toPublicTarget(target: TargetRecord): PublicTarget {
     scope: target.scope,
     createdAt: target.createdAt,
     updatedAt: target.updatedAt,
+    lastProbeAt: target.lastProbeAt,
+    lastProbeOk: target.lastProbeOk,
+    lastProbeFailure: target.lastProbeFailure,
   };
 }
 

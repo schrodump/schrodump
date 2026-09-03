@@ -223,7 +223,6 @@ export const en = {
   "guided.step.target": "Create a database target",
   "guided.step.probe": "Test the target connection",
   "guided.step.policy": "Create a policy with verify enabled",
-  "guided.manual": "Run it on the page — the server keeps no record of whether it ran.",
   "guided.open": "Open",
   "guided.done": "Done",
 

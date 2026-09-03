@@ -19,6 +19,9 @@ const RECORD: TargetRecord = {
   encryptedCredential: { v: 1, dek: "WRAPPED-DEK", data: "CIPHERTEXT" },
   createdAt: new Date("2026-07-23T12:00:00Z"),
   updatedAt: new Date("2026-07-23T12:00:00Z"),
+  lastProbeAt: new Date("2026-09-03T12:00:00Z"),
+  lastProbeOk: true,
+  lastProbeFailure: null,
 };
 
 const STORE: TargetStore = {
@@ -205,6 +208,25 @@ describe("DELETE /targets/:id", () => {
     const app = await appWith("viewer");
     const res = await app.inject({ method: "DELETE", url: "/targets/t1" });
     expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+describe("targets — the recorded probe travels to the client", () => {
+  it("exposes the last probe, which is what the setup checklist reads", async () => {
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "GET", url: "/targets" });
+    const [first] = res.json() as { lastProbeOk: boolean | null; lastProbeAt: string | null }[];
+    expect(first?.lastProbeOk).toBe(true);
+    expect(first?.lastProbeAt).toBe("2026-09-03T12:00:00.000Z");
+    await app.close();
+  });
+
+  it("still never returns the credential alongside it", async () => {
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "GET", url: "/targets" });
+    expect(res.body).not.toContain("WRAPPED-DEK");
+    expect(res.body).not.toContain("encryptedCredential");
     await app.close();
   });
 });

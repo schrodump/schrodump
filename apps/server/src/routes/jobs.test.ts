@@ -36,13 +36,14 @@ const service: JobsService = {
   enqueueVerify: () => Promise.resolve("job-v"),
   enqueueRestore: () => Promise.resolve("job-r"),
   testConnection: () => Promise.resolve({ ok: true, serverVersionNum: 160002, failure: null, driverCode: null }),
+  recordProbe: () => Promise.resolve(),
 };
 
-async function appWith(role: Role | null) {
+async function appWith(role: Role | null, over: Partial<JobsService> = {}) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
-    jobsRoutes({ resolver: () => Promise.resolve(ctx), service })(instance);
+    jobsRoutes({ resolver: () => Promise.resolve(ctx), service: { ...service, ...over } })(instance);
     return Promise.resolve();
   });
   return app;
@@ -94,6 +95,59 @@ describe("list bounds", () => {
     expect(body.counts).toEqual({ VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 });
     expect(body.total).toBe(1);
     expect(Array.isArray(body.items)).toBe(true);
+    await app.close();
+  });
+});
+
+// Same gap as the destination canary: the probe answered one browser and the deployment kept no
+// memory of it, so the setup checklist could never tick "test the connection" off. A target with
+// credentials in a form and a target proven reachable are different things, and only one of them
+// is a backup that will run tonight.
+describe("test-connection — the probe outcome is recorded", () => {
+  it("records a passing probe against the target that was probed", async () => {
+    const recorded: unknown[] = [];
+    const app = await appWith("operator", {
+      recordProbe: (organizationId, targetId, result) => {
+        recorded.push({ organizationId, targetId, ok: result.ok, failure: result.failure });
+        return Promise.resolve();
+      },
+    });
+    await app.inject({ method: "POST", url: "/targets/t1/test-connection" });
+    expect(recorded).toEqual([{ organizationId: "o", targetId: "t1", ok: true, failure: null }]);
+    await app.close();
+  });
+
+  it("records the failure CODE on a refusal, never the driver's prose", async () => {
+    // The codes exist because driver errors embed the credential they failed with. A stored
+    // message would put that credential in a column that the list endpoint then hands out.
+    const recorded: unknown[] = [];
+    const app = await appWith("operator", {
+      testConnection: () =>
+        Promise.resolve({
+          ok: false,
+          serverVersionNum: null,
+          failure: "AUTH_FAILED",
+          driverCode: "28P01",
+        }),
+      recordProbe: (organizationId, targetId, result) => {
+        recorded.push({ ok: result.ok, failure: result.failure });
+        return Promise.resolve();
+      },
+    });
+    await app.inject({ method: "POST", url: "/targets/t1/test-connection" });
+    expect(recorded).toEqual([{ ok: false, failure: "AUTH_FAILED" }]);
+    await app.close();
+  });
+
+  it("still answers the caller with the probe result, unchanged", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({ method: "POST", url: "/targets/t1/test-connection" });
+    expect(res.json()).toEqual({
+      ok: true,
+      serverVersionNum: 160002,
+      failure: null,
+      driverCode: null,
+    });
     await app.close();
   });
 });

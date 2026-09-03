@@ -15,8 +15,6 @@ interface Step {
   key: MessageKey;
   href: string;
   done: boolean;
-  // The server records no state for canary/probe runs, so those steps are prompts, not checkmarks.
-  manual?: boolean;
 }
 
 export function GuidedSetup() {
@@ -33,15 +31,25 @@ export function GuidedSetup() {
   const hasDestination = (destinations.data ?? []).length > 0;
   const hasTarget = (targets.data ?? []).length > 0;
   const hasVerifyingPolicy = (policies.data ?? []).some((policy) => policy.verifyLevel !== "NONE");
+  // `=== true`, not truthiness: null is "never run" and false is "ran and was refused", and
+  // neither is a destination proven writable or a target proven reachable. Both used to be
+  // permanently unticked prompts, because the outcome was returned to one browser and kept
+  // nowhere; the server records them now.
+  const hasPassingCanary = (destinations.data ?? []).some((d) => d.lastCanaryOk === true);
+  const hasPassingProbe = (targets.data ?? []).some((target) => target.lastProbeOk === true);
 
-  if (hasKeys && hasDestination && hasTarget && hasVerifyingPolicy) return null;
+  // The two checks are part of being set up, not decoration. A bucket nobody proved writable is
+  // the same open question this product refuses to paint green anywhere else, so the card stays
+  // until they are answered rather than dismissing with work outstanding.
+  if (hasKeys && hasDestination && hasTarget && hasVerifyingPolicy && hasPassingCanary && hasPassingProbe)
+    return null;
 
   const steps: Step[] = [
     { key: "guided.step.keys", href: "/settings", done: hasKeys },
     { key: "guided.step.destination", href: "/destinations", done: hasDestination },
-    { key: "guided.step.canary", href: "/destinations", done: false, manual: true },
+    { key: "guided.step.canary", href: "/destinations", done: hasPassingCanary },
     { key: "guided.step.target", href: "/targets", done: hasTarget },
-    { key: "guided.step.probe", href: "/targets", done: false, manual: true },
+    { key: "guided.step.probe", href: "/targets", done: hasPassingProbe },
     { key: "guided.step.policy", href: "/policies", done: hasVerifyingPolicy },
   ];
 
@@ -57,6 +65,7 @@ export function GuidedSetup() {
             <li
               key={`${step.key}-${index}`}
               className="flex flex-wrap items-center gap-x-3 gap-y-1"
+              data-done={step.done ? "true" : "false"}
             >
               <span
                 aria-hidden="true"
@@ -78,9 +87,6 @@ export function GuidedSetup() {
                 </span>
               ) : (
                 <>
-                  {step.manual ? (
-                    <span className="text-xs text-muted-foreground">{t("guided.manual")}</span>
-                  ) : null}
                   <Link
                     href={step.href}
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-auto")}
