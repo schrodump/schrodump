@@ -49,15 +49,13 @@ import { createRetentionPorts } from "./retention-wiring.js";
 import { runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 import { dumpIsMultiDatabaseFor, runRestoreJob } from "./restore.js";
+import { producerVersion } from "../version.js";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { driverCodeOf } from "../probe/test-connection.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
 import { runVerifyJob, type VerifyLevel, type VerifyProof } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
 
-// Identifies the tool that produced a manifest. No per-build version source exists yet (the server
-// package is 0.0.0); a stable literal keeps the manifest schema satisfied until one lands.
-const TOOL_VERSION = "schrodump-server/0.0.0";
 // The pipeline always gzips the dump before encryption (see backup-wiring.ts), regardless of the
 // policy's compression preference — the manifest and artifact must record what actually happened.
 const PIPELINE_COMPRESSION = "gzip" as const;
@@ -585,7 +583,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         organizationId: job.organizationId,
         engine,
         serverVersionNum: probe.serverVersionNum,
-        toolVersion: TOOL_VERSION,
+        toolVersion: producerVersion(),
         executionMode: mode,
         parallelism: mode === "STAGED" ? policy.parallelism : 1,
         scope: probe.scope,

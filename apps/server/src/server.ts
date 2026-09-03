@@ -27,9 +27,16 @@ import { createCredentialAuditSink } from "./observability/audit.js";
 import type { CredentialAuditSink } from "./crypto/credential-access.js";
 import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
 import { loadEnv } from "./env.js";
+import { serverVersion } from "./version.js";
 import { createLogger, newCorrelationId } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
-import { createEncryptionKeyService, createJobsService, prismaDestinationStore, prismaNotificationChannelStore, prismaPolicyStore } from "./routes/wiring.js";
+import {
+  createEncryptionKeyService,
+  createJobsService,
+  prismaDestinationStore,
+  prismaNotificationChannelStore,
+  prismaPolicyStore,
+} from "./routes/wiring.js";
 
 // A stable per-instance auth secret derived from the KEK when none is configured explicitly.
 function deriveAuthSecret(kek: Buffer): string {
@@ -147,6 +154,10 @@ export async function main(): Promise<void> {
   });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
+
+  // Which build is serving. The first thing anyone needs during an incident, and the log is where
+  // they already are — /health stays version-free on purpose (see version.ts).
+  app.log.info({ version: serverVersion() }, "schrodump server listening");
 
   // --- worker boot ---
   const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"

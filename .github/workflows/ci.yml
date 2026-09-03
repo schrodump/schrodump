@@ -278,8 +278,30 @@ jobs:
           push: false
           load: true
           tags: schrodump/schrodump:ci
+          # A value no default could produce, so the assertion below proves the ARG actually
+          # travelled rather than passing on the Dockerfile's fallback.
+          build-args: |
+            VERSION=0.0.0-ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The image has to be able to say what it is. Two readers, two mechanisms, and the release
+      # builds both from the git tag: `docker inspect` (no process needed) and SCHRODUMP_VERSION,
+      # which the boot log reports and every manifest records as the producer of its artifact. A
+      # broken chain here means every backup written by the image names 0.0.0-dev as its producer,
+      # which is unrecoverable after the fact — the artifact is in a bucket by then.
+      - name: Assert the image knows which build it is
+        run: |
+          label=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+            schrodump/schrodump:ci)
+          env_version=$(docker run --rm --entrypoint sh schrodump/schrodump:ci -c 'printf %s "$SCHRODUMP_VERSION"')
+          echo "label=$label env=$env_version"
+          if [ "$label" != "0.0.0-ci" ]; then
+            echo "OCI version label is '$label', expected the VERSION build arg"; exit 1
+          fi
+          if [ "$env_version" != "0.0.0-ci" ]; then
+            echo "SCHRODUMP_VERSION is '$env_version', expected the VERSION build arg"; exit 1
+          fi
 
       # The architecture in one assertion: dumps run in ephemeral executors, so a database client
       # inside the server image means the boundary was crossed.
