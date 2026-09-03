@@ -147,8 +147,9 @@ almacenamiento, el cifrado, la retención GFS, la ejecución de restauraciones, 
 notificaciones (webhook y SMTP), la autocopia del propio catálogo, la interfaz web y el pipeline
 completo de CI + release firmada están implementados y probados. La restauración cubre artefactos
 single-stream y staged (directorio), y tiene alcance donde el motor ofrece un mecanismo para ello:
-PostgreSQL hasta esquema o tabla, MongoDB hasta base de datos o colección. Las copias físicas/PITR
-están en la hoja de ruta.
+PostgreSQL hasta esquema o tabla, MongoDB hasta base de datos o colección. Un replica set de
+MongoDB se vuelca junto con su oplog, y una restauración full-cluster lo reaplica, de modo que todas
+las colecciones quedan en un mismo instante. Las copias físicas/PITR están en la hoja de ruta.
 [docs/roadmap.md](docs/roadmap.md) indica exactamente qué está y qué no está en v1.
 
 ## Contribuir
