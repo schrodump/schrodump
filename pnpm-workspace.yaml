@@ -1,3 +1,15 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# pnpm 10 blocks dependency build scripts unless they are named here. It stopped reading the
+# `pnpm` key in package.json — it warned on every command that the key was IGNORED, which means a
+# silently unapproved build script rather than a cosmetic complaint.
+onlyBuiltDependencies:
+  - esbuild
+
+# Prisma and sharp stay OFF this list on purpose, and install prints that it ignored them:
+#   - prisma/@prisma/client: the client is generated explicitly by the typecheck/build scripts and
+#     by the image build, which then deletes the query engines for vendors this product does not
+#     use. An approved postinstall would put them back.
+#   - sharp: the image deletes it outright (see docker/Dockerfile) — this UI renders no <Image>.
