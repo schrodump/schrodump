@@ -30,8 +30,6 @@ export const es: Record<MessageKey, string> = {
   "common.errorDetail": "La solicitud falló: {message}",
   "common.configured": "Configurado",
   "common.replace": "Reemplazar",
-  "common.endpointPending":
-    "Estos datos dependen de un endpoint del servidor que todavía no está disponible.",
 
   "locale.label": "Idioma",
   "locale.en": "Inglés",
@@ -228,6 +226,20 @@ export const es: Record<MessageKey, string> = {
   "guided.done": "Hecho",
 
   "settings.title": "Configuración",
+  "role.admin": "Admin",
+  "role.operator": "Operador",
+  "role.viewer": "Lector",
+  "members.email": "Correo",
+  "members.name": "Nombre",
+  "members.role": "Rol",
+  "members.roleOf": "Rol de {email}",
+  "members.add": "Añadir miembro",
+  "members.remove": "Quitar",
+  "members.pendingRotation": "aún no ha cambiado la contraseña temporal",
+  "members.minted": "Contraseña temporal de {email}",
+  "members.minted.warning": "Se muestra una sola vez. Entrégala por otro canal; es un secreto compartido hasta que la cambie, y no podrá hacer nada hasta entonces.",
+  "members.minted.done": "Ya la copié",
+  "members.forbidden": "Solo un admin puede ver o cambiar los miembros.",
   "settings.members": "Miembros",
   "settings.members.description":
     "Los miembros de la organización y sus roles: admin, operator, viewer.",

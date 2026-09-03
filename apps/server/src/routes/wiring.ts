@@ -8,7 +8,10 @@
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
+import type { Auth } from "../auth/auth.js";
+import type { Role } from "../auth/rbac.js";
 import { scopedPrisma } from "../data/scope.js";
+import type { MemberRecord, MemberStore } from "./members.js";
 import { encryptCredential } from "../crypto/envelope.js";
 import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import {
@@ -545,6 +548,110 @@ export function createEncryptionKeyService(
         // identity is never returned — the server keeps it and nobody needs to copy it down.
         escrowIdentity: request.type === "escrow" ? (generated?.identity ?? null) : null,
       };
+    },
+  };
+}
+
+// Members. The role has been enforced since the first migration and there was no way to grant one:
+// bootstrap creates the FIRST admin, the setup token is consumed, and nothing else ever wrote a
+// Membership. A product with three roles and one seat.
+//
+// `remove` deletes the MEMBERSHIP and never the User, and that is not tidiness — AuditLog.user is
+// an optional relation with no onDelete, so Prisma's default is SetNull: deleting the row would
+// silently strip the actor from every audit entry that person ever produced, including
+// "restore.execute". Access is revoked either way, because betterAuthResolver returns null without
+// a membership and every guarded route then answers 401.
+//
+// The cost of that choice, stated rather than discovered: User.email stays globally unique and
+// taken, so a removed member cannot be re-added under the same address. Attaching a fresh
+// membership to the surviving account would be the fix, and it is deliberately NOT done here while
+// Better-Auth's sign-up endpoint is open — someone could register an address BEFORE an admin adds
+// it and receive the membership meant for its real owner.
+export function prismaMemberStore(
+  prisma: PrismaClient,
+  auth: Auth,
+  organizationId: string,
+): MemberStore {
+  const toRecord = (row: {
+    userId: string;
+    role: string;
+    createdAt: Date;
+    user: { email: string; name: string; mustChangePassword: boolean };
+  }): MemberRecord => ({
+    userId: row.userId,
+    email: row.user.email,
+    name: row.user.name,
+    role: row.role as Role,
+    mustChangePassword: row.user.mustChangePassword,
+    createdAt: row.createdAt,
+  });
+
+  return {
+    list: async () =>
+      (
+        await prisma.membership.findMany({
+          where: { organizationId },
+          orderBy: { createdAt: "asc" },
+          include: { user: { select: { email: true, name: true, mustChangePassword: true } } },
+        })
+      ).map(toRecord),
+
+    create: async (data) => {
+      // Checked first for a clean 409, and caught below as well: the unique constraint is the real
+      // guard, and two admins adding the same address at once must not produce a 500.
+      if ((await prisma.user.findUnique({ where: { email: data.email } })) !== null) return null;
+      try {
+        // Better-Auth hashes the password and creates the User + Account, exactly as the bootstrap
+        // does for the first admin.
+        await auth.api.signUpEmail({
+          body: { email: data.email, password: data.password, name: data.name },
+        });
+      } catch {
+        return null;
+      }
+      // The account can do nothing until this is cleared: requireRole refuses every role while it
+      // stands. The temporary password is a shared secret until the member replaces it — the same
+      // status docs/security.md gives the bootstrap password.
+      const user = await prisma.user.update({
+        where: { email: data.email },
+        data: { mustChangePassword: true },
+        select: { id: true, email: true, name: true, mustChangePassword: true },
+      });
+      const membership = await prisma.membership.create({
+        data: { organizationId, userId: user.id, role: data.role },
+        select: { userId: true, role: true, createdAt: true },
+      });
+      return toRecord({ ...membership, user });
+    },
+
+    updateRole: async (userId, role) => {
+      // updateMany keeps organizationId in the filter, so a membership in another organization is
+      // a miss rather than a cross-tenant write.
+      const { count } = await prisma.membership.updateMany({
+        where: { userId, organizationId },
+        data: { role },
+      });
+      if (count === 0) return null;
+      const row = await prisma.membership.findFirstOrThrow({
+        where: { userId, organizationId },
+        include: { user: { select: { email: true, name: true, mustChangePassword: true } } },
+      });
+      return toRecord(row);
+    },
+
+    remove: async (userId) => {
+      const { count } = await prisma.membership.deleteMany({ where: { userId, organizationId } });
+      return count > 0;
+    },
+
+    countAdmins: () => prisma.membership.count({ where: { organizationId, role: "admin" } }),
+
+    roleOf: async (userId) => {
+      const row = await prisma.membership.findFirst({
+        where: { userId, organizationId },
+        select: { role: true },
+      });
+      return row === null ? null : (row.role as Role);
     },
   };
 }

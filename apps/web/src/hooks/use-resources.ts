@@ -9,6 +9,7 @@ import type {
   EncryptionKey,
   Instance,
   JobList,
+  Member,
   NotificationChannel,
   Policy,
   SelfBackupList,
@@ -43,6 +44,15 @@ export function useNotificationChannels() {
 
 export function usePolicies() {
   return useQuery({ queryKey: ["policies"], queryFn: () => api.get<Policy[]>("/policies") });
+}
+
+export function useMembers() {
+  return useQuery({
+    queryKey: ["members"],
+    queryFn: () => api.get<Member[]>("/members"),
+    // Admin-only, like /instance and /self-backups: a 403 is an answer, not a transient failure.
+    retry: false,
+  });
 }
 
 export function useInstance() {
