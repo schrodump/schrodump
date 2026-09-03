@@ -112,8 +112,8 @@ the image instead — no process required — or read the first line the server 
 
 ```sh
 docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
-  schrodump/schrodump:0.1.0-rc.2
-docker compose logs schrodump | grep 'server listening'   # {"version":"0.1.0-rc.2",...}
+  schrodump/schrodump:0.1.0-rc.3
+docker compose logs schrodump | grep 'server listening'   # {"version":"0.1.0-rc.3",...}
 ```
 
 Every artifact carries the same answer for itself, in its manifest's `toolVersion` — which is the
