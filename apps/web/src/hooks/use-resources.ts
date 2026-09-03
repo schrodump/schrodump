@@ -3,7 +3,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ArtifactList, Destination, EncryptionKey, JobList, NotificationChannel, Policy, SelfBackupList, Target } from "@/lib/types";
+import type {
+  ArtifactList,
+  Destination,
+  EncryptionKey,
+  Instance,
+  JobList,
+  NotificationChannel,
+  Policy,
+  SelfBackupList,
+  Target,
+} from "@/lib/types";
 
 export function useArtifacts() {
   return useQuery({ queryKey: ["artifacts"], queryFn: () => api.get<ArtifactList>("/artifacts") });
@@ -33,6 +43,15 @@ export function useNotificationChannels() {
 
 export function usePolicies() {
   return useQuery({ queryKey: ["policies"], queryFn: () => api.get<Policy[]>("/policies") });
+}
+
+export function useInstance() {
+  return useQuery({
+    queryKey: ["instance"],
+    queryFn: () => api.get<Instance>("/instance"),
+    // Admin-only, like /self-backups: a 403 is an answer, not a transient failure.
+    retry: false,
+  });
 }
 
 export function useSelfBackups() {

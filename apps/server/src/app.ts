@@ -15,6 +15,7 @@ import { encryptionKeyRoutes, type EncryptionKeyRoutesDeps } from "./routes/encr
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
+import { instanceRoutes, type InstanceConfig } from "./routes/instance.js";
 import { restoreRoutes } from "./routes/restore.js";
 import { selfBackupRoutes } from "./routes/self-backups.js";
 import { sessionRoutes } from "./routes/session.js";
@@ -41,6 +42,9 @@ export interface AppDeps {
   // Null when self-backup is unconfigured; surfaced by GET /self-backups so the UI can distinguish
   // "not configured" from "configured and never ran".
   selfBackupDestinationId: string | null;
+  // What this process booted with, for GET /instance. A function rather than a value so the route
+  // reads it at request time and cannot serve a snapshot taken before the environment was parsed.
+  instanceConfig(): InstanceConfig;
   kek: Buffer;
 }
 
@@ -76,6 +80,10 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     restoreRoutes(deps.resolver, deps.jobsService)(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    instanceRoutes({ resolver: deps.resolver, config: deps.instanceConfig })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {

@@ -207,3 +207,23 @@ export interface RotatedKey {
   escrowIdentityWarning: string | null;
   consequences: RotationConsequences;
 }
+
+// What the running deployment booted with. Read-only, and that is a property of the deployment
+// rather than an unfinished form: these come from the process environment, and a staged dump in
+// flight is sized against the scratch budget it started with. Changing them is a restart.
+export interface Instance {
+  version: string;
+  scratch: {
+    // false is STREAM-only: no staged dump, no verify sandbox, no restore. The single most
+    // consequential fact about what this deployment can do.
+    configured: boolean;
+    path: string | null;
+    maxBytes: number;
+    maxConcurrentStaged: number;
+  };
+  stagedThresholdBytes: number | null;
+  executorNetwork: string;
+  selfBackup: { configured: boolean; intervalMs: number };
+  notifyMinGapMs: number;
+  shutdownGraceMs: number;
+}

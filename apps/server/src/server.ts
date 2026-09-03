@@ -150,6 +150,18 @@ export async function main(): Promise<void> {
     prisma,
     encryptionKeys: createEncryptionKeyService(prisma, kek),
     selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
+    instanceConfig: () => ({
+      version: serverVersion(),
+      scratchPath: env.SCHRODUMP_SCRATCH_PATH ?? null,
+      scratchMaxBytes: env.SCHRODUMP_SCRATCH_MAX_BYTES,
+      maxConcurrentStaged: env.SCHRODUMP_MAX_CONCURRENT_STAGED,
+      stagedThresholdBytes: env.SCHRODUMP_STAGED_THRESHOLD_BYTES ?? null,
+      executorNetwork: env.SCHRODUMP_EXECUTOR_NETWORK,
+      selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
+      selfBackupIntervalMs: env.SCHRODUMP_SELF_BACKUP_INTERVAL_MS,
+      notifyMinGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
+      shutdownGraceMs: env.SCHRODUMP_SHUTDOWN_GRACE_MS,
+    }),
     kek,
   });
 
