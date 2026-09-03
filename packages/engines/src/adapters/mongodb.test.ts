@@ -79,6 +79,43 @@ describe("mongodbAdapter.buildDump", () => {
     ).toThrow(EngineDescriptorError);
   });
 
+  it("refuses a scope naming more than one database, rather than picking one", () => {
+    expect(() =>
+      mongodbAdapter.buildDump(
+        dumpInput({ scope: { databases: ["shop", "billing"], schemas: [], collections: [] } }),
+      ),
+    ).toThrow(EngineDescriptorError);
+  });
+
+  it("refuses a scope naming more than one collection", () => {
+    expect(() =>
+      mongodbAdapter.buildDump(
+        dumpInput({
+          scope: { databases: ["shop"], schemas: [], collections: ["orders", "invoices"] },
+        }),
+      ),
+    ).toThrow(EngineDescriptorError);
+  });
+
+  // The remedy this message names is the whole value of the error, and it MOVED when the dump
+  // scope stopped coming from probe discovery: telling an operator to narrow the credential now
+  // sends them to edit something that no longer decides this. Asserting the text is asserting
+  // that the advice still points at the thing they can act on.
+  it("names the target's scope as the remedy, never the credential", () => {
+    try {
+      mongodbAdapter.buildDump(
+        dumpInput({ scope: { databases: ["shop", "billing"], schemas: [], collections: [] } }),
+      );
+      expect.unreachable("buildDump should have refused a two-database scope");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EngineDescriptorError);
+      const message = (error as EngineDescriptorError).message;
+      expect(message).toContain("scope");
+      expect(message).not.toContain("credential");
+      expect(message).not.toContain("listDatabases");
+    }
+  });
+
   it("keeps the password in env, never in the command", () => {
     const descriptor = mongodbAdapter.buildDump(dumpInput());
     for (const arg of descriptor.command) {
