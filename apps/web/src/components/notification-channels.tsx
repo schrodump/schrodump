@@ -27,8 +27,7 @@ export function ChannelRow({
   const where = channel.kind === "WEBHOOK" ? channel.url : channel.toAddresses.join(", ");
 
   return (
-    <Card>
-      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-2 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium">
@@ -70,8 +69,7 @@ export function ChannelRow({
             </Button>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 

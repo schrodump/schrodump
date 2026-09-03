@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
+import { LastCheck } from "@/components/last-check";
 import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
 import { TargetForm } from "@/components/target-form";
 import { Button } from "@/components/ui/button";
@@ -77,14 +78,25 @@ function TargetRow({ target }: { target: Target }) {
   }
 
   return (
-    <Card>
-      <CardContent className="space-y-3 pt-6">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+    <div className="space-y-2 border-b border-border px-2 py-3">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div>
             <p className="font-medium">{target.name}</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="font-mono text-xs text-[var(--color-foreground-soft)]">
               {target.engine} · {target.host}:{target.port}
             </p>
+            {/* The recorded probe, which the row never showed: the guided checklist reads it and
+                this is where an operator actually looks. Never-run is amber, not a grey dash —
+                it is an open question, and a dash reads as "not applicable". */}
+            <LastCheck
+              ok={target.lastProbeOk}
+              at={target.lastProbeAt}
+              keys={{
+                never: "targets.probe.never",
+                lastOk: "targets.probe.lastOk",
+                lastFailed: "targets.probe.lastFailed",
+              }}
+            />
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <TestConnection targetId={target.id} />
@@ -103,9 +115,8 @@ function TargetRow({ target }: { target: Target }) {
         </div>
         {/* The server refuses a delete with 409 and a reason naming what still depends on the row.
             Showing it verbatim is the point — "in use" on its own is not actionable. */}
-        {remove.isError ? <ErrorState message={remove.error.message} /> : null}
-      </CardContent>
-    </Card>
+      {remove.isError ? <ErrorState message={remove.error.message} /> : null}
+    </div>
   );
 }
 
@@ -129,7 +140,9 @@ export default function TargetsPage() {
         </Card>
       ) : null}
 
-      <div className="mt-6 space-y-3">
+      {/* A ruled list rather than a stack of cards: the rows are siblings, not
+          separate objects. */}
+      <div className="mt-6 border-t border-border">
         {targets.isPending ? (
           <LoadingState />
         ) : targets.isError ? (

@@ -51,8 +51,7 @@ function PolicyRow({ policy, scratchConfigured }: { policy: Policy; scratchConfi
   }
 
   return (
-    <Card>
-      <CardContent className="space-y-3 pt-6">
+    <div className="space-y-3 border-b border-border px-2 py-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div>
             <p className="font-medium">
@@ -126,8 +125,7 @@ function PolicyRow({ policy, scratchConfigured }: { policy: Policy; scratchConfi
             on the row. Surfacing it verbatim is the whole point — "in use" alone is not actionable. */}
         {remove.isError ? <ErrorState message={remove.error.message} /> : null}
         {update.isError ? <ErrorState message={update.error.message} /> : null}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -151,7 +149,7 @@ export default function PoliciesPage() {
         </Card>
       ) : null}
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 border-t border-border">
         {policies.isPending ? (
           <LoadingState />
         ) : policies.isError ? (

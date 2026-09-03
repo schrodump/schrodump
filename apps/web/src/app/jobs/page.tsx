@@ -6,7 +6,6 @@
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
-import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useJobs } from "@/hooks/use-resources";
@@ -17,8 +16,7 @@ import type { Job, JobState } from "@/lib/types";
 function JobRow({ job }: { job: Job }) {
   const t = useT();
   return (
-    <Card>
-      <CardContent className="space-y-3 pt-6">
+    <div className="space-y-3 border-b border-border px-2 py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="font-medium">{t(`job.kind.${job.kind}`)}</span>
           <span className="text-sm text-muted-foreground">{t(`job.state.${job.state}`)}</span>
@@ -37,8 +35,7 @@ function JobRow({ job }: { job: Job }) {
             </pre>
           </details>
         ) : null}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -75,7 +72,7 @@ export default function JobsPage() {
         </div>
       </div>
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 border-t border-border">
         {jobs.isPending ? (
           <LoadingState />
         ) : jobs.isError ? (
