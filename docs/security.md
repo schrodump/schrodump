@@ -275,8 +275,11 @@ Dumps run in ephemeral containers, one per job, built from the target's own majo
 A backup tool is a high-value target: compromise the image, and you have credentials for every
 database of every operator who pulled it.
 
-- Every published image is **signed with cosign**, keyless via OIDC. There is no signing key to
-  steal. Verify before running — the command is in [install.md](install.md#upgrading).
+- Every published image is **signed with cosign** (v3, pinned in `release.yml`), keyless via OIDC.
+  There is no signing key to steal. Verify before running — the command, and the client version it
+  needs, are in [install.md](install.md#upgrading). The version is not incidental: a cosign v2
+  client cannot read a v3 signature and answers `no signatures found`, which reads exactly like an
+  unsigned image.
 - Every published image carries an **SBOM** and provenance attestation, so what is inside it is a
   question with an answer.
 - CI scans dependencies, scans the built image, checks for committed secrets and verifies licence
