@@ -27,6 +27,7 @@ const MANIFEST = {
   checksumAlgorithm: "sha256",
   checksum: "a".repeat(64),
   compression: "gzip",
+  scope: { databases: [], schemas: [], collections: [] },
   encryption: { keyIds: ["k1"] },
   dependsOn: [],
   createdAt: new Date().toISOString(),
@@ -34,12 +35,14 @@ const MANIFEST = {
 
 function fakePrisma() {
   const calls: string[] = [];
+  const created: Record<string, unknown>[] = [];
   const prisma = {
     $extends: () => prisma,
     artifact: {
       findMany: () => Promise.resolve([]),
-      create: () => {
+      create: (args: { data: Record<string, unknown> }) => {
         calls.push("artifact.create");
+        created.push(args.data);
         return Promise.resolve({});
       },
     },
@@ -54,7 +57,21 @@ function fakePrisma() {
       },
     },
   } as unknown as PrismaClient;
-  return { prisma, calls };
+  return { prisma, calls, created };
+}
+
+// What a rebuild writes onto the Artifact row for one manifest.
+async function importedRow(over: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const { prisma, created } = fakePrisma();
+  const ports = createCatalogRebuildPorts({
+    prisma,
+    organizationId: "org-1",
+    destinationId: "dest-1",
+    driver: {} as never,
+    prefix: "s",
+  });
+  await ports.importArtifact({ ...MANIFEST, ...over } as typeof MANIFEST);
+  return created[0] as Record<string, unknown>;
 }
 
 describe("catalog rebuild — importing a manifest whose job row survived", () => {
@@ -73,5 +90,39 @@ describe("catalog rebuild — importing a manifest whose job row survived", () =
     // create() on a surviving job id is what threw; the fake rejects it to make that concrete.
     expect(calls).toEqual(["backupJob.upsert", "artifact.create"]);
     expect(calls).not.toContain("backupJob.create");
+  });
+});
+
+// A rebuild is the documented recovery floor: the row it writes is the only description of the
+// artifact that will exist. Every fact the manifest already carries has to survive the trip, and the
+// two below decide whether the artifact can be RESTORED at all afterwards.
+describe("catalog rebuild — facts the manifest carries must survive the trip", () => {
+  it("preserves the execution mode instead of letting the column default to STREAM", async () => {
+    // A STAGED artifact is a tar; the restore pipeline unpacks it only when the row says STAGED.
+    // Omitting the field left the schema default in place, so a rebuild silently relabelled every
+    // staged artifact as a plain stream — and its restore would then feed a tar to the client.
+    const row = await importedRow({ executionMode: "STAGED" });
+    expect(row.executionMode).toBe("STAGED");
+  });
+
+  it("recovers the multi-database fact from the dump scope in the manifest", async () => {
+    const row = await importedRow({
+      engine: "mysql",
+      scope: { databases: ["app", "billing"], schemas: [], collections: [] },
+    });
+    expect(row.dumpIsMultiDatabase).toBe(true);
+  });
+
+  it("records a single-database mysql script as the recorded false that clears the restore gate", async () => {
+    const row = await importedRow({
+      engine: "mysql",
+      scope: { databases: ["app"], schemas: [], collections: [] },
+    });
+    expect(row.dumpIsMultiDatabase).toBe(false);
+  });
+
+  it("leaves the fact null for an engine it says nothing about", async () => {
+    const row = await importedRow();
+    expect(row.dumpIsMultiDatabase).toBeNull();
   });
 });
