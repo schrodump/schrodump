@@ -49,3 +49,27 @@ describe("createRestorePorts — oplog provenance mapping", () => {
     expect("sourceHasOplog" in artifact).toBe(false);
   });
 });
+
+// The same three-state hop for the multi-database fact, and the same failure it prevents: Prisma
+// hands back `null` for an unrecorded column, and the gate in the domain only clears on a recorded
+// `false`. A mapping that leaked the null through would refuse every restore it should allow;
+// one that coerced it to false would permit the exact hazard the gate exists for.
+describe("createRestorePorts — multi-database mapping", () => {
+  const mysql = (over: Record<string, unknown> = {}) => deps({ engine: "mysql" as const, ...over });
+
+  it("carries a recorded true through to the domain", async () => {
+    const artifact = await createRestorePorts(mysql({ dumpIsMultiDatabase: true })).loadArtifact();
+    expect(artifact.dumpIsMultiDatabase).toBe(true);
+  });
+
+  it("carries a recorded false through, distinctly from unknown", async () => {
+    const artifact = await createRestorePorts(mysql({ dumpIsMultiDatabase: false })).loadArtifact();
+    expect(artifact.dumpIsMultiDatabase).toBe(false);
+  });
+
+  it("reports an unrecorded column as undefined, which is what the domain refuses on", async () => {
+    const artifact = await createRestorePorts(mysql()).loadArtifact();
+    expect(artifact.dumpIsMultiDatabase).toBeUndefined();
+    expect("dumpIsMultiDatabase" in artifact).toBe(false);
+  });
+});

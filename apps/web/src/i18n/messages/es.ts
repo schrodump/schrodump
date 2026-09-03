@@ -206,6 +206,8 @@ export const es: Record<MessageKey, string> = {
     "El restore es deliberado. Elige un alcance — los que esta engine no puede restaurar quedan deshabilitados.",
   "restore.scope": "Alcance del restore",
   "restore.unsupported": "No soportado para {engine}",
+  "restore.notConfinable":
+    "Este dump contiene más de una base de datos, y ninguna flag confina el restore a una de ellas — restáuralo como clúster completo",
   "restore.targetDatabase": "Base de datos de destino",
   "restore.overExisting": "Restaurar sobre una base de datos existente (sobrescribe datos)",
   "restore.confirmPrompt":

@@ -48,7 +48,7 @@ import {
 import { createRetentionPorts } from "./retention-wiring.js";
 import { runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
-import { runRestoreJob } from "./restore.js";
+import { dumpIsMultiDatabaseFor, runRestoreJob } from "./restore.js";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { driverCodeOf } from "../probe/test-connection.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
@@ -612,6 +612,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             executionMode: mode,
             serverVersionNum: probe.serverVersionNum,
             sourceHasOplog: sourceHasOplogFor(engine, facts) ?? null,
+            // Recorded from the scope the dump actually named. Restore cannot re-derive it: the set
+            // of databases a credential can see changes, and the question is about the script in
+            // the bucket, not about today's server.
+            dumpIsMultiDatabase:
+              dumpIsMultiDatabaseFor(
+                engine,
+                mode,
+                dumpScopeFor(engine, probe.scope, scopedDatabases).databases,
+              ) ?? null,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
             checksumAlgorithm: upload.checksumAlgorithm,
@@ -1080,6 +1089,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           // null (unknown provenance) becomes undefined: the domain distinguishes "we never recorded
           // it" from "it has no oplog", and only the former degrades with a recorded reason.
           ...(artifact.sourceHasOplog !== null ? { sourceHasOplog: artifact.sourceHasOplog } : {}),
+          // Same three-state mapping, opposite consequence: here only a recorded `false` clears the
+          // gate, so leaking the null through as `false` would permit the data loss it guards.
+          ...(artifact.dumpIsMultiDatabase !== null
+            ? { dumpIsMultiDatabase: artifact.dumpIsMultiDatabase }
+            : {}),
         }),
       availableKeys: async () => {
         // ALL keys (active + retired): an artifact may have been encrypted with a now-retired key.

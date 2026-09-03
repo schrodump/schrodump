@@ -21,6 +21,7 @@ const artifact: Artifact = {
   engine: "postgres",
   executionMode: "STREAM",
   sourceHasOplog: null,
+  dumpIsMultiDatabase: null,
   serverVersionNum: 160_002,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
@@ -149,5 +150,55 @@ describe("RestoreDialog", () => {
 
     expect(await screen.findByText("Restore enqueued")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start restore" })).toBeDisabled();
+  });
+});
+
+// The second lock on the server's newest refusal. A mysqldump script replays its own USE statements
+// and mysql offers no flag to confine it, so a DATABASE restore of a script carrying several
+// databases rewrites all of them — measured, with the client exiting 0. The dialog must not offer
+// a target the server is certain to refuse, and must not make it look like an engine limitation:
+// the same engine restores one database perfectly well when the script carries only one.
+describe("RestoreDialog — a mysql script that carries more than one database", () => {
+  const mysql = (dumpIsMultiDatabase: boolean | null): Artifact => ({
+    ...artifact,
+    engine: "mysql",
+    dumpIsMultiDatabase,
+  });
+
+  async function openDialogFor(subject: Artifact) {
+    const user = userEvent.setup();
+    renderWith(<RestoreButton artifact={subject} role="operator" />);
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    return user;
+  }
+
+  it("offers a DATABASE restore when the artifact is recorded single-database", async () => {
+    await openDialogFor(mysql(false));
+    expect(screen.getByLabelText("Database")).toBeEnabled();
+  });
+
+  it("withholds a DATABASE restore for a multi-database artifact", async () => {
+    await openDialogFor(mysql(true));
+    expect(screen.getByLabelText("Database")).toBeDisabled();
+  });
+
+  it("withholds it when the fact was never recorded, exactly as the server does", async () => {
+    await openDialogFor(mysql(null));
+    expect(screen.getByLabelText("Database")).toBeDisabled();
+  });
+
+  it("gives the artifact's reason on that row, not the engine's", async () => {
+    // SCHEMA/TABLE/COLLECTION genuinely are engine limitations here and keep saying so. DATABASE is
+    // the one this artifact withholds, and it has to say why itself — an operator told "not
+    // supported for MySQL" would conclude the engine cannot do it and stop looking.
+    await openDialogFor(mysql(true));
+    const databaseRow = screen.getByLabelText("Database").closest("div");
+    expect(databaseRow).toHaveTextContent(/more than one database/i);
+    expect(databaseRow).not.toHaveTextContent(/not supported/i);
+  });
+
+  it("still offers a full-cluster restore, which is what the script actually does", async () => {
+    await openDialogFor(mysql(true));
+    expect(screen.getByLabelText("Full cluster")).toBeEnabled();
   });
 });

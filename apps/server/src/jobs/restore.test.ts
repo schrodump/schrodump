@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { EncryptionKeyRecord } from "../crypto/artifact.js";
 import {
+  dumpIsMultiDatabaseFor,
   runRestoreJob,
   type ArtifactForRestore,
   type RestorePorts,
@@ -182,5 +183,109 @@ describe("runRestoreJob", () => {
     const outcome = await runRestoreJob(REQ, h.ports);
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toMatch(/sealed|identity/i);
+  });
+});
+
+// A mysqldump script carries CREATE DATABASE / USE / DROP TABLE for every database it was dumped
+// with, and mysql's buildRestore emits no scoping flag at all — FULL_CLUSTER and DATABASE produce
+// the IDENTICAL command. So a DATABASE restore of a multi-database artifact is a claim with no
+// mechanism behind it. Measured on mysql 8.4.10, not inferred: two databases dumped together, a row
+// added to the second after the dump, the script restored "into" the first — the second went from
+// two rows to one, the new row gone, and the client exited 0.
+describe("runRestoreJob — a mysql dump script cannot be confined to one database", () => {
+  const sql = (over: Partial<ArtifactForRestore> = {}): ArtifactForRestore => ({
+    ...ARTIFACT,
+    engine: "mysql",
+    supportedRestoreTargets: ["FULL_CLUSTER", "DATABASE"],
+    ...over,
+  });
+
+  it.each(["mysql", "mariadb"])(
+    "refuses a DATABASE restore of a multi-database %s artifact",
+    async (engine) => {
+      const h = makeHarness({
+        loadArtifact: () => Promise.resolve(sql({ engine, dumpIsMultiDatabase: true })),
+      });
+      const outcome = await runRestoreJob(REQ, h.ports);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toMatch(/cannot be confined/i);
+      expect(h.restoredWithKey).toEqual([]);
+      // Refused before the audit, like every other pre-flight check: nothing was attempted.
+      expect(h.audits).toEqual([]);
+    },
+  );
+
+  it("names FULL_CLUSTER as the honest way to run it anyway", async () => {
+    // The refusal costs the operator nothing but the false claim: for mysql the two targets build
+    // the same command, so FULL_CLUSTER does exactly what a DATABASE restore was already doing —
+    // it just says so.
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve(sql({ dumpIsMultiDatabase: true })),
+    });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.error).toMatch(/FULL_CLUSTER/);
+  });
+
+  it("refuses when the artifact predates the fact being recorded", async () => {
+    // undefined is a weaker claim than false, and the failure direction decides the answer:
+    // permitting the hazard silently costs a neighbouring database, while refusing costs a label.
+    // A catalog rebuild recovers the fact from the manifest already in the bucket.
+    const h = makeHarness({ loadArtifact: () => Promise.resolve(sql()) });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toMatch(/never recorded/i);
+    expect(h.restoredWithKey).toEqual([]);
+  });
+
+  it("allows a DATABASE restore when the artifact is recorded single-database", async () => {
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve(sql({ dumpIsMultiDatabase: false })),
+    });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.ok).toBe(true);
+    expect(h.restoredWithKey).toEqual(["retired-op"]);
+  });
+
+  it("allows FULL_CLUSTER of a multi-database artifact — the whole script is what was asked for", async () => {
+    const h = makeHarness({
+      loadArtifact: () => Promise.resolve(sql({ dumpIsMultiDatabase: true })),
+    });
+    const outcome = await runRestoreJob({ ...REQ, target: "FULL_CLUSTER" }, h.ports);
+    expect(outcome.ok).toBe(true);
+    expect(h.restoredWithKey).toEqual(["retired-op"]);
+  });
+
+  it("leaves postgres alone: a pg_dump artifact is one database whatever the target scope said", async () => {
+    const h = makeHarness({ loadArtifact: () => Promise.resolve(ARTIFACT) });
+    const outcome = await runRestoreJob(REQ, h.ports);
+    expect(outcome.ok).toBe(true);
+  });
+});
+
+describe("dumpIsMultiDatabaseFor", () => {
+  it("says nothing about engines whose restore is not a replayed script", () => {
+    // false would assert something about a mysqldump script for artifacts that have none, and the
+    // stored value would stop meaning what it says.
+    expect(dumpIsMultiDatabaseFor("postgres", "STREAM", ["a", "b"])).toBeUndefined();
+    expect(dumpIsMultiDatabaseFor("mongodb", "STREAM", ["a", "b"])).toBeUndefined();
+  });
+
+  it("is false for a STREAM dump that named at most one database", () => {
+    // No --databases at all (the dump takes the connection's own database), and --databases with a
+    // single name: both scripts land in exactly one place.
+    expect(dumpIsMultiDatabaseFor("mysql", "STREAM", [])).toBe(false);
+    expect(dumpIsMultiDatabaseFor("mysql", "STREAM", ["app"])).toBe(false);
+  });
+
+  it("is true for a STREAM dump that named two or more databases", () => {
+    expect(dumpIsMultiDatabaseFor("mysql", "STREAM", ["app", "billing"])).toBe(true);
+    expect(dumpIsMultiDatabaseFor("mariadb", "STREAM", ["app", "billing", "analytics"])).toBe(true);
+  });
+
+  it("is false for a STAGED artifact whatever the scope listed", () => {
+    // STAGED is mydumper, and `mydumper -B <db>` dumps ONE database — myloader restores it into one
+    // with the same flag. A staged artifact is single-database by construction, so refusing a
+    // DATABASE restore of one would cost a capability that actually works.
+    expect(dumpIsMultiDatabaseFor("mysql", "STAGED", ["app", "billing"])).toBe(false);
   });
 });

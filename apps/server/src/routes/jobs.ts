@@ -31,6 +31,13 @@ export interface ArtifactRecord {
   // matters. `null` for every engine but mongodb, deliberately: false would assert something about
   // an oplog for a database that has none.
   sourceHasOplog: boolean | null;
+  // Whether this artifact's dump script carries more than one database. Exposed for the same reason
+  // as executionMode: the server refuses a sub-cluster restore of one (a mysqldump script replays
+  // its own USE statements and no flag confines it), and the UI needs the fact to stop offering a
+  // restore that is certain to be refused. `null` is "never recorded", NOT "no" — for these engines
+  // only a recorded false clears the gate. `null` for every engine whose restore is not a replayed
+  // script, deliberately: false would assert something about a script those artifacts do not have.
+  dumpIsMultiDatabase: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

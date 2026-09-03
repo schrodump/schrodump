@@ -27,6 +27,9 @@ export interface Artifact {
   // collection on ONE instant. null means the engine has none — a different statement from false,
   // "a mongo dump that carries none", and the interface must not blur them.
   sourceHasOplog: boolean | null;
+  // Whether this artifact's dump script carries more than one database. Only mysql/mariadb answer
+  // it; null means never recorded, which is NOT the same as no — see canConfineRestore.
+  dumpIsMultiDatabase: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

@@ -204,6 +204,8 @@ export const ptBR: Record<MessageKey, string> = {
     "Restore é deliberado. Escolha um escopo — os que esta engine não restaura ficam desabilitados.",
   "restore.scope": "Escopo do restore",
   "restore.unsupported": "Não suportado para {engine}",
+  "restore.notConfinable":
+    "Este dump carrega mais de um banco, e nenhuma flag confina a restauração a um deles — restaure como cluster completo",
   "restore.targetDatabase": "Banco de destino",
   "restore.overExisting": "Restaurar por cima de um banco existente (sobrescreve dados)",
   "restore.confirmPrompt": "Para confirmar, digite exatamente o nome do banco de destino.",

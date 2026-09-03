@@ -20,6 +20,7 @@ const row = {
   engine: "postgres",
   executionMode: "STAGED",
   sourceHasOplog: null,
+  dumpIsMultiDatabase: null,
   serverVersionNum: 160002,
   sizeRawBytes: 9_000_000_000n,
   sizeCompressedBytes: 1_500_000_000n,
@@ -183,6 +184,16 @@ describe("createEncryptionKeyService.provision", () => {
 // recorded on the row and dropped by the mapper, so `GET /artifacts` could not answer the question
 // at all — which is how the compose smoke ended up reading the column straight from the database.
 describe("toArtifactRecord carries the oplog fact", () => {
+  it("passes dumpIsMultiDatabase through, including the null that means 'never recorded'", () => {
+    // The UI withholds a sub-cluster restore on true AND on null, and only a recorded false clears
+    // it. Coercing null to false here would hand the interface a permission the server refuses.
+    expect(toArtifactRecord({ ...row, dumpIsMultiDatabase: true }).dumpIsMultiDatabase).toBe(true);
+    expect(toArtifactRecord({ ...row, dumpIsMultiDatabase: false }).dumpIsMultiDatabase).toBe(
+      false,
+    );
+    expect(toArtifactRecord({ ...row, dumpIsMultiDatabase: null }).dumpIsMultiDatabase).toBe(null);
+  });
+
   it("passes sourceHasOplog through, including the null that means 'not a mongo dump'", () => {
     expect(toArtifactRecord({ ...row, sourceHasOplog: true }).sourceHasOplog).toBe(true);
     expect(toArtifactRecord({ ...row, sourceHasOplog: false }).sourceHasOplog).toBe(false);

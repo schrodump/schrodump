@@ -25,6 +25,7 @@ const base: Artifact = {
   engine: "mongodb",
   executionMode: "STREAM",
   sourceHasOplog: null,
+  dumpIsMultiDatabase: null,
   serverVersionNum: 80_000,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
