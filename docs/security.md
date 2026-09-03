@@ -292,13 +292,22 @@ database of every operator who pulled it.
   the image, and a way to fetch and run arbitrary code is not something a container holding
   database credentials should have lying around.
 
-### Known: `sharp` ships in the image
+### Was known, now fixed: `sharp` no longer ships in the image
 
-Next traces `sharp` into the standalone build, so `sharp` and its bundled `libvips` are present
-in the published image and are flagged by image scanning (libvips CVEs, fixed in `sharp` 0.35).
-The web interface does not use Next's image optimisation, so the code is never loaded — but it is
-shipped, and "present but unreachable" is a weaker claim than "absent". Removing it is a
-build-configuration change, tracked separately.
+Next traces `sharp` into the standalone build, so `sharp` and its bundled `libvips` used to be
+present in the published image and flagged by image scanning (libvips CVEs, fixed in `sharp` 0.35).
+The web interface uses no `<Image>` and sets no `images` config, so the code was never loaded — but
+it shipped, and "present but unreachable" is a weaker claim than "absent".
+
+The build now deletes it (`docker/Dockerfile`, next to the Prisma engine cuts), which took 17.5 MB
+out of the web runtime. `outputFileTracingExcludes` does not cover it — Next special-cases `sharp`
+for the standalone server and copies it regardless of the exclude globs — so the cut is a `rm` in
+the image build, and the container smoke test is what proves it safe: if the UI ever does need
+`sharp`, it fails on boot with a missing module rather than silently.
+
+What remains is roughly 12 KB of dangling symlinks in `.pnpm/node_modules` whose targets are gone.
+`docker/prune-store.mjs` preserves that directory wholesale because removing it breaks every
+`require`. They contain no code and no libvips binary.
 
 ## Reporting a vulnerability
 
