@@ -57,18 +57,6 @@ export const RESTORE_TARGETS_BY_ENGINE: Record<EngineKind, readonly RestoreTarge
   mongodb: ["FULL_CLUSTER", "DATABASE", "COLLECTION"],
 };
 
-// Restore works end-to-end for all four engines, in both execution modes. A STAGED artifact is a
-// tar of a directory dump; the server unpacks it before handing the directory to
-// `pg_restore` / `myloader`. This mirrors that; it does not replace it — the server stays the lock.
-export function canRestoreArtifact(artifact: {
-  engine: EngineKind;
-  executionMode: ExecutionMode;
-}): boolean {
-  // Kept as a function rather than inlined `true`: the per-artifact question is real (a future
-  // engine or mode may not restore), and the call sites already ask it.
-  return artifact.engine !== undefined && artifact.executionMode !== undefined;
-}
-
 // Whether a restore of this artifact can be confined to a single database at all.
 //
 // mysql/mariadb replay the dump as a SQL script, and their buildRestore emits no scoping flag —

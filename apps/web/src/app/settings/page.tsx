@@ -11,8 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
 
-// Self-backup is real and has an endpoint. The three below still need one (keys, members, instance
-// config); the page states that plainly instead of inventing data.
+// Keys and self-backup are real and have endpoints. The two below still need one; the page states
+// that plainly instead of inventing data.
 const PANELS: { title: MessageKey; description: MessageKey }[] = [
   { title: "settings.members", description: "settings.members.description" },
   { title: "settings.instance", description: "settings.instance.description" },

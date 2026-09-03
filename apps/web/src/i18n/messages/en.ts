@@ -22,16 +22,12 @@ export const en = {
   "common.create": "Create",
   "common.edit": "Edit",
   "common.delete": "Delete",
-  "common.close": "Close",
   "common.retry": "Retry",
   "common.loading": "Loading…",
   "common.error": "Something went wrong",
   "common.errorDetail": "The request failed: {message}",
-  "common.empty": "Nothing here yet",
-  "common.required": "This field is required",
   "common.configured": "Configured",
   "common.replace": "Replace",
-  "common.notAvailable": "Not available yet",
   "common.endpointPending": "This data needs a server endpoint that is not available yet.",
 
   "locale.label": "Language",
@@ -42,7 +38,6 @@ export const en = {
   "state.verified": "Verified",
   "state.unobserved": "Unobserved",
   "state.failed": "Failed",
-  "state.unobserved.hint": "No verify has run — this backup is an open question.",
 
   "dashboard.title": "Dashboard",
   "dashboard.unobservedBackups": "{count} unobserved backups",
@@ -214,8 +209,6 @@ export const en = {
   "restore.mismatch": "The name does not match the target database.",
   "restore.submit": "Start restore",
   "restore.enqueued": "Restore enqueued",
-  "restore.stagedUnavailable":
-    "This artifact was written in staged (directory) mode, which cannot be restored in this version",
   "restoreTarget.FULL_CLUSTER": "Full cluster",
   "restoreTarget.DATABASE": "Database",
   "restoreTarget.SCHEMA": "Schema",
@@ -235,9 +228,6 @@ export const en = {
   "guided.done": "Done",
 
   "settings.title": "Settings",
-  "settings.keys": "Encryption keys",
-  "settings.keys.description":
-    "Age recipients and the KEK fingerprint the server pins at first boot.",
   "settings.members": "Members",
   "settings.members.description": "Organization members and their roles: admin, operator, viewer.",
   "settings.instance": "Instance",
@@ -299,7 +289,6 @@ export const en = {
   "keys.type.escrow": "Escrow",
   "keys.serverHolds": "Server holds the identity",
   "keys.offline": "Identity kept offline",
-  "keys.created": "Keys created.",
   "keys.escrowIdentity": "Escrow private identity",
   "keys.escrowWarning": "Save this now, somewhere that is not this server. It is shown once and never stored. Without it, a self-backup can never be recovered — and that is the one backup that matters after you lose this database.",
   "keys.escrowSaved": "I have saved it somewhere safe",

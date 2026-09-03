@@ -24,16 +24,12 @@ export const es: Record<MessageKey, string> = {
   "common.create": "Crear",
   "common.edit": "Editar",
   "common.delete": "Eliminar",
-  "common.close": "Cerrar",
   "common.retry": "Reintentar",
   "common.loading": "Cargando…",
   "common.error": "Algo salió mal",
   "common.errorDetail": "La solicitud falló: {message}",
-  "common.empty": "Todavía no hay nada aquí",
-  "common.required": "Campo obligatorio",
   "common.configured": "Configurado",
   "common.replace": "Reemplazar",
-  "common.notAvailable": "Todavía no disponible",
   "common.endpointPending":
     "Estos datos dependen de un endpoint del servidor que todavía no está disponible.",
 
@@ -45,7 +41,6 @@ export const es: Record<MessageKey, string> = {
   "state.verified": "Verificado",
   "state.unobserved": "No observado",
   "state.failed": "Falló",
-  "state.unobserved.hint": "Ningún verify se ejecutó — este backup es una pregunta abierta.",
 
   "dashboard.title": "Panel",
   "dashboard.unobservedBackups": "{count} backups no observados",
@@ -216,8 +211,6 @@ export const es: Record<MessageKey, string> = {
   "restore.mismatch": "El nombre no coincide con la base de datos de destino.",
   "restore.submit": "Iniciar restore",
   "restore.enqueued": "Restore encolado",
-  "restore.stagedUnavailable":
-    "Este artefacto fue escrito en modo staged (directorio), que no puede restaurarse en esta versión",
   "restoreTarget.FULL_CLUSTER": "Cluster completo",
   "restoreTarget.DATABASE": "Base de datos",
   "restoreTarget.SCHEMA": "Schema",
@@ -237,9 +230,6 @@ export const es: Record<MessageKey, string> = {
   "guided.done": "Hecho",
 
   "settings.title": "Configuración",
-  "settings.keys": "Claves de cifrado",
-  "settings.keys.description":
-    "Los recipients de age y el fingerprint de la KEK que el servidor fija en el primer arranque.",
   "settings.members": "Miembros",
   "settings.members.description":
     "Los miembros de la organización y sus roles: admin, operator, viewer.",
@@ -302,7 +292,6 @@ export const es: Record<MessageKey, string> = {
   "keys.type.escrow": "Custodia",
   "keys.serverHolds": "El servidor guarda la identidad",
   "keys.offline": "Identidad guardada sin conexión",
-  "keys.created": "Claves creadas.",
   "keys.escrowIdentity": "Identidad privada de custodia",
   "keys.escrowWarning": "Guárdalo ahora, en un lugar que no sea este servidor. Se muestra una sola vez y nunca se almacena. Sin él, una autocopia jamás podrá recuperarse — y esa es la copia que importa cuando pierdes esta base.",
   "keys.escrowSaved": "Lo he guardado en un lugar seguro",
