@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
+import { LastCheck } from "@/components/last-check";
 import { DestinationForm } from "@/components/destination-form";
 import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
@@ -61,16 +62,26 @@ function DestinationRow({ destination }: { destination: Destination }) {
   }
 
   return (
-    <Card>
-      <CardContent className="space-y-3 pt-6">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+    <div className="space-y-2 border-b border-border px-2 py-3">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div>
             <p className="font-medium">{destination.name}</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="font-mono text-xs text-[var(--color-foreground-soft)]">
               {destination.bucket}
               {destination.prefix ? `/${destination.prefix}` : ""} ·{" "}
               {t(`sealMode.${destination.sealMode}`)}
             </p>
+            {/* The recorded canary. A bucket nobody has written to is an open question, and the
+                row is where an operator looks for it. */}
+            <LastCheck
+              ok={destination.lastCanaryOk}
+              at={destination.lastCanaryAt}
+              keys={{
+                never: "destinations.canary.never",
+                lastOk: "destinations.canary.lastOk",
+                lastFailed: "destinations.canary.lastFailed",
+              }}
+            />
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Canary destinationId={destination.id} />
@@ -91,8 +102,7 @@ function DestinationRow({ destination }: { destination: Destination }) {
             system holds for the bucket, so removing it would make every backup in it unreachable.
             The 409 says how many artifacts are in the way. */}
         {remove.isError ? <ErrorState message={remove.error.message} /> : null}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -116,7 +126,7 @@ export default function DestinationsPage() {
         </Card>
       ) : null}
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 border-t border-border">
         {destinations.isPending ? (
           <LoadingState />
         ) : destinations.isError ? (
