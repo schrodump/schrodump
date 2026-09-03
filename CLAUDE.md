@@ -40,7 +40,8 @@ apps/server         # Fastify + Prisma. Composes the four packages above.
 apps/web            # Next.js 16 + React 19. Consumes the server API.
 docker/             # production Dockerfile, entrypoint.sh, prune-store.mjs, executors/
 docs/               # install, security, backup-restore, lgpd, roadmap + superpowers/
-scripts/            # rehearse-recovery.sh (works WITHOUT Schrodump) + smoke-compose.sh (CI)
+scripts/            # rehearse-recovery.sh (works WITHOUT Schrodump), check-kek.mjs (tests a
+                    # KEK candidate without booting) + smoke-compose.sh (CI)
 .github/workflows/  # ci, security, release
 compose.yaml        # deployment stack (server + postgres + docker-socket-proxy)
 ```
@@ -107,11 +108,12 @@ environment set — otherwise they are `describe.skipIf`:
   version **and digest** pinned. There is **no `age` executor** — artifact encryption is
   in-process via the `age-encryption` library. See `apps/server/CLAUDE.md` for why.
 - CI: `ci.yml` (dco, readme-sync, check, integration, executor images build, image build/smoke — the
-  last of which stands the **composed stack** up and drives seventeen steps through it: all four
+  last of which stands the **composed stack** up and drives eighteen steps through it: all four
   engines in both execution modes, verified by restore, three restored over live data, a catalog
-  rebuild, a key rotation, a self-backup, retention actually deleting, and a signed notification
-  delivered. It exists because three defects shipped in the seam between the code and
-  `compose.yaml` that no other test could see, and covering the rest found six more),
+  rebuild, a key rotation, a self-backup, retention actually deleting, a signed notification
+  delivered, and a replica set whose oplog is actually replayed. It exists because three defects
+  shipped in the seam between the code and `compose.yaml` that no other test could see, and
+  covering the rest found six more),
   `security.yml` (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the
   executor images, on a `v*` tag). `release.yml` re-runs the full gate on the tagged commit and
   every publishing job `needs:` it — a tag on a red commit must not become a signed image. A
