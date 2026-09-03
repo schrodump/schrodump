@@ -4,7 +4,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ProbeFailureCode } from "@/lib/domain";
-import type { NotificationChannel } from "@/lib/types";
+import type { CreatedMember, Member, NotificationChannel } from "@/lib/types";
 
 export function useCreateTarget() {
   const client = useQueryClient();
@@ -158,5 +158,34 @@ export function useDeleteNotificationChannel() {
   return useMutation({
     mutationFn: (id: string) => api.delete<void>(`/notification-channels/${id}`),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["notification-channels"] }),
+  });
+}
+
+// The response carries the temporary password, and it is the ONLY time it exists in readable form.
+// The caller has to hold it in component state and show it — there is no second GET that returns
+// it, by design, exactly as with the escrow identity.
+export function useCreateMember() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; name: string; role: string }) =>
+      api.post<CreatedMember>("/members", body),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["members"] }),
+  });
+}
+
+export function useUpdateMemberRole() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { userId: string; role: string }) =>
+      api.patch<Member>(`/members/${input.userId}`, { role: input.role }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["members"] }),
+  });
+}
+
+export function useDeleteMember() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api.delete<void>(`/members/${userId}`),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["members"] }),
   });
 }

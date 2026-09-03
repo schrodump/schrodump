@@ -6,17 +6,10 @@
 import { AppShell } from "@/components/app-shell";
 import { EncryptionKeysPanel } from "@/components/encryption-keys";
 import { InstancePanel } from "@/components/instance-panel";
+import { MembersPanel } from "@/components/members-panel";
 import { SelfBackupPanel } from "@/components/self-backup-panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
-
-// Keys, self-backup and instance configuration are real and have endpoints. Members is the one
-// left; the page states that plainly instead of inventing data.
-const PANELS: { title: MessageKey; description: MessageKey }[] = [
-  { title: "settings.members", description: "settings.members.description" },
-];
 
 export default function SettingsPage() {
   const t = useT();
@@ -28,19 +21,7 @@ export default function SettingsPage() {
         <EncryptionKeysPanel canEdit={role === "admin"} />
         <SelfBackupPanel />
         <InstancePanel />
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {PANELS.map((panel) => (
-          <Card key={panel.title}>
-            <CardHeader>
-              <CardTitle>{t(panel.title)}</CardTitle>
-              <CardDescription>{t(panel.description)}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">{t("common.endpointPending")}</p>
-            </CardContent>
-          </Card>
-        ))}
+        <MembersPanel />
       </div>
     </AppShell>
   );

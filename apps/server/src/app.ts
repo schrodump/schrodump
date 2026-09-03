@@ -16,6 +16,7 @@ import { jobsRoutes, type JobsService } from "./routes/jobs.js";
 import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { instanceRoutes, type InstanceConfig } from "./routes/instance.js";
+import { memberRoutes, type MemberStore } from "./routes/members.js";
 import { restoreRoutes } from "./routes/restore.js";
 import { selfBackupRoutes } from "./routes/self-backups.js";
 import { sessionRoutes } from "./routes/session.js";
@@ -45,6 +46,7 @@ export interface AppDeps {
   // What this process booted with, for GET /instance. A function rather than a value so the route
   // reads it at request time and cannot serve a snapshot taken before the environment was parsed.
   instanceConfig(): InstanceConfig;
+  memberStore(organizationId: string): MemberStore;
   kek: Buffer;
 }
 
@@ -84,6 +86,10 @@ export function buildApp(deps: AppDeps) {
   });
   app.register((instance) => {
     instanceRoutes({ resolver: deps.resolver, config: deps.instanceConfig })(instance);
+    return Promise.resolve();
+  });
+  app.register((instance) => {
+    memberRoutes({ resolver: deps.resolver, store: deps.memberStore })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {

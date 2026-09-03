@@ -34,6 +34,7 @@ import {
   createEncryptionKeyService,
   createJobsService,
   prismaDestinationStore,
+  prismaMemberStore,
   prismaNotificationChannelStore,
   prismaPolicyStore,
 } from "./routes/wiring.js";
@@ -150,6 +151,7 @@ export async function main(): Promise<void> {
     prisma,
     encryptionKeys: createEncryptionKeyService(prisma, kek),
     selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
+    memberStore: (organizationId) => prismaMemberStore(prisma, auth, organizationId),
     instanceConfig: () => ({
       version: serverVersion(),
       scratchPath: env.SCHRODUMP_SCRATCH_PATH ?? null,

@@ -8,6 +8,7 @@ import type {
   ExecutionMode,
   JobKind,
   JobState,
+  Role,
   SealMode,
   VerifyLevel,
 } from "@/lib/domain";
@@ -226,4 +227,23 @@ export interface Instance {
   selfBackup: { configured: boolean; intervalMs: number };
   notifyMinGapMs: number;
   shutdownGraceMs: number;
+}
+
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  role: Role;
+  // True until this member has replaced the password they were handed. requireRole refuses every
+  // action while it stands, for every role — so the row is worth showing: a member who has not
+  // rotated yet cannot do anything, and that looks like a broken account if the UI stays quiet.
+  mustChangePassword: boolean;
+  createdAt: string;
+}
+
+// The temporary password is present exactly once, in the response to the creation that minted it,
+// and is never retrievable again — the same contract as the escrow identity.
+export interface CreatedMember {
+  temporaryPassword: string;
+  member: Member;
 }
