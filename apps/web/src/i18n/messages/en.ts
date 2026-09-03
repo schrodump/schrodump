@@ -39,10 +39,10 @@ export const en = {
   "state.failed": "Failed",
 
   "dashboard.title": "Dashboard",
-  "dashboard.unobservedBackups": "{count} unobserved backups",
+  "dashboard.unobserved.caption": "backups nobody has checked",
+  "dashboard.verified.label": "Verified by restore",
+  "dashboard.failed.label": "Failed",
   "dashboard.unobservedHint": "Backups with no verify — the questions to answer first.",
-  "dashboard.verifiedBackups": "{count} verified",
-  "dashboard.failedBackups": "{count} failed",
   "dashboard.recentJobs": "Recent jobs",
   "dashboard.noJobs": "No jobs yet",
 
