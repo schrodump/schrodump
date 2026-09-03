@@ -66,3 +66,55 @@ describe("ArtifactRow and the oplog fact", () => {
     expect(screen.queryByText(/oplog/i)).toBeNull();
   });
 });
+
+// Nineteen fields, scanned in a hurry. The row used to lead with the bucket key — a 60-character
+// storage path, the least useful thing on it — and spell the checksum out beside it, so five rows
+// filled a screen and none of them answered "can I recover?" at a glance.
+//
+// Two tiers now: what carries the scan stays on the summary line, and the forensic fields open in
+// place. Nothing moved off the page; a native <details> keeps it one keystroke away rather than
+// one route away.
+describe("ArtifactRow — two tiers", () => {
+  function summaryOf(): HTMLElement {
+    const summary = document.querySelector("summary");
+    if (summary === null) throw new Error("the row is not a disclosure");
+    return summary as HTMLElement;
+  }
+
+  it("leads the scan with state, engine and size", () => {
+    renderRow({ ...base, state: "UNOBSERVED", sizeCompressedBytes: 1024 });
+    const summary = summaryOf();
+    expect(summary).toHaveTextContent(/unobserved/i);
+    expect(summary).toHaveTextContent(/mongodb/i);
+    expect(summary).toHaveTextContent(/1\.0 KB/i);
+  });
+
+  it("keeps the bucket key and the checksum off the scan line", () => {
+    // They are forensic: needed exactly once, during an incident, and never while scanning.
+    renderRow(base);
+    const summary = summaryOf();
+    expect(summary).not.toHaveTextContent("org/shop/2026-01-01.archive");
+    expect(summary).not.toHaveTextContent("deadbeef");
+  });
+
+  it("still carries them, one disclosure away rather than one page away", () => {
+    renderRow(base);
+    expect(screen.getByText(/org\/shop\/2026-01-01\.archive/)).toBeInTheDocument();
+    expect(screen.getByText(/deadbeef/)).toBeInTheDocument();
+  });
+
+  it("opens and closes without script, so the keyboard reaches it", () => {
+    renderRow(base);
+    const row = document.querySelector("details");
+    expect(row).not.toBeNull();
+    expect(row).not.toHaveAttribute("open");
+    summaryOf().click();
+    expect(row).toHaveAttribute("open");
+  });
+
+  it("keeps the actions reachable without opening the row", () => {
+    renderRow(base);
+    const summary = summaryOf();
+    expect(summary).toHaveTextContent(/verify/i);
+  });
+});
