@@ -51,8 +51,45 @@ jobs:
         continue-on-error: true
         run: pnpm audit
 
+      # `pnpm audit` exits 1 for two unrelated reasons: a critical advisory exists, or the
+      # registry never answered. Conflating them cost three blocked merges in one day — npm's
+      # advisory endpoint (POST /-/npm/v1/security/audits/quick) went down three times while the
+      # registry root kept answering in 40ms, and each outage surfaced as an opaque exit 1 that
+      # reads exactly like a vulnerability.
+      #
+      # This does NOT fail open. A network failure is retried, because a socket timeout is what
+      # retries are for, and if it never resolves the step still fails — with a message saying the
+      # check did not RUN, which is a different thing to hand a human than "you have a critical
+      # advisory". Failing open here would repeat the defect the DCO job already documents: a
+      # check that reported success when it could not do its work.
+      #
+      # Exercised locally against all four outcomes before landing: clean (0), critical advisory
+      # (1, named as such), timeout-then-success (0 after retry), and permanent outage (1, named
+      # as an unrun check). If output ever contains both a network error and an advisory, it is
+      # classified as a network failure and still ends in a failure — the wrong message, never a
+      # wrong verdict.
       - name: Fail on critical advisories
-        run: pnpm audit --audit-level critical
+        run: |
+          for attempt in 1 2 3; do
+            set +e
+            out="$(pnpm audit --audit-level critical 2>&1)"
+            code=$?
+            set -e
+            printf '%s\n' "$out"
+            if [ "$code" -eq 0 ]; then
+              echo "no critical advisories"
+              exit 0
+            fi
+            if printf '%s' "$out" | grep -qE 'ERR_SOCKET_TIMEOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|FetchError|socket hang up|ERR_PNPM_REGISTRY'; then
+              echo "::warning::the npm advisory service did not answer (attempt ${attempt} of 3)"
+              sleep $((attempt * 20))
+              continue
+            fi
+            echo "::error::pnpm audit reported critical advisories"
+            exit "$code"
+          done
+          echo "::error::the npm advisory service could not be reached in three attempts. This is an UNRUN check, not a clean one, and it fails closed on purpose."
+          exit 1
 
   image:
     name: image scan
