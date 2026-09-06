@@ -14,12 +14,12 @@ versions before 1.0.
 **Do not open a public GitHub issue for security problems.** Public disclosure before a
 fix is available puts every deployment at risk.
 
-Report privately through one of:
+Report through **GitHub's private vulnerability reporting** for this repository:
+[Security → Report a vulnerability](https://github.com/schrodump/schrodump/security/advisories/new).
 
-- GitHub's **private vulnerability reporting** for this repository
-  (Security → Report a vulnerability).
-- Email to the security contact.
-  <!-- TODO: endereço de segurança dedicado pendente de definição -->
+It is private between you and the maintainers, it needs no account beyond the one you are already
+reading this with, and it opens a draft advisory the fix can be prepared and reviewed against
+before any of it becomes public.
 
 Please include, as far as you can:
 
