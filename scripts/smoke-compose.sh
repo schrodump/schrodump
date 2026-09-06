@@ -35,6 +35,28 @@ PASSWORD="smoke-password-not-a-secret"
 log() { printf '\n== %s\n' "$1"; }
 fail() {
   printf '\nsmoke: %s\n' "$1" >&2
+
+  # A verify that ends INCONCLUSIVE is the runner failing to LOOK at an artifact, not a verdict on
+  # it — the server leaves the artifact untouched and says so. That distinction never reached this
+  # output: every step here aborts on `"state":"FAILED"` and prints the tail, and the tail is the
+  # last forty lines of a container that has kept working since.
+  #
+  # It cannot be tolerated either, and this is the reason to go looking for it rather than to
+  # ignore it. classifyVerifyError returns FAILED only for a closed set of restore codes and
+  # INCONCLUSIVE for everything else, so a socket proxy that denies `exec` — one of the three
+  # defects this script exists to catch — arrives here looking exactly like a Docker daemon that
+  # blinked. worker-wiring.ts logs the cause on purpose for precisely this moment; all that was
+  # missing was reading it back.
+  inconclusive="$(docker compose -p "$PROJECT" --env-file "${WORK}/.env" logs schrodump 2>&1 |
+    grep -F 'verify inconclusive — the artifact is unchanged' || true)"
+  if [ -n "$inconclusive" ]; then
+    printf '\n--- a verify could not run; nothing was claimed about the artifact ---\n' >&2
+    printf '%s\n' "$inconclusive" >&2
+    printf '\nRead `cause` and `detail` above before re-running. An infrastructure hiccup and a\n' >&2
+    printf 'deployment that can NEVER verify produce this same line, and the second one is the\n' >&2
+    printf 'defect this smoke was written to catch.\n' >&2
+  fi
+
   printf '\n--- schrodump logs (tail) ---\n' >&2
   docker compose -p "$PROJECT" --env-file "${WORK}/.env" logs schrodump 2>&1 | tail -40 >&2 || true
   exit 1
