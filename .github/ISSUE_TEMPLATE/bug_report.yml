@@ -28,7 +28,7 @@ body:
         `docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}'
         schrodump/schrodump:<tag>` — or take it from the `server listening` log line. If the
         report is about an artifact, its manifest's `toolVersion` is the one that matters.
-      placeholder: "0.1.0-rc.3"
+      placeholder: "0.1.0"
     validations:
       required: true
 
