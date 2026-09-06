@@ -215,9 +215,32 @@ jobs:
       - name: Changelog
         env:
           TAG: ${{ github.ref_name }}
+          STABLE: ${{ needs.image.outputs.stable }}
           DIGEST: ${{ needs.image.outputs.digest }}
         run: |
-          previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          # Who reads these notes decides where the range starts, and the two readers differ.
+          #
+          # A candidate is read by whoever is tracking candidates, so "since the previous tag"
+          # is right and stays untouched below.
+          #
+          # A stable release is read by an operator deciding whether to upgrade, and "since the
+          # previous tag" is wrong for them: the last tag before v0.2.0 is v0.2.0-rc.N, so a
+          # whole release cycle would be announced as whatever happened to land after the final
+          # candidate. This was never noticed because the stable path has never run — every tag
+          # so far has been an -rc, and the branch that gets this wrong is the other one.
+          if [ "$STABLE" = "true" ]; then
+            previous=$(git tag --list 'v*' --sort=-v:refname --merged "${TAG}" |
+                       grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | grep -vFx "${TAG}" | head -1)
+            if [ -z "$previous" ]; then
+              # No stable predecessor: this is the first one. The whole history would be an
+              # enumeration nobody finishes, and the candidates of this same version are the
+              # only thing anyone outside this repository could already be running — so the
+              # cycle starts at the first of them.
+              previous=$(git tag --list "${TAG}-*" --sort=v:refname --merged "${TAG}" | head -1)
+            fi
+          else
+            previous=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          fi
           {
             echo "## ${TAG}"
             echo
