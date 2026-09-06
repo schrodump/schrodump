@@ -1,0 +1,15 @@
+# A blank issue is a blank triage. Every path below asks for what a maintainer needs before the
+# question can even be understood; the security path deliberately leaves GitHub.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/schrodump/schrodump/security/advisories/new
+    about: >-
+      Never a public issue. Report privately here — see SECURITY.md for what to include and how
+      disclosure is coordinated.
+  - name: Already answered in the docs
+    url: https://github.com/schrodump/schrodump/blob/main/docs/roadmap.md
+    about: >-
+      Physical backups, PITR, an agent, local filesystem destinations and S3 Object Lock are out
+      of v1 on purpose, each with its reason. The known limitations shipping in v1 are listed
+      there too, so check before opening.
