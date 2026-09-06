@@ -84,12 +84,15 @@ only then builds, signs and publishes — a tag on a commit whose CI failed must
 image.
 
 ```sh
-git tag -a v0.1.0-rc.3 -m "v0.1.0-rc.3"
-git push origin v0.1.0-rc.3
+# A candidate: publishes and signs, but does not move `latest`.
+git tag -a v1.2.3-rc.1 -m "v1.2.3-rc.1" && git push origin v1.2.3-rc.1
+
+# The stable release: this is the one `latest` follows.
+git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3
 ```
 
 `latest` moves only when the tag parses as exactly `X.Y.Z`, so a `-rc.N` publishes to
-`ghcr.io/schrodump/schrodump:0.1.0-rc.3` and `schrodump/schrodump:0.1.0-rc.3` without becoming the
+`ghcr.io/schrodump/schrodump:1.2.3-rc.1` and `schrodump/schrodump:1.2.3-rc.1` without becoming the
 tag `compose.yaml` pulls by default. Cut a release candidate first: the pipeline signs with cosign,
 attaches an SBOM and publishes the executor images, and none of that has an opportunity to be wrong
 until a tag exists.
@@ -126,7 +129,7 @@ Because `latest` does not move, the shipped `compose.yaml` will not pull an `-rc
 Name it in `.env`:
 
 ```sh
-SCHRODUMP_IMAGE=schrodump/schrodump:0.1.0-rc.3
+SCHRODUMP_IMAGE=schrodump/schrodump:1.2.3-rc.1
 ```
 
 That is the same variable production should use to pin an exact version, so the path is exercised
@@ -148,7 +151,7 @@ stranger can pull:
 
 ```sh
 docker logout ghcr.io
-docker pull ghcr.io/schrodump/schrodump:0.1.0-rc.3
+docker pull ghcr.io/schrodump/schrodump:<the tag just published>
 ```
 
 Docker Hub repositories are public by default and need no equivalent step.
