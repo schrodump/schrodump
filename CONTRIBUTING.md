@@ -7,9 +7,11 @@ into the project.
 
 - Schrodump is licensed under **AGPL-3.0-or-later**. By contributing you agree that
   your contribution is licensed under the same terms.
-- Every contribution is accepted **only** under the Schrodump Contributor License
-  Agreement (CLA). See [Contributor License Agreement](#contributor-license-agreement)
-  below. **No pull request is merged before the CLA is signed.**
+- Contributions are certified by the **DCO**, not a CLA. There is nothing to sign up
+  for: you add a `Signed-off-by` trailer to each commit with `git commit -s`. See
+  [Sign your work](#sign-your-work-the-developer-certificate-of-origin) below for what
+  that trailer certifies and why a CLA was deliberately not chosen.
+- Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Pull request flow
 
@@ -29,8 +31,9 @@ into the project.
 
 5. Every source file must carry the SPDX header (see `CLAUDE.md`).
 6. Push and open a pull request against `main`. Fill in what changed and why.
-7. A maintainer reviews. CI (`typecheck`, `lint`, `test`) must be green and the CLA
-   must be signed before merge.
+7. A maintainer reviews. CI (`typecheck`, `lint`, `test`) must be green and every commit
+   in the range must carry its `Signed-off-by` before merge — the `dco` job fails closed,
+   so an unsigned commit blocks the PR rather than slipping through.
 
 ## Commit convention
 
