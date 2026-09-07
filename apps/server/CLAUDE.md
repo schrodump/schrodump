@@ -64,6 +64,18 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   without a code); **emitting** the message is not. The distinction is commented in the file.
 - `serverVersionNum` is an encoded integer (`major*10000 + minor*100 + patch`) — a comparison key,
   not text. Formatting it for display belongs to `apps/web`.
+- **`TestConnectionResult` carries `databases` (name + size) and `isReplicaSet`.** The probe always
+  measured them and the worker always used them (STAGED routing, the scratch reservation); the
+  operator never saw them. On a real deployment the 9.4 GB database an unscoped postgres target left
+  behind was in that list, discarded on the way out. Names and sizes are not credentials, and the
+  caller has already supplied the credentials that produced them — so they leave this module, and
+  the driver's prose still does not.
+- **`POST /targets/discover` (operator+, `routes/targets.ts`) probes a connection that has not been
+  saved.** The password travels in the body, is used for that one connection and is discarded — the
+  same posture as the password on create. It probes unscoped, through the engine's maintenance
+  database, exactly as the backup's own probe will, so "discovery works" also means "the backup can
+  probe". It exists so the form can offer the scope as a choice over what the server actually
+  holds instead of a typed name.
 
 ## Env (what the server actually reads)
 
@@ -371,6 +383,15 @@ an admin-creation link, and an old log line stops working after an hour.
   second-guessed. mysql/mariadb are not affected: their dump receives every database the probe
   found. `sizeRawBytes` is now the bytes the dump actually produced; the estimate keeps its two
   real jobs, STAGED routing and the scratch reservation, which are decisions taken *before* the dump.
+  That guard is the **second** lock. The first is `scopeProblem` (`routes/targets.ts`), applied on
+  create and on any PATCH that touches the scope (engine read off the row): postgres must name
+  exactly one database, mongodb at most one, mysql/mariadb anything. And the form no longer has a
+  free-text scope at all — its hint read "empty means all", which for postgres was the lie at the
+  centre of the incident. `TargetForm` runs `/targets/discover` and offers the scope as a choice
+  over what was found: one radio for postgres (the maintenance database is listed and marked, and
+  is a legitimate explicit pick), checkboxes for mysql, and for mongodb a whole-instance lock when
+  `isReplicaSet` comes back true. Nothing is pre-selected: even with a single non-maintenance
+  database, the operator clicks. A default is what this replaces.
 
 - **Resources are editable, with identity fields withheld.** `/targets`, `/destinations` and
   `/policies` have `PATCH` (operator+, `.strict()` and `.partial()` schemas, an empty patch is 400).

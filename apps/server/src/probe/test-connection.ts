@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import type { ProbeConnection, ProbeResult } from "@schrodump/engines/probe/types";
+import type { DatabaseSize, ProbeConnection, ProbeResult } from "@schrodump/engines/probe/types";
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
@@ -32,6 +32,17 @@ export interface TestConnectionResult {
   // way to say why to anyone. A class name and a numeric code cannot carry a credential, which is
   // exactly why this is the one piece of driver output allowed out of here.
   readonly driverCode: string | null;
+  // What the server holds, by name and size. Empty on failure. This used to be dropped here — the
+  // probe measured it and the worker used it for STAGED routing, but the operator never saw it. It
+  // is what lets a target be scoped from what actually exists instead of from a typed name: on a
+  // real deployment an unscoped postgres target dumped the maintenance database while the 9.4 GB
+  // one sat beside it in this very list, discarded on this line. Names and sizes are not
+  // credentials, and the caller has already supplied the credentials that produced them.
+  readonly databases: readonly DatabaseSize[];
+  // null on failure. For mongodb this decides the scope outright: a replica set is dumped whole,
+  // with its oplog, and cannot be narrowed. Reported for every engine rather than only mongo so a
+  // caller never has to guess whether null means "not a replica set" or "not asked".
+  readonly isReplicaSet: boolean | null;
 }
 
 export interface ProbeTarget {
@@ -163,13 +174,22 @@ export async function testTargetConnection(
 
   try {
     const result = await probes[target.engine](connection);
-    return { ok: true, serverVersionNum: result.serverVersionNum, failure: null, driverCode: null };
+    return {
+      ok: true,
+      serverVersionNum: result.serverVersionNum,
+      failure: null,
+      driverCode: null,
+      databases: result.databases,
+      isReplicaSet: result.facts.isReplicaSet,
+    };
   } catch (error) {
     return {
       ok: false,
       serverVersionNum: null,
       failure: classify(error),
       driverCode: driverCodeOf(error),
+      databases: [],
+      isReplicaSet: null,
     };
   }
 }

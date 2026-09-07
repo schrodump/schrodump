@@ -8,6 +8,7 @@ import type {
   ExecutionMode,
   JobKind,
   JobState,
+  ProbeFailureCode,
   Role,
   SealMode,
   VerifyLevel,
@@ -59,6 +60,23 @@ export interface Job {
   stderr: string | null;
   reason: string | null;
   createdAt: string;
+}
+
+// POST /targets/discover, and /targets/:id/test-connection. `databases` is what the server holds,
+// by name and size, so a scope is picked from what exists rather than typed; empty on failure.
+// `isReplicaSet` decides a mongodb scope outright: a replica set is dumped whole, with its oplog.
+export interface DiscoveredDatabase {
+  name: string;
+  sizeBytes: number;
+}
+
+export interface DiscoverResult {
+  ok: boolean;
+  serverVersionNum: number | null;
+  failure: ProbeFailureCode | null;
+  driverCode: string | null;
+  databases: DiscoveredDatabase[];
+  isReplicaSet: boolean | null;
 }
 
 export interface Target {

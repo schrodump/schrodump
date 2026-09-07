@@ -213,8 +213,16 @@ async function probeTarget(
   const row = await scopedPrisma(prisma, organizationId).databaseTarget.findFirst({
     where: { id: targetId },
   });
-  if (row === null)
-    return { ok: false, serverVersionNum: null, failure: "UNKNOWN", driverCode: null };
+  if (row === null) {
+    return {
+      ok: false,
+      serverVersionNum: null,
+      failure: "UNKNOWN",
+      driverCode: null,
+      databases: [],
+      isReplicaSet: null,
+    };
+  }
 
   const scope = ScopeSchema.safeParse(row.scope);
   return testTargetConnection({
