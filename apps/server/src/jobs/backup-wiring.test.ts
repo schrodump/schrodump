@@ -44,8 +44,8 @@ function fakeRunner(exitCode: number): Runner {
   };
 }
 
-// Consumes the ciphertext stream to completion (the hash listener in uploadEncrypted has already put
-// it in flowing mode) and resolves — never inspects the bytes. `deletedKeys` records what the
+// Consumes the ciphertext stream to completion, the way a real multipart upload does, and resolves
+// — never inspects the bytes. `deletedKeys` records what the
 // run-failure cleanup path (finding #2) actually deletes; `putBehavior` lets a test simulate a
 // transient put() failure (finding #1) instead of the default happy-path put.
 function fakeDriver(options?: {
@@ -69,6 +69,11 @@ function fakeDriver(options?: {
           return;
         }
         body.on("error", reject);
+        // A real uploader READS the stream. This used to wait for "end" without consuming, which
+        // only ever arrived because uploadEncrypted had a `data` listener on the same stream
+        // putting it in flowing mode — the very defect that let 9.4 GB reach a bucket as 877
+        // bytes. A fixture that depends on the bug cannot fail when the bug is fixed.
+        body.resume();
         body.on("end", () => resolve({ etag: "e", sizeBytes: 0, checksum: null }));
       }),
     get: unused,
@@ -79,6 +84,25 @@ function fakeDriver(options?: {
     },
     list: unused,
     canary: unused,
+  };
+}
+
+// A dump whose stdout breaks partway through: bytes flow, then the stream dies. This is the shape
+// that shipped — a 9.4 GB production dump reached the bucket as an 877-byte envelope with the job
+// reported SUCCEEDED, because `.pipe()` drops a middle stage's error and closes the destination
+// cleanly. Only the FULL_RESTORE verify caught it, by restoring the artifact and finding no tables.
+function fakeBrokenStreamRunner(): Runner {
+  return {
+    run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+      opts.stdout?.write(Buffer.from("-- pg_dump fixture payload\n"));
+      setImmediate(() => {
+        opts.stdout?.destroy(new Error("the dump stream broke mid-transfer"));
+      });
+      // Exit 0, like the tool that never noticed. Success has to be decided by the DATA arriving,
+      // not by the process not complaining — which is this project's whole argument.
+      return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+    },
+    withEphemeralService: () => Promise.reject(new Error("not used in backup tests")),
   };
 }
 
@@ -194,6 +218,22 @@ describe("createBackupPorts.executeAndUpload", () => {
     // And the empty object it already wrote must not outlive the job as an orphan, exactly as the
     // non-zero-exit path does.
     expect(deletedKeys).toEqual(["backups/org-1/job-1/artifact.bin"]);
+  });
+
+  it("fails the job when the dump stream breaks mid-transfer, instead of uploading what survived", async () => {
+    // The defect this replaces did not throw: it uploaded the truncated remainder, called it a
+    // success, and left an artifact that only a full restore could expose as empty.
+    const { deps, recipient } = await makeDeps(0, { runner: fakeBrokenStreamRunner() });
+    const ports = createBackupPorts(deps);
+
+    await expect(
+      ports.executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow();
   });
 
   it("rejects when the dump exits non-zero (no VERIFIED artifact can result)", async () => {

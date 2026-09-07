@@ -51,6 +51,21 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
     return { finalState: "UNOBSERVED", effectiveLevel: "NONE", degraded: false };
   }
 
+  // Condemning an artifact is the most consequential verdict this product issues, and it was
+  // issued in silence: the reason below used to be `degradedReason ?? undefined`, which is
+  // undefined whenever nothing was downgraded. A FAILED artifact therefore carried a FAILED job
+  // with a null reason, a null exit code and no stderr — the operator saw a colour and nothing
+  // else. Observed on a real deployment where the artifact genuinely WAS bad; the verdict was
+  // right and there was no way to learn how it had been reached.
+  //
+  // A downgrade is still recorded when both apply: an artifact condemned by a CHECKSUM that ran
+  // only because FULL_RESTORE was unavailable is a different claim from one condemned by a
+  // restore, and the row has to be able to say which.
+  const verdict = (ok: boolean, failure: string): string | undefined =>
+    ok
+      ? (degradedReason ?? undefined)
+      : [failure, degradedReason].filter((part) => part !== null).join("; ");
+
   try {
     if (level === "FULL_RESTORE") {
       const proof = await ports.fullRestore();
@@ -69,7 +84,10 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       }
       const ok = proof === "VERIFIED";
       await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
-      await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degradedReason ?? undefined);
+      await ports.setJobState(
+        ok ? "SUCCEEDED" : "FAILED",
+        verdict(ok, "verify failed: the artifact restored but produced no usable schema"),
+      );
       return {
         finalState: ok ? "VERIFIED" : "FAILED",
         effectiveLevel: level,
@@ -79,7 +97,10 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
 
     const ok = await ports.checksumMatches();
     await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
-    await ports.setJobState(ok ? "SUCCEEDED" : "FAILED", degradedReason ?? undefined);
+    await ports.setJobState(
+      ok ? "SUCCEEDED" : "FAILED",
+      verdict(ok, "verify failed: the stored object does not match the checksum in its manifest"),
+    );
     return {
       finalState: ok ? "VERIFIED" : "FAILED",
       effectiveLevel: level,
