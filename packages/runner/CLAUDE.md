@@ -35,6 +35,15 @@ Docker execution and scratch management. Takes precedence over the root `CLAUDE.
   is *capped* (`10m`, one file) rather than discarded. "The sandbox could not run" is the hardest
   failure this product has to explain; discarding its log would trade a disk problem for a
   blindness problem.
+- **`demuxStream` is never given the destination directly** — `demuxInto` wraps it. dockerode
+  attaches a flowing-mode `data` listener and calls `stdout.write(chunk)` without reading the
+  return value and without ever pausing its source, so the container's output arrives at socket
+  speed and everything the consumer has not taken yet queues in memory. For a dump that queue IS
+  the backup: measured on a production MongoDB, 46 GB read and 1.4 GB uploaded with the server
+  holding 74 GiB of a 125 GiB host. The sink `demuxInto` hands over forwards each chunk and pauses
+  the attach when the destination is full, which stops the socket, which is what finally reaches
+  `mongodump` and makes it wait. The framing stays dockerode's problem; only the flow control is
+  ours.
 - **The create options are pure functions** (`executorCreateOptions`, `serviceCreateOptions`)
   because `DockerodeEngine` is not exported and every unit test replaces it with a fake — so what
   `createContainer` actually receives was unobservable, which is precisely where the defect above
