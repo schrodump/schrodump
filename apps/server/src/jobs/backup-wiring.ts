@@ -7,6 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { PassThrough, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { resolveCapabilities } from "@schrodump/core/capabilities";
 import type { EngineKind } from "@schrodump/core/types";
@@ -109,12 +110,42 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
         callback(null, chunk);
       },
     });
-    const encrypted = await encryptStream(dumpOut.pipe(countRaw).pipe(createGzip()), recipients);
+    // pipeline(), never a chain of .pipe(). With .pipe() an error in a middle stage is dropped on
+    // the floor and the destination still closes cleanly — packages/runner/CLAUDE.md states the
+    // rule, for exactly this reason, and this path did not follow it.
+    //
+    // It is not a theoretical difference. A 9.4 GB production dump reached the bucket as an
+    // 877-byte envelope with the job reported SUCCEEDED: whatever broke between the counter and
+    // the encrypter had nowhere to surface, so the chain closed cleanly around nothing. Only the
+    // FULL_RESTORE verify caught it, by restoring the artifact and finding no tables.
+    // Never awaited for COMPLETION — a PassThrough destination only settles once its readable side
+    // is drained, and the drainer here is encryptStream, so waiting on it deadlocks. It is used for
+    // the half that was missing: on any stage's error, pipeline() destroys every stream in the
+    // chain WITH that error, so it reaches `compressed`, then the encrypter, then put(), which
+    // rejects and fails the job. `.pipe()` forwarded none of that.
+    const compressed = new PassThrough();
+    void pipeline(dumpOut, countRaw, createGzip(), compressed).catch(() => undefined);
+
+    const encrypted = await encryptStream(compressed, recipients);
     const hash = createHash("sha256");
     let sizeBytes = 0;
-    encrypted.on("data", (chunk: Buffer) => {
-      hash.update(chunk);
-      sizeBytes += chunk.length;
+    // A Transform, not a `data` listener — the same rule the countRaw comment above states, applied
+    // to the stream it was not applied to. A listener switches `encrypted` to flowing mode here,
+    // before put() attaches its consumer on the next statement, and everything that flows in that
+    // window is counted and hashed and then dropped.
+    const measure = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        hash.update(chunk);
+        sizeBytes += chunk.length;
+        callback(null, chunk);
+      },
+    });
+    // Chained rather than a second pipeline() with a PassThrough destination: that destination only
+    // settles once its readable side is fully consumed, which deadlocks against put() being the
+    // consumer. The error is forwarded by hand instead, which is the part .pipe() drops.
+    const body = encrypted.pipe(measure);
+    encrypted.on("error", (err: unknown) => {
+      measure.destroy(err instanceof Error ? err : new Error(String(err)));
     });
 
     // Both settle unconditionally, so neither is ever left an unhandled rejection — a run that
@@ -122,7 +153,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     // lets put() complete instead of hanging; if put() were simply awaited and threw, runPromise
     // would go unobserved and crash the whole worker process, not just this job.
     const [putOutcome, runOutcome] = await Promise.allSettled([
-      deps.driver.put(key, encrypted, {
+      deps.driver.put(key, body, {
         contentType: "application/octet-stream",
         partSize: PART_SIZE,
         metadata: {},

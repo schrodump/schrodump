@@ -8,16 +8,21 @@ interface Harness {
   ports: VerifyPorts;
   artifactStates: string[];
   jobStates: string[];
+  // The reason was dropped here for as long as it was dropped in production: a condemned artifact
+  // carried a FAILED job with a null reason, and a harness that never looked could not say so.
+  jobReasons: (string | undefined)[];
   calls: string[];
 }
 
 function makeHarness(over: Partial<VerifyPorts> = {}): Harness {
   const artifactStates: string[] = [];
   const jobStates: string[] = [];
+  const jobReasons: (string | undefined)[] = [];
   const calls: string[] = [];
   const ports: VerifyPorts = {
-    setJobState: (state) => {
+    setJobState: (state, reason) => {
       jobStates.push(state);
+      jobReasons.push(reason);
       return Promise.resolve();
     },
     setArtifactState: (state) => {
@@ -34,7 +39,7 @@ function makeHarness(over: Partial<VerifyPorts> = {}): Harness {
     },
     ...over,
   };
-  return { ports, artifactStates, jobStates, calls };
+  return { ports, artifactStates, jobStates, jobReasons, calls };
 }
 
 const CTX: VerifyContext = {
@@ -107,5 +112,52 @@ describe("runVerifyJob", () => {
     expect(outcome.finalState).toBe("UNOBSERVED");
     expect(h.artifactStates).toEqual([]); // infra failure never touches the artifact's state
     expect(h.jobStates).toEqual(["RUNNING", "FAILED"]);
+  });
+});
+
+// Condemning an artifact is the most consequential verdict this product issues, and it was issued
+// in silence. Observed on a real deployment: two artifacts marked FAILED, their jobs FAILED with a
+// null reason, a null exit code and no stderr, and nothing in the log. The verdict was correct —
+// the artifacts really were empty — and there was no way to learn how it had been reached.
+describe("a verify that condemns an artifact says why", () => {
+  it("records why a full restore condemned it", async () => {
+    const h = makeHarness({ fullRestore: () => Promise.resolve("FAILED") });
+
+    const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
+
+    expect(outcome.finalState).toBe("FAILED");
+    expect(h.artifactStates).toEqual(["FAILED"]);
+    expect(h.jobReasons.at(-1)).toMatch(/restored but produced no usable schema/);
+  });
+
+  it("records why a checksum condemned it", async () => {
+    const h = makeHarness({ checksumMatches: () => Promise.resolve(false) });
+
+    const outcome = await runVerifyJob(CTX, h.ports);
+
+    expect(outcome.finalState).toBe("FAILED");
+    expect(h.jobReasons.at(-1)).toMatch(/does not match the checksum in its manifest/);
+  });
+
+  it("keeps the downgrade alongside the failure, because they are different claims", async () => {
+    // An artifact condemned by a CHECKSUM that only ran because FULL_RESTORE was unavailable is
+    // not the same claim as one condemned by a restore. The row has to be able to say which.
+    const h = makeHarness({ checksumMatches: () => Promise.resolve(false) });
+
+    await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE", sealed: true }, h.ports);
+
+    expect(h.jobReasons.at(-1)).toMatch(/does not match the checksum/);
+    expect(h.jobReasons.at(-1)).toMatch(/sealed destination/);
+  });
+
+  it("still says nothing extra when the verify passes", async () => {
+    // The reason field is for verdicts an operator has to act on. A clean pass with no downgrade
+    // has nothing to add, and filling it would train people to ignore it.
+    const h = makeHarness();
+
+    await runVerifyJob(CTX, h.ports);
+
+    expect(h.jobStates.at(-1)).toBe("SUCCEEDED");
+    expect(h.jobReasons.at(-1)).toBeUndefined();
   });
 });
