@@ -358,6 +358,20 @@ an admin-creation link, and an old log line stops working after an hour.
   (`MONGO_CONFIG_SCRATCH_REQUIRED_REASON` in `jobs/worker-wiring.ts`) instead of getting stuck deep
   inside the executor.
 
+- **An unscoped postgres target is refused when the server holds more than the maintenance
+  database** (`postgresUnscopedAlternatives`, applied in `buildDumpDescriptorFor`,
+  `jobs/worker-wiring.ts`). `pg_dump` copies exactly one database — the one the connection is open
+  to — and an unscoped target connects to `postgres`. On a real deployment that turned a 9.4 GB
+  `ipog_finance` into an 876-byte artifact under a `SUCCEEDED` job, and the row read "9.4 GB"
+  because `sizeRawBytes` was the probe's server-wide estimate. Only a `FULL_RESTORE` verify caught
+  it; the default `CHECKSUM` would have made it `VERIFIED`. The refusal is an `EngineDescriptorError`
+  (the class `backup.ts` writes verbatim into `BackupJob.reason`) naming the databases left behind,
+  and it fires before any container starts. When `postgres` is the only database it proceeds — that
+  is where the data lives — and an explicit scope, including an explicit `postgres`, is never
+  second-guessed. mysql/mariadb are not affected: their dump receives every database the probe
+  found. `sizeRawBytes` is now the bytes the dump actually produced; the estimate keeps its two
+  real jobs, STAGED routing and the scratch reservation, which are decisions taken *before* the dump.
+
 - **Resources are editable, with identity fields withheld.** `/targets`, `/destinations` and
   `/policies` have `PATCH` (operator+, `.strict()` and `.partial()` schemas, an empty patch is 400).
   What is **not** editable, and why — each would invalidate an existing artifact:

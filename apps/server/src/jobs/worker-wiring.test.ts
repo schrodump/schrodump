@@ -5,11 +5,19 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
+import {
+  EngineDescriptorError,
+  type TargetConnection,
+  type TargetFacts,
+} from "@schrodump/engines/descriptor";
+import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import { loadEnv } from "../env.js";
 import {
+  buildDumpDescriptorFor,
   createJobExecutor,
   createWorkerStore,
   originDatabaseFor,
+  postgresUnscopedAlternatives,
   resolveVerifyPlan,
   sanitizeReason,
   sourceHasOplogFor,
@@ -466,5 +474,169 @@ describe("VERIFY_INCONCLUSIVE_LOG", () => {
 
     expect(pattern, "smoke-compose.sh no longer greps for an inconclusive verify").toBeDefined();
     expect(VERIFY_INCONCLUSIVE_LOG).toContain(pattern);
+  });
+});
+
+// On a real deployment an unscoped postgres target backed up `postgres` — the maintenance database,
+// 7.5 MB of catalogs — while `ipog_finance`, 9.4 GB, sat beside it untouched. The job was SUCCEEDED,
+// the artifact was 876 bytes, and the row said "9.4 GB" because sizeRawBytes was the probe's
+// server-wide estimate. Only a FULL_RESTORE verify caught it; the default CHECKSUM would not have.
+describe("postgresUnscopedAlternatives", () => {
+  const found = ["ipog_finance", "postgres"];
+
+  it("names the databases an unscoped postgres target would silently leave behind", () => {
+    expect(postgresUnscopedAlternatives("postgres", [], "postgres", found)).toEqual(["ipog_finance"]);
+  });
+
+  it("is empty when the maintenance database is the only one, because then it is where the data lives", () => {
+    expect(postgresUnscopedAlternatives("postgres", [], "postgres", ["postgres"])).toEqual([]);
+  });
+
+  it("never second-guesses an explicit scope", () => {
+    expect(postgresUnscopedAlternatives("postgres", ["ipog_finance"], "ipog_finance", found)).toEqual([]);
+  });
+
+  it("respects an explicit `postgres` too — naming it is a decision, defaulting to it is not", () => {
+    expect(postgresUnscopedAlternatives("postgres", ["postgres"], "postgres", found)).toEqual([]);
+  });
+
+  it("treats an empty-string scope entry as unscoped, the same way originDatabaseFor does", () => {
+    expect(postgresUnscopedAlternatives("postgres", [""], "postgres", found)).toEqual(["ipog_finance"]);
+  });
+
+  it("stays out of the other engines, whose dump tools copy everything the probe found", () => {
+    for (const engine of ["mysql", "mariadb", "mongodb"] as const) {
+      expect(postgresUnscopedAlternatives(engine, [], "mysql", ["a", "b", "mysql"])).toEqual([]);
+    }
+  });
+});
+
+describe("buildDumpDescriptorFor", () => {
+  const connection = (database: string): TargetConnection => ({
+    host: "db",
+    port: 5432,
+    database,
+    username: "app",
+    password: "pw",
+    tls: false,
+  });
+  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
+  const probe = (databases: string[]) => ({
+    serverVersionNum: 170_011,
+    scope: { databases, schemas: [], collections: [] },
+    estimatedBytes: 9_446_000_000,
+  });
+  // Records what reached the adapter, so a test can assert that nothing did.
+  function recordingAdapter() {
+    const calls: unknown[] = [];
+    const adapter = {
+      buildDump: (input: unknown): ExecutionDescriptor => {
+        calls.push(input);
+        return { image: "postgres:17", command: ["pg_dump"], env: {}, outputKind: "stdout" };
+      },
+    };
+    return { adapter, calls };
+  }
+
+  it("refuses the incident exactly, before any descriptor is built", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "postgres",
+      connection: connection("postgres"),
+      scopedDatabases: [],
+      facts,
+      stagingPathFor: () => undefined,
+    });
+
+    let thrown: unknown;
+    try {
+      build("STREAM", 1, probe(["ipog_finance", "postgres"]));
+    } catch (error) {
+      thrown = error;
+    }
+
+    // EngineDescriptorError specifically: it is the class whose message backup.ts writes verbatim
+    // into BackupJob.reason. A plain Error would be sanitized to "job failed: Error" and leave the
+    // operator exactly as uninformed as the silent default did.
+    expect(thrown).toBeInstanceOf(EngineDescriptorError);
+    expect((thrown as EngineDescriptorError).code).toBe("POSTGRES_SCOPE_REQUIRED");
+    expect((thrown as Error).message).toMatch(/ipog_finance/);
+    expect((thrown as Error).message).toMatch(/maintenance database/);
+    expect((thrown as Error).message).toMatch(/scope/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("builds the descriptor for a scoped target, with the probe scope SQL engines dump under", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "postgres",
+      connection: connection("ipog_finance"),
+      scopedDatabases: ["ipog_finance"],
+      facts,
+      stagingPathFor: () => "/scratch/job-1",
+    });
+    const found = probe(["ipog_finance", "postgres"]);
+
+    build("STREAM", 1, found);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      connection: connection("ipog_finance"),
+      executionMode: "STREAM",
+      parallelism: 1,
+      scope: found.scope,
+      facts,
+    });
+    expect(calls[0]).not.toHaveProperty("stagingPath");
+  });
+
+  it("hands STAGED its staging path and STREAM none", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "postgres",
+      connection: connection("ipog_finance"),
+      scopedDatabases: ["ipog_finance"],
+      facts,
+      stagingPathFor: () => "/scratch/job-1",
+    });
+
+    build("STAGED", 4, probe(["ipog_finance"]));
+
+    expect(calls[0]).toMatchObject({ executionMode: "STAGED", parallelism: 4, stagingPath: "/scratch/job-1" });
+  });
+
+  it("lets an unscoped postgres target through when the server holds nothing else", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "postgres",
+      connection: connection("postgres"),
+      scopedDatabases: [],
+      facts,
+      stagingPathFor: () => undefined,
+    });
+
+    build("STREAM", 1, probe(["postgres"]));
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does not refuse mysql, whose dump copies every database the probe found", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "mysql",
+      connection: connection("mysql"),
+      scopedDatabases: [],
+      facts,
+      stagingPathFor: () => undefined,
+    });
+
+    build("STREAM", 1, probe(["shop", "billing", "mysql"]));
+
+    expect(calls).toHaveLength(1);
   });
 });

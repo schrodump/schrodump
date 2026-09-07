@@ -80,7 +80,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     recipients: string[],
     key: string,
     extraMounts: RunMount[] = [],
-  ): Promise<{ checksum: string; sizeBytes: number }> => {
+  ): Promise<{ checksum: string; sizeBytes: number; rawBytes: number }> => {
     const dumpOut = new PassThrough();
     const runPromise = deps.runner.run(descriptor, {
       network: deps.network,
@@ -191,7 +191,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       throw new Error("dump produced no data (the tool exited 0 but wrote nothing)");
     }
 
-    return { checksum: hash.digest("hex"), sizeBytes };
+    return { checksum: hash.digest("hex"), sizeBytes, rawBytes };
   };
 
   // Two runs, one artifact. Both mount the staging directory at the same path the descriptor names.
@@ -199,7 +199,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     dumpDescriptor: ExecutionDescriptor,
     recipients: string[],
     key: string,
-  ): Promise<{ checksum: string; sizeBytes: number }> => {
+  ): Promise<{ checksum: string; sizeBytes: number; rawBytes: number }> => {
     const stagingPath = deps.stagingPath;
     if (stagingPath === undefined) {
       // resolveExecutionMode only chooses STAGED when scratch is configured, so this is a wiring
@@ -253,14 +253,19 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       // DIRECTORY, so it takes two: the dump fills a mounted staging directory, then a second run
       // tars that directory to stdout and THAT becomes the artifact. Without the second run the
       // upload reads a stdout the dump never wrote to — an empty artifact under a SUCCEEDED job.
-      const { checksum, sizeBytes } =
+      const { checksum, sizeBytes, rawBytes } =
         mode === "STAGED"
           ? await archiveStagedDump(dumpDescriptor, recipients.recipients, key)
           : await uploadEncrypted(dumpDescriptor, recipients.recipients, key);
       return {
         bucketKey: key,
         manifestKey: manifestKey(deps.prefix, deps.organizationId, deps.jobId),
-        sizeRawBytes: probe.estimatedBytes,
+        // What the dump actually produced, not `probe.estimatedBytes`. The estimate is the probe's
+        // sum over EVERY database on the server, and it belongs to the decisions taken before the
+        // dump — STAGED routing, the scratch reservation. Recorded on the artifact it said 9.4 GB
+        // over an 876-byte envelope that held no tables: the one number an operator uses to judge
+        // whether a backup is plausible, and it was describing a different thing entirely.
+        sizeRawBytes: rawBytes,
         sizeCompressedBytes: sizeBytes,
         checksumAlgorithm: "sha256",
         checksum,
