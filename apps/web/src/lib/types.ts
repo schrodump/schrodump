@@ -45,6 +45,11 @@ export interface Artifact {
 export interface Job {
   id: string;
   policyId: string | null;
+  // What the job is ABOUT, resolved by the server: the database it reads or writes, and the policy
+  // it belongs to. Both null for a job whose policy was deleted; policyName also null for a manual
+  // run. Nulls are rendered as absence, never as a placeholder that would read like a real name.
+  targetName: string | null;
+  policyName: string | null;
   kind: JobKind;
   state: JobState;
   correlationId: string;

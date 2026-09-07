@@ -5,7 +5,13 @@ import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { LIST_PAGE_SIZE } from "./jobs.js";
 import { generateAgeKeyPair } from "../crypto/artifact.js";
-import { createEncryptionKeyService, createJobsService, toArtifactRecord } from "./wiring.js";
+import {
+  createEncryptionKeyService,
+  createJobsService,
+  JOB_SUBJECT_INCLUDE,
+  toArtifactRecord,
+  toJobRecord,
+} from "./wiring.js";
 
 // A full Artifact row as Prisma returns it — sizes are BigInt, plus internal columns the API must
 // not expose.
@@ -96,6 +102,20 @@ describe("createJobsService list bounds", () => {
     };
     return { calls, prisma: base as unknown as PrismaClient };
   }
+
+  it("asks the database for exactly the relations the mapper reads", async () => {
+    // The mapper and the query live in different places and neither one fails loudly if the other
+    // changes: drop the include and every row silently reports a null target, which reads like a
+    // deployment with no policies rather than like a bug.
+    const spy = spyPrisma();
+
+    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs(
+      "org-1",
+    );
+
+    const call = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findMany");
+    expect(call?.args.include).toEqual(JOB_SUBJECT_INCLUDE);
+  });
 
   it("bounds the artifact list and asks the database for the counts", async () => {
     const spy = spyPrisma();
@@ -198,5 +218,55 @@ describe("toArtifactRecord carries the oplog fact", () => {
     expect(toArtifactRecord({ ...row, sourceHasOplog: true }).sourceHasOplog).toBe(true);
     expect(toArtifactRecord({ ...row, sourceHasOplog: false }).sourceHasOplog).toBe(false);
     expect(toArtifactRecord({ ...row, sourceHasOplog: null }).sourceHasOplog).toBe(null);
+  });
+});
+
+// A job row said what KIND it was and nothing about WHAT it was for, so an operator watching two
+// backups run could not tell which of their databases was being read. The answer existed — as a
+// cuid inside the correlationId.
+describe("a job says which database it is about", () => {
+  const scalars = { id: "j1", kind: "BACKUP", state: "RUNNING" } as const;
+
+  it("resolves a BACKUP through the policy it belongs to", () => {
+    const out = toJobRecord({ ...scalars, policy: { name: "nightly", target: { name: "orders" } } });
+
+    expect(out.targetName).toBe("orders");
+    expect(out.policyName).toBe("nightly");
+  });
+
+  it("resolves a VERIFY through the artifact it acts on, and the job that produced it", () => {
+    // The route that is easy to forget: a verify has no policy of its own, so without this half
+    // exactly the rows an operator stares at during an incident stay anonymous.
+    const out = toJobRecord({
+      ...scalars,
+      kind: "VERIFY",
+      policy: null,
+      verifyArtifact: { job: { policy: { name: "nightly", target: { name: "orders" } } } },
+    });
+
+    expect(out.targetName).toBe("orders");
+    expect(out.policyName).toBe("nightly");
+  });
+
+  it("leaves a manual run's policy null instead of inventing a name for it", () => {
+    // "unknown" here would be indistinguishable from a real policy called unknown, and would hide
+    // the difference between "nobody scheduled this" and "the policy row is gone".
+    const out = toJobRecord({ ...scalars, policy: null });
+
+    expect(out.policyName).toBeNull();
+    expect(out.targetName).toBeNull();
+  });
+
+  it("carries the job's own fields through and drops the relations", () => {
+    const out = toJobRecord({
+      ...scalars,
+      correlationId: "backup:p1",
+      policy: { name: "nightly", target: { name: "orders" } },
+    });
+
+    expect(out.correlationId).toBe("backup:p1");
+    expect(out.state).toBe("RUNNING");
+    expect(out).not.toHaveProperty("policy");
+    expect(out).not.toHaveProperty("verifyArtifact");
   });
 });
