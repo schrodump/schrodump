@@ -7,7 +7,9 @@ import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import {
   DockerRunner,
+  executorCreateOptions,
   sanitizeStderr,
+  serviceCreateOptions,
   type ContainerSpec,
   type DockerEngine,
   type EphemeralServiceSpec,
@@ -421,5 +423,78 @@ describe("obtaining the executor image", () => {
     await expect(runner.run(DESCRIPTOR, opts())).rejects.toThrow(
       /could not obtain the executor image/,
     );
+  });
+});
+
+// The defect these cover cost a production host its whole disk. An executor's stdout is the dump
+// itself, and Docker's default json-file driver has no size limit — so every byte streaming to
+// object storage was ALSO written to /var/lib/docker/containers/<id>/<id>-json.log and kept, since
+// these containers are deliberately created with AutoRemove: false. A 216 GB host reached 100%
+// during a single MongoDB dump, with the database being protected on the same disk.
+//
+// Nothing could see it. The engine that calls createContainer is not exported and every unit test
+// here replaces it with a fake, so the options the daemon actually receives were unobserved for
+// every release so far. That is why these are pure functions now.
+describe("container create options", () => {
+  const spec: ContainerSpec = {
+    image: "postgres:16-alpine",
+    command: ["pg_dump", "-Fc"],
+    env: { PGPASSWORD: "x" },
+    network: "targets",
+    mounts: [{ source: "/scratch/a", target: "/work", readOnly: false }],
+  };
+
+  it("gives an executor NO log driver, because its stdout is the artifact and not diagnostics", () => {
+    expect(executorCreateOptions(spec).HostConfig?.LogConfig).toEqual({ Type: "none", Config: {} });
+  });
+
+  it("still carries everything the run depends on", () => {
+    const opts = executorCreateOptions({ ...spec, workdir: "/work" });
+
+    expect(opts.Image).toBe("postgres:16-alpine");
+    expect(opts.Cmd).toEqual(["pg_dump", "-Fc"]);
+    expect(opts.Env).toEqual(["PGPASSWORD=x"]);
+    expect(opts.WorkingDir).toBe("/work");
+    // Attach is how stdout is read at all, and it happens before start — turning the log driver off
+    // is only safe because of that.
+    expect(opts.AttachStdout).toBe(true);
+    expect(opts.AttachStderr).toBe(true);
+    expect(opts.HostConfig?.NetworkMode).toBe("targets");
+    expect(opts.HostConfig?.Binds).toEqual(["/scratch/a:/work"]);
+    // Removed by hand in run()'s finally, after the exit code and stderr have been read.
+    expect(opts.HostConfig?.AutoRemove).toBe(false);
+  });
+
+  it("omits WorkingDir when the descriptor does not ask for one", () => {
+    expect(executorCreateOptions(spec).WorkingDir).toBeUndefined();
+  });
+
+  it("marks a read-only mount, which is the only thing separating it from a writable bind", () => {
+    const opts = executorCreateOptions({
+      ...spec,
+      mounts: [{ source: "/scratch/a", target: "/work", readOnly: true }],
+    });
+
+    expect(opts.HostConfig?.Binds).toEqual(["/scratch/a:/work:ro"]);
+  });
+
+  it("CAPS the sandbox's log rather than discarding it — that output is the reason it failed", () => {
+    // The opposite case on purpose. A throwaway database server's log is diagnostics, bounded by
+    // its own verbosity rather than by the size of the data, and "the sandbox could not run" is the
+    // hardest failure this product has to explain. Discarding it would trade a disk problem for a
+    // blindness problem.
+    const svc: EphemeralServiceSpec = {
+      image: "postgres:16-alpine",
+      env: { POSTGRES_PASSWORD: "x" },
+      network: "targets",
+      readinessCommand: ["pg_isready"],
+      port: 5432,
+      correlationId: "c",
+      readinessTimeoutMs: 1000,
+    };
+    const log = serviceCreateOptions(svc).HostConfig?.LogConfig;
+
+    expect(log?.Type).toBe("json-file");
+    expect(log?.Config).toEqual({ "max-size": "10m", "max-file": "1" });
   });
 });

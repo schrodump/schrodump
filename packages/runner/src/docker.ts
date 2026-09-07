@@ -347,6 +347,69 @@ function drain(stream: Readable): Promise<void> {
   });
 }
 
+// An executor's stdout IS the artifact. `pg_dump -Fc`, `mongodump --archive` and the staging `tar`
+// all write the dump there, and the runner reads it by attaching BEFORE start (see start() below),
+// so nothing is lost by the daemon never keeping a copy.
+//
+// Docker's default driver does keep one. `json-file` has no size limit unless the daemon sets one,
+// so every byte of every STREAM dump was also written to
+// /var/lib/docker/containers/<id>/<id>-json.log — a second, unencrypted, uncompressed copy of a
+// backup that is already streaming to object storage, on the host's own disk, kept after the job
+// because these containers are created with AutoRemove: false.
+//
+// It took a production MongoDB to see it: a 216 GB host went to 100% full during one dump, with the
+// database it was there to protect running on the same disk. Nothing in CI could catch it — the
+// smoke's databases are a table with one row, so the log is a few kilobytes.
+//
+// There is nothing here to log. stdout is payload, and stderr arrives through the same attach and
+// is sanitized into the job's own record, which is where an operator reads it.
+// `Config` is required by dockerode's type even where the driver takes no options.
+export const EXECUTOR_LOG_CONFIG = { Type: "none", Config: {} } as const;
+
+// The sandbox is the opposite case and gets the opposite treatment. Its output is a throwaway
+// database server's own log — diagnostics, not payload, and bounded by the server's verbosity
+// rather than by the size of the data. So it is capped, not discarded: "the sandbox could not run"
+// is the hardest failure this product has to explain, and throwing away the one place the reason
+// appears would trade a disk problem for a blindness problem.
+export const SERVICE_LOG_CONFIG = {
+  Type: "json-file",
+  Config: { "max-size": "10m", "max-file": "1" },
+} as const;
+
+// Built as pure functions so the options the daemon actually receives can be asserted. The engine
+// below is not exported and the unit tests replace it wholesale with a fake, so until these existed
+// nothing could see what was passed to createContainer — which is exactly where the defect above
+// lived, invisible, for every release so far.
+export function executorCreateOptions(spec: ContainerSpec): Docker.ContainerCreateOptions {
+  return {
+    Image: spec.image,
+    Cmd: spec.command,
+    Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+    Tty: false,
+    AttachStdout: true,
+    AttachStderr: true,
+    HostConfig: {
+      NetworkMode: spec.network,
+      AutoRemove: false,
+      Binds: spec.mounts.map((m) => `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`),
+      LogConfig: { ...EXECUTOR_LOG_CONFIG },
+    },
+    ...(spec.workdir !== undefined ? { WorkingDir: spec.workdir } : {}),
+  };
+}
+
+export function serviceCreateOptions(spec: EphemeralServiceSpec): Docker.ContainerCreateOptions {
+  return {
+    Image: spec.image,
+    Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+    HostConfig: {
+      NetworkMode: spec.network,
+      AutoRemove: false,
+      LogConfig: { Type: SERVICE_LOG_CONFIG.Type, Config: { ...SERVICE_LOG_CONFIG.Config } },
+    },
+  };
+}
+
 class DockerodeEngine implements DockerEngine {
   readonly #docker: Docker;
 
@@ -380,22 +443,7 @@ class DockerodeEngine implements DockerEngine {
   }
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
-    const createOptions: Docker.ContainerCreateOptions = {
-      Image: spec.image,
-      Cmd: spec.command,
-      Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
-      Tty: false,
-      AttachStdout: true,
-      AttachStderr: true,
-      HostConfig: {
-        NetworkMode: spec.network,
-        AutoRemove: false,
-        Binds: spec.mounts.map((m) => `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`),
-      },
-      ...(spec.workdir !== undefined ? { WorkingDir: spec.workdir } : {}),
-    };
-
-    const container = await this.#docker.createContainer(createOptions);
+    const container = await this.#docker.createContainer(executorCreateOptions(spec));
     // Read-only attach: stdout/stderr only, no stdin. Feeding a container's stdin needs a hijacked
     // attach whose demux intermittently leaks attach-protocol framing into the stdout stream —
     // corrupting it. No executor needs stdin (dumps read from the DB, restores read a mounted file).
@@ -427,14 +475,7 @@ class DockerodeEngine implements DockerEngine {
   }
 
   async startService(spec: EphemeralServiceSpec): Promise<StartedService> {
-    const container = await this.#docker.createContainer({
-      Image: spec.image,
-      Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
-      HostConfig: {
-        NetworkMode: spec.network,
-        AutoRemove: false,
-      },
-    });
+    const container = await this.#docker.createContainer(serviceCreateOptions(spec));
 
     // Once createContainer succeeds the container exists and must be reaped even if start/inspect
     // throws (e.g. a start failure), otherwise it leaks — withEphemeralService only ever gets a
