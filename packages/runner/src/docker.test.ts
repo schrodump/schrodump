@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { PassThrough, Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { describe, expect, it } from "vitest";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import {
   DockerRunner,
+  demuxInto,
   executorCreateOptions,
   sanitizeStderr,
   serviceCreateOptions,
@@ -496,5 +498,90 @@ describe("container create options", () => {
 
     expect(log?.Type).toBe("json-file");
     expect(log?.Config).toEqual({ "max-size": "10m", "max-file": "1" });
+  });
+});
+
+// Measured on a production MongoDB: 46 GB read from the database, 1.4 GB uploaded to object
+// storage, and the server holding 74 GiB of a 125 GiB host. The dump was not going to disk — it
+// was queued in memory, because nothing between the socket and the uploader ever said "stop".
+describe("backpressure reaches the container", () => {
+  // dockerode's shape, and the whole problem in three lines: a flowing-mode listener, and a write
+  // whose return value is discarded. Reproduced rather than described, so the test fails for the
+  // real reason if docker-modem ever changes.
+  const modemLikeDockerode = {
+    demuxStream(source: NodeJS.ReadableStream, out: Writable) {
+      source.on("data", (chunk: Buffer) => {
+        out.write(chunk);
+      });
+    },
+  };
+
+  function offeredSource(chunks: number, size: number) {
+    const state = { produced: 0 };
+    const chunk = Buffer.alloc(size, 1);
+    let left = chunks;
+    const stream = new Readable({
+      read() {
+        if (left === 0) {
+          this.push(null);
+          return;
+        }
+        left -= 1;
+        state.produced += size;
+        this.push(chunk);
+      },
+    });
+    return { stream, state };
+  }
+
+  const CHUNK = 64 * 1024;
+  const OFFERED = 400; // ~26 MB, far past any reasonable buffer
+
+  it("stops pulling from the socket while nothing is reading stdout", async () => {
+    const src = offeredSource(OFFERED, CHUNK);
+    const stdout = new PassThrough({ highWaterMark: CHUNK });
+
+    demuxInto(modemLikeDockerode, src.stream, stdout, new PassThrough());
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(src.state.produced).toBeLessThan(OFFERED * CHUNK);
+  });
+
+  it("resumes once the consumer drains, so a slow reader is slow and not broken", async () => {
+    // The consumer has to be slow enough to actually FILL the destination, or the pause never
+    // fires and this asserts nothing — the first version of this test passed with `resume`
+    // deleted, which is the only reason it is written this way.
+    const src = offeredSource(60, CHUNK);
+    const stdout = new PassThrough({ highWaterMark: CHUNK });
+    let received = 0;
+    const slow = new Writable({
+      highWaterMark: CHUNK,
+      write(chunk: Buffer, _encoding, callback) {
+        received += chunk.length;
+        setTimeout(callback, 1);
+      },
+    });
+
+    demuxInto(modemLikeDockerode, src.stream, stdout, new PassThrough());
+    // What `attachStream.on("end")` does in start(): the socket closing is what ends stdout.
+    src.stream.on("end", () => stdout.end());
+    await pipeline(stdout, slow);
+
+    // Without the resume the chain stalls at the first full buffer and this never arrives.
+    expect(received).toBe(60 * CHUNK);
+  }, 10_000);
+
+  it("without the sink, the same modem queues everything — which is the defect", async () => {
+    // The control. Handing demuxStream the PassThrough directly is what the runner used to do, and
+    // it is what makes the two tests above mean something: the bound comes from the sink, not from
+    // the streams happening to be slow.
+    const src = offeredSource(OFFERED, CHUNK);
+    const stdout = new PassThrough({ highWaterMark: CHUNK });
+
+    modemLikeDockerode.demuxStream(src.stream, stdout);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(src.state.produced).toBe(OFFERED * CHUNK);
+    expect(stdout.writableLength).toBeGreaterThan(CHUNK);
   });
 });

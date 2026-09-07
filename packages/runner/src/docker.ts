@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { PassThrough, type Readable, type Writable } from "node:stream";
+import { PassThrough, Writable, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Docker from "dockerode";
 import { SchrodumpError } from "@schrodump/core/errors";
@@ -347,6 +347,31 @@ function drain(stream: Readable): Promise<void> {
   });
 }
 
+// Bridges demuxStream's fire-and-forget writes back onto the stream contract. `demuxStream` needs
+// somewhere to put stdout and stderr; giving it these sinks rather than the PassThroughs themselves
+// is what lets a full destination reach back to the socket. Nothing else about the demux changes —
+// the Docker multiplex framing stays dockerode's problem, which is where that expertise belongs.
+export function demuxInto(
+  modem: { demuxStream(source: NodeJS.ReadableStream, out: Writable, err: Writable): void },
+  source: { pause(): unknown; resume(): unknown } & NodeJS.ReadableStream,
+  stdout: PassThrough,
+  stderr: PassThrough,
+): void {
+  const sink = (destination: PassThrough): Writable =>
+    new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        // The callback is called either way: demuxStream ignores it, and holding it would only
+        // move the same unbounded queue into this Writable instead. The pause is what bounds it.
+        if (!destination.write(chunk)) {
+          source.pause();
+          destination.once("drain", () => source.resume());
+        }
+        callback();
+      },
+    });
+  modem.demuxStream(source, sink(stdout), sink(stderr));
+}
+
 // An executor's stdout IS the artifact. `pg_dump -Fc`, `mongodump --archive` and the staging `tar`
 // all write the dump there, and the runner reads it by attaching BEFORE start (see start() below),
 // so nothing is lost by the daemon never keeping a copy.
@@ -450,7 +475,19 @@ class DockerodeEngine implements DockerEngine {
     const attachStream = await container.attach({ stream: true, stdout: true, stderr: true });
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    container.modem.demuxStream(attachStream, stdout, stderr);
+    // demuxStream does `streama.on("data", ...)` and then `stdout.write(content)` WITHOUT reading
+    // the return value and without ever pausing its source. So the container's output arrives as
+    // fast as the socket delivers it and every byte is queued, whatever the consumer is doing.
+    //
+    // For a dump that is the whole backup. When the upload to object storage is slower than the
+    // database can be read — routinely true — the difference accumulates in this PassThrough, in
+    // memory, unbounded. Measured on a production MongoDB: 46 GB read, 1.4 GB uploaded, and the
+    // server holding 74 GiB of a 125 GiB host.
+    //
+    // The sink below is what demuxStream writes into instead. It forwards each chunk on and, when
+    // the destination says it is full, pauses the attach — which stops reading the socket, which
+    // is what finally reaches the container and makes `mongodump` wait. Resumed on drain.
+    demuxInto(container.modem, attachStream, stdout, stderr);
     attachStream.on("end", () => {
       stdout.end();
       stderr.end();
