@@ -112,8 +112,26 @@ that has already passed. Nothing there ever waits for a future one.
 So the gate proves the seam between the code and the deployment, and it cannot prove anything
 whose only failure mode is elapsed time. That is what this is for. Run the candidate on a host
 that is not CI, against a database and a bucket you own, until each of the following has happened
-on its own — the floor is set by your retention, since watching `keepDaily` roll takes
-`keepDaily + 1` days.
+on its own.
+
+**Use two policies, not one.** How long this takes is a choice, and running a single daily policy
+makes it the slowest possible choice — the first signal about anything arrives tomorrow.
+
+- A **fast** policy on an hourly cron with `keepLast: 3` reaches items 1, 2, 3 and 5 within a few
+  hours. `keepLast` is a straight `slice(0, n)` over the manifests newest-first, so it rolls by
+  count and retention genuinely deletes rather than being configured and believed.
+
+  Set `minAgeBeforeDeleteMs` **below** this policy's window, or set it to zero. It is a floor on
+  deletion and it outranks every count: nothing younger than it is removed whatever `keepLast`
+  says. Left at a day on an hourly policy, the fast track deletes nothing for a day and reads
+  exactly like retention working.
+- A **slow** policy on a daily cron with `keepDaily` covers what only the calendar can prove.
+  Those buckets are keyed on the day, so nothing compresses them: `keepDaily + 1` days is the
+  floor and there is no way around it.
+
+The fast policy is not a simulation of the slow one. Both dispatch real unattended windows through
+the same scheduler against the same wall clock; only the retention arithmetic differs. What the
+split buys is finding out on day one that something is wrong, instead of on day four.
 
 1. **A window nobody was watching.** A backup that started because the clock said so, not because
    someone pressed a button. This is the tick, the advisory lock and `@@unique([policyId,
