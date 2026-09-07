@@ -23,6 +23,22 @@ Docker execution and scratch management. Takes precedence over the root `CLAUDE.
   cancellation kills the container too.
 - **stderr** always captured, truncated and **sanitised** (database client messages leak
   host/user/password).
+- **Executors are created with no log driver** (`LogConfig: {Type: "none"}`), and that is not a
+  tidiness preference. An executor's stdout **is the artifact** — `pg_dump -Fc`, `mongodump
+  --archive`, the staging `tar` — and Docker's default `json-file` driver has no size limit unless
+  the daemon sets one, so every byte already streaming to object storage was ALSO written to
+  `/var/lib/docker/containers/<id>/<id>-json.log`, and kept, because these containers deliberately
+  use `AutoRemove: false`. A production MongoDB dump took a 216 GB host to 100% full, with the
+  database it was protecting on the same disk. Nothing lost: `run()` attaches BEFORE `start()`, and
+  stderr comes through that same attach. The **sandbox** (`startService`) is the opposite case and
+  gets the opposite treatment — its output is diagnostics, bounded by the server's verbosity, so it
+  is *capped* (`10m`, one file) rather than discarded. "The sandbox could not run" is the hardest
+  failure this product has to explain; discarding its log would trade a disk problem for a
+  blindness problem.
+- **The create options are pure functions** (`executorCreateOptions`, `serviceCreateOptions`)
+  because `DockerodeEngine` is not exported and every unit test replaces it with a fake — so what
+  `createContainer` actually receives was unobservable, which is precisely where the defect above
+  lived undetected through every release.
 
 ## Executor images are pulled here, because nothing else pulls them
 
