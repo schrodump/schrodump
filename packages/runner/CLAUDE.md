@@ -93,6 +93,18 @@ accidental surface. It is **not** containment — `CONTAINERS` plus `POST` accep
 `Binds` and `Privileged`, which is root on the host, and that is what running dumps in containers
 requires. See `docs/security.md`.
 
+The allow-list is not the only thing about that proxy this package depends on. The image caps idle
+connections at ten minutes (`timeout client 10m` / `timeout server 10m`, baked in, not settable by
+env), and `run()` holds two connections idle for the whole job: the attach carrying a dump that
+sends nothing between chunks, and the `container.wait()` long-poll that is silent until the
+container exits. A `pg_restore` verify writes to the database, not stdout, so both channels are
+quiet far past ten minutes — and the proxy severed them, leaving `wait()` blocked forever (bounded
+only by `DUMP_TIMEOUT_MS`, 3h) with the executor orphaned. This package assumes the socket stays
+open for as long as the run's own timeout, so `compose.yaml`'s `docker-proxy` entrypoint disables
+both idle timeouts; the runner keeps the real ceiling (`opts.timeoutMs` → `RUNNER_TIMEOUT`, which
+kills the container and thereby ends the attach and settles wait). `socket-proxy.integration.test.ts`
+reproduces the cut against a short timeout and asserts the shipped config disables it.
+
 ## Scratch (`scratch.ts`)
 
 > Scratch holds the **dump in clear**. In `directory` mode the writer is `pg_dump`/`mydumper`

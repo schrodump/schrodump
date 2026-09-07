@@ -71,6 +71,28 @@ boundary must not change without someone deciding that it should.
 `/var/run/docker.sock` directly into Schrodump means a remote-code-execution bug in Schrodump is
 a host takeover, not a service compromise.
 
+### The proxy carries the job, so it must not time the job
+
+The image ships an HAProxy config with `timeout client 10m` and `timeout server 10m`, and neither
+is configurable through the container's environment (upstream issue #148). Ten minutes is fatal to
+a real backup. A dump reaches Schrodump over a single attach stream and its exit code over a
+`container.wait()` long-poll — and both go **silent** for the length of the job: a `pg_dump`/
+`mongodump` that streams steadily still sends nothing on the wait channel until it exits, and a
+`pg_restore` verify writes to the database, not to stdout, for its entire run. So on any job longer
+than ten minutes the proxy severed the idle connection (an `sD` server-timeout in the proxy log, at
+exactly 600s), the runner blocked on a `wait()` that never settled, and the job hung until the 3h
+`DUMP_TIMEOUT_MS` ceiling with its executor container left orphaned. A 655 MB verify hung this way
+on the first production deployment.
+
+`compose.yaml` disables both idle timeouts on the proxy — patched into the in-image template by the
+`docker-proxy` entrypoint, before the stock entrypoint reads it, so no host file has to be mounted.
+This does not weaken the boundary: the timeout is a generic anti-slowloris default for an
+internet-facing balancer, and this proxy sees exactly one client (Schrodump) on an internal
+network. The **real** ceiling is owned where it belongs — in the runner, whose `DUMP_TIMEOUT_MS`
+kills the executor on expiry, which ends the attach and settles the wait. `socket-proxy.integration.test.ts`
+reproduces the cut against a short timeout and proves that disabling it is what lets a long job's
+wait return.
+
 ## Scratch holds your data in clear
 
 `STAGED` backups write the dump to the scratch directory first, then compress, then encrypt, then upload.

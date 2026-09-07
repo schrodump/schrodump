@@ -130,3 +130,132 @@ describe.skipIf(!enabled)("the deployment's socket proxy permits what the runner
     }
   }, 300_000);
 });
+
+// The allow-list is not the only thing about this proxy the runner depends on and CI could not see.
+// The image bakes `timeout client 10m` / `timeout server 10m` into its HAProxy config, and both are
+// fatal to a long job: a dump's `container.wait()` is a long-poll that stays silent until the
+// container exits, and a `pg_restore` verify writes nothing to stdout while it restores — so an idle
+// connection past ten minutes is severed, `run()` blocks on a wait() that never settles, and the
+// job hangs until the 3h DUMP_TIMEOUT_MS ceiling with its executor orphaned. A 655 MB verify hung
+// exactly this way in production. compose.yaml disables both timeouts (the runner owns the real
+// ceiling); this proves the cut is real and that disabling it is what prevents the hang.
+describe.skipIf(!enabled)("the socket proxy must not time out a long-running job", () => {
+  const TINY_NAME = "schrodump-socket-proxy-tiny";
+  const NOLIMIT_NAME = "schrodump-socket-proxy-nolimit";
+  const TINY_PORT = 12398;
+  const NOLIMIT_PORT = 12397;
+
+  beforeAll(() => {
+    // Pull the sleeper image to the host up front, so createContainer (which does not pull) finds it
+    // locally — never streaming a pull through the short-timeout proxy under test, which would be a
+    // flaky dependence on that pull finishing inside two seconds.
+    execFileSync("docker", ["pull", "alpine:latest"], { stdio: "ignore" });
+  }, 300_000);
+
+  afterAll(() => {
+    for (const name of [TINY_NAME, NOLIMIT_NAME, `${TINY_NAME}-sub`, `${NOLIMIT_NAME}-sub`]) {
+      execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    }
+  });
+
+  // Mirrors compose.yaml's docker-proxy entrypoint: patch the idle timeouts in the in-image template
+  // before the stock entrypoint generates /tmp/haproxy.cfg from it. `value` is the HAProxy duration
+  // to write — `0` disables (what the shipped stack does); `2s` reproduces the incident's idle cut
+  // in seconds instead of ten minutes.
+  function startProxy(name: string, port: number, timeout: string): Docker {
+    const env = proxyEnvFromCompose();
+    execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    execFileSync("docker", [
+      "run",
+      "-d",
+      "--name",
+      name,
+      ...Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]),
+      "--entrypoint",
+      "/bin/sh",
+      "-p",
+      `${String(port)}:2375`,
+      "-v",
+      "/var/run/docker.sock:/var/run/docker.sock:ro",
+      PROXY_IMAGE,
+      "-ec",
+      `sed -i 's/timeout client 10m/timeout client ${timeout}/; s/timeout server 10m/timeout server ${timeout}/' /usr/local/etc/haproxy/haproxy.cfg.template\n` +
+        "exec /usr/local/bin/docker-entrypoint.sh haproxy -f /tmp/haproxy.cfg",
+    ]);
+    return new Docker({ host: "127.0.0.1", port });
+  }
+
+  async function waitForPing(docker: Docker): Promise<void> {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      try {
+        await docker.ping();
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  }
+
+  // Races container.wait() against a wall-clock budget. "resolved:<code>" only if wait returned the
+  // real exit before the budget; "rejected" if the cut surfaced as an error; "pending" if it never
+  // settled (the production hang). An idle wait that was severed can never be "resolved:0".
+  async function idleWaitOutcome(
+    container: Docker.Container,
+    budgetMs: number,
+  ): Promise<string> {
+    return Promise.race([
+      container
+        .wait()
+        .then((r: { StatusCode: number }) => `resolved:${String(r.StatusCode)}`)
+        .catch(() => "rejected"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), budgetMs)),
+    ]);
+  }
+
+  async function idleWaitThroughProxy(
+    docker: Docker,
+    subName: string,
+    budgetMs: number,
+  ): Promise<string> {
+    await waitForPing(docker);
+    // Sleeps with no stdout: the attach and the wait long-poll are both idle for six seconds, which
+    // is what a real dump/restore does for far longer.
+    const container = await docker.createContainer({
+      Image: "alpine:latest",
+      Cmd: ["sleep", "6"],
+      name: subName,
+    });
+    try {
+      await container.start();
+      return await idleWaitOutcome(container, budgetMs);
+    } finally {
+      await container.remove({ force: true }).catch(() => undefined);
+    }
+  }
+
+  it("severs an idle wait at the idle timeout — the production hang, reproduced in seconds", async () => {
+    const tiny = startProxy(TINY_NAME, TINY_PORT, "2s");
+    // The container exits at 6s; a healthy wait resolves just after. With a 2s idle timeout the wait
+    // long-poll is cut at 2s and never returns the real exit, so by 8s it has NOT resolved with 0.
+    const outcome = await idleWaitThroughProxy(tiny, `${TINY_NAME}-sub`, 8000);
+    expect(outcome).not.toBe("resolved:0");
+  }, 300_000);
+
+  it("returns the real exit code once the idle timeout is disabled — the fix", async () => {
+    const nolimit = startProxy(NOLIMIT_NAME, NOLIMIT_PORT, "0");
+    // Same idle six-second job; with the timeout disabled the wait survives past the point the cut
+    // would have happened and returns exit 0.
+    const outcome = await idleWaitThroughProxy(nolimit, `${NOLIMIT_NAME}-sub`, 14000);
+    expect(outcome).toBe("resolved:0");
+  }, 300_000);
+
+  it("compose.yaml disables both idle timeouts, so the shipped stack cannot regress", () => {
+    const composePath = fileURLToPath(new URL("../../../compose.yaml", import.meta.url));
+    const compose = readFileSync(composePath, "utf8");
+    const afterProxy = compose.split(/^ {2}docker-proxy:$/m)[1] ?? "";
+    // Bound to the docker-proxy service: cut at the next top-level section so a stray match elsewhere
+    // cannot make this pass for the wrong reason.
+    const service = afterProxy.split(/^\S/m)[0] ?? afterProxy;
+    expect(service).toMatch(/sed -i .*timeout client 0.*timeout server 0/);
+  });
+});
