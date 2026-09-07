@@ -3,8 +3,8 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { ProbeFailureCode } from "@/lib/domain";
-import type { CreatedMember, Member, NotificationChannel } from "@/lib/types";
+import type { EngineKind } from "@/lib/domain";
+import type { CreatedMember, DiscoverResult, Member, NotificationChannel } from "@/lib/types";
 
 export function useCreateTarget() {
   const client = useQueryClient();
@@ -36,13 +36,22 @@ export function useDeleteTarget() {
 
 export function useTestConnection() {
   return useMutation({
-    mutationFn: (targetId: string) =>
-      api.post<{
-        ok: boolean;
-        serverVersionNum: number | null;
-        failure: ProbeFailureCode | null;
-        driverCode: string | null;
-      }>(`/targets/${targetId}/test-connection`),
+    mutationFn: (targetId: string) => api.post<DiscoverResult>(`/targets/${targetId}/test-connection`),
+  });
+}
+
+// Opens a connection with credentials that have not been saved and lists what the server holds, so
+// the target's scope is chosen from what exists. Nothing is persisted by this call.
+export function useDiscoverDatabases() {
+  return useMutation({
+    mutationFn: (body: {
+      engine: EngineKind;
+      host: string;
+      port: number;
+      username: string;
+      password: string;
+      tls: boolean;
+    }) => api.post<DiscoverResult>("/targets/discover", body),
   });
 }
 

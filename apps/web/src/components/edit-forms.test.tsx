@@ -25,7 +25,10 @@ const TARGET: Target = {
   port: 5432,
   username: "backup",
   tls: true,
-  scope: { databases: ["app", "shop"], schemas: [], collections: [] },
+  // One database, because that is the only postgres scope that backs up what it names: pg_dump
+  // copies exactly one, and this fixture used to carry two — the shape that silently backed up the
+  // first and dropped the second, and that the form and the API now refuse.
+  scope: { databases: ["app"], schemas: [], collections: [] },
   createdAt: "2026-01-01T00:00:00.000Z",
   lastProbeAt: null,
   lastProbeOk: null,
@@ -109,7 +112,8 @@ describe("TargetForm in edit mode", () => {
     captureFetch();
     renderWith(<TargetForm onDone={() => undefined} target={TARGET} />);
     expect(screen.getByLabelText("Host")).toHaveValue("db.internal");
-    expect(screen.getByLabelText(/Databases to back up/)).toHaveValue("app, shop");
+    // The scope is a selection, not a text field: with no discovery run, the saved one is shown.
+    expect(screen.getByText(/Currently: app/)).toBeInTheDocument();
   });
 
   it("locks the engine — every artifact records the engine it was taken with", () => {

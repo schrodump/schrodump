@@ -90,6 +90,22 @@ export const PROBE_FAILURE_CODES = [
 ] as const;
 export type ProbeFailureCode = (typeof PROBE_FAILURE_CODES)[number];
 
+// What a scope has to look like for the dump tool to copy what the operator meant. The server holds
+// the authoritative copy (routes/targets.ts, scopeProblem) and refuses at the border; this mirror
+// lets the form disable Save before a request is ever made. Postgres: pg_dump copies exactly one
+// database per run, and an unscoped target would copy `postgres` — the maintenance database, which
+// on a real deployment produced an 876-byte backup of nothing under a SUCCEEDED job. MongoDB: one
+// database, or none for the whole instance, which is also what a replica set requires.
+export type ScopeProblem = "postgres" | "mongodb";
+export function scopeProblemCode(
+  engine: EngineKind,
+  databases: readonly string[],
+): ScopeProblem | null {
+  if (engine === "postgres" && databases.length !== 1) return "postgres";
+  if (engine === "mongodb" && databases.length > 1) return "mongodb";
+  return null;
+}
+
 const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 
 export function canRestore(role: Role): boolean {

@@ -59,7 +59,14 @@ describe("testTargetConnection", () => {
 
   it("reports the server version, which decides the executor image", async () => {
     const outcome = await testTargetConnection(target(), table(async () => result(160_004)));
-    expect(outcome).toEqual({ ok: true, serverVersionNum: 160_004, failure: null, driverCode: null });
+    expect(outcome).toEqual({
+      ok: true,
+      serverVersionNum: 160_004,
+      failure: null,
+      driverCode: null,
+      databases: [],
+      isReplicaSet: undefined,
+    });
   });
 
   it("hands the decrypted password to the probe and nothing else", async () => {
@@ -124,6 +131,8 @@ describe("testTargetConnection", () => {
       serverVersionNum: null,
       failure: "UNREACHABLE",
       driverCode: "ERROR/ECONNREFUSED",
+      databases: [],
+      isReplicaSet: null,
     });
   });
 });
@@ -176,5 +185,47 @@ describe("classify", () => {
     expect(classify(new Error("something went sideways"))).toBe("UNKNOWN");
     expect(classify(null)).toBe("UNKNOWN");
     expect(classify("boom")).toBe("UNKNOWN");
+  });
+});
+
+// The probe always measured this and the worker always used it; the operator never saw it. On a
+// real deployment the 9.4 GB database an unscoped target left behind was in this list, dropped on
+// the line below — which is why it is now returned, and why the form can choose from it.
+describe("testTargetConnection reports what the server holds", () => {
+  const rich: ProbeResult = {
+    serverVersionNum: 170_011,
+    databases: [
+      { name: "ipog_finance", sizeBytes: 9_896_000_000 },
+      { name: "postgres", sizeBytes: 7_690_000 },
+    ],
+    scope: { databases: ["ipog_finance", "postgres"], schemas: [], collections: [] },
+    facts: { isReplicaSet: false, hasMyisam: false },
+  };
+
+  it("returns every database by name and size on success", async () => {
+    const outcome = await testTargetConnection(target(), table(async () => rich));
+
+    expect(outcome.databases).toEqual(rich.databases);
+  });
+
+  it("returns whether the server is a replica set, which decides a mongo scope outright", async () => {
+    const replicaSet = { ...rich, facts: { isReplicaSet: true, hasMyisam: false } };
+
+    const outcome = await testTargetConnection(target({ engine: "mongodb" }), table(async () => replicaSet));
+
+    expect(outcome.isReplicaSet).toBe(true);
+  });
+
+  it("returns an empty list and an unknown topology on failure, never a stale one", async () => {
+    const outcome = await testTargetConnection(
+      target(),
+      table(async () => {
+        throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+      }),
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.databases).toEqual([]);
+    expect(outcome.isReplicaSet).toBeNull();
   });
 });

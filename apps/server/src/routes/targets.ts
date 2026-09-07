@@ -8,6 +8,7 @@ import { authenticate, contextOf, requireRole, type SessionResolver } from "../a
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
+import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
 const ScopeSchema = z.object({
@@ -53,6 +54,41 @@ const UpdateTargetSchema = z
   .strict();
 
 type EngineName = z.infer<typeof EngineSchema>;
+
+// The connection alone — everything a probe needs and nothing that would be stored. Used by
+// /targets/discover so an operator can see what a server holds BEFORE a target exists.
+const DiscoverSchema = z.object({
+  engine: EngineSchema,
+  host: z.string().min(1),
+  port: z.number().int(),
+  username: z.string().min(1),
+  password: z.string().min(1),
+  tls: z.boolean().default(true),
+});
+
+// What a scope has to look like for the dump tool to copy what the operator meant. Enforced at
+// the border, and again at dump time by buildDumpDescriptorFor (jobs/worker-wiring.ts): the two
+// locks are deliberate, because the second one was the only one for long enough to ship a backup
+// of the wrong database. A postgres target with no database dumped `postgres` — the maintenance
+// database — while a 9.4 GB one sat untouched beside it, under a SUCCEEDED job. Refusing here
+// means that target cannot be created at all, which is where the mistake is cheapest.
+//
+// The message is the error body, verbatim, because it is written for the person who has to fix it.
+export function scopeProblem(engine: EngineName, scope: { databases: string[] }): string | null {
+  const count = scope.databases.length;
+  if (engine === "postgres" && count !== 1) {
+    return count === 0
+      ? "a postgres target must name exactly one database: pg_dump copies one per run, and " +
+          "without a name it would copy `postgres`, the maintenance database"
+      : "a postgres target must name exactly one database: pg_dump copies one per run, so " +
+          `${count} names would back up only the first — create one target per database`;
+  }
+  if (engine === "mongodb" && count > 1) {
+    return "a mongodb target names at most one database, or none for the whole instance (which " +
+      "is also what a replica set requires)";
+  }
+  return null;
+}
 
 // Derived from the schema rather than from CreateTargetData: Zod's `.partial()` produces
 // `k?: T | undefined`, and under exactOptionalPropertyTypes that is a different type from `k?: T`.
@@ -147,6 +183,9 @@ export interface TargetRoutesDeps {
   resolver: SessionResolver;
   kek: Buffer;
   store(organizationId: string): TargetStore;
+  // Opens a real connection with the given credentials and reports what is there. Injected so the
+  // route is testable without a database, exactly as the store is.
+  probe(target: ProbeTarget): Promise<TestConnectionResult>;
 }
 
 export function targetRoutes(deps: TargetRoutesDeps) {
@@ -157,6 +196,8 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       async (request, reply) => {
         const parsed = CreateTargetSchema.safeParse(request.body);
         if (!parsed.success) return reply.status(400).send({ error: "invalid target" });
+        const problem = scopeProblem(parsed.data.engine, parsed.data.scope);
+        if (problem !== null) return reply.status(400).send({ error: problem });
         const created = await deps.store(contextOf(request).organizationId).create({
           name: parsed.data.name,
           engine: parsed.data.engine,
@@ -168,6 +209,22 @@ export function targetRoutes(deps: TargetRoutesDeps) {
           encryptedCredential: encryptCredential(deps.kek, parsed.data.password),
         });
         return reply.status(201).send(toPublicTarget(created));
+      },
+    );
+
+    // Lists what a server holds before any target exists, so the scope can be chosen from what is
+    // actually there rather than typed. Nothing is persisted: the password in the body is used for
+    // this one connection and discarded, the same posture as the password on create. The
+    // connection is opened exactly as the backup's own probe would open it — unscoped, through the
+    // engine's maintenance database — so "discovery works" also means "the backup can probe".
+    app.post(
+      "/targets/discover",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const parsed = DiscoverSchema.safeParse(request.body);
+        if (!parsed.success) return reply.status(400).send({ error: "invalid connection" });
+        const result = await deps.probe({ ...parsed.data, databases: [] });
+        return reply.send(result);
       },
     );
 
@@ -208,7 +265,17 @@ export function targetRoutes(deps: TargetRoutesDeps) {
           return reply.status(400).send({ error: "no fields to update" });
         }
 
-        const updated = await deps.store(contextOf(request).organizationId).update(params.data.id, {
+        const store = deps.store(contextOf(request).organizationId);
+        // The engine is not in a patch — it cannot be changed — so the rule reads it off the row.
+        // One extra query, only when the scope itself is what is being changed.
+        if (rest.scope !== undefined) {
+          const current = await store.get(params.data.id);
+          if (current === null) return reply.status(404).send({ error: "not found" });
+          const problem = scopeProblem(current.engine as EngineName, rest.scope);
+          if (problem !== null) return reply.status(400).send({ error: problem });
+        }
+
+        const updated = await store.update(params.data.id, {
           ...rest,
           ...(password !== undefined
             ? { encryptedCredential: encryptCredential(deps.kek, password) }

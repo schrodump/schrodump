@@ -113,6 +113,21 @@ WHATWG `URL`. On success the field is cleared (do not keep the password in two p
 on error no field is touched. It refuses `mongodb+srv` and multi-host URIs with a reason instead of
 guessing.
 
+## Target scope is chosen, never typed (`components/target-form.tsx`)
+
+The scope field used to be free text with the hint "empty means all". For postgres that was false —
+empty meant `postgres`, the maintenance database — and on a real deployment it produced an 876-byte
+backup of nothing under a SUCCEEDED job. The form now runs `POST /targets/discover` with the typed
+credentials (nothing is saved by that call) and offers the scope as a selection over what the server
+was found to hold, with sizes: one radio for postgres, checkboxes for mysql/mariadb (none selected
+means all), and for mongodb a whole-instance lock when `isReplicaSet` comes back true. Save is
+disabled by `scopeProblemCode` (`lib/domain.ts`) for exactly the cases the API refuses with
+`scopeProblem` — the API is the control, this is so the refusal happens before the request. Nothing
+is pre-selected, even with one obvious candidate: a default is what this replaces. In edit mode the
+password is write-only and starts empty, so re-discovering means typing it; without it the saved
+selection stands. A name carried in from a pasted URL that the server does not hold is dropped on
+discovery rather than saved.
+
 ## SPDX
 
 ```

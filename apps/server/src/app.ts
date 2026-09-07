@@ -22,6 +22,7 @@ import { selfBackupRoutes } from "./routes/self-backups.js";
 import { sessionRoutes } from "./routes/session.js";
 import { setupRoutes, type SetupDeps } from "./routes/setup.js";
 import { targetRoutes, type TargetStore } from "./routes/targets.js";
+import { testTargetConnection } from "./probe/test-connection.js";
 
 export interface AppDeps {
   logger: FastifyBaseLogger;
@@ -93,7 +94,12 @@ export function buildApp(deps: AppDeps) {
     return Promise.resolve();
   });
   app.register((instance) => {
-    targetRoutes({ resolver: deps.resolver, kek: deps.kek, store: deps.targetStore })(instance);
+    targetRoutes({
+      resolver: deps.resolver,
+      kek: deps.kek,
+      store: deps.targetStore,
+      probe: testTargetConnection,
+    })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {
