@@ -15,7 +15,13 @@ import type { EngineKind } from "@schrodump/core/types";
 import type { Manifest } from "@schrodump/core/manifest";
 import { retentionIsConfigured, type RetentionPolicy } from "@schrodump/core/retention";
 import { resolveAdapter } from "@schrodump/engines/registry";
-import type { DumpScope, TargetConnection, TargetFacts } from "@schrodump/engines/descriptor";
+import {
+  EngineDescriptorError,
+  type DumpScope,
+  type EngineAdapter,
+  type TargetConnection,
+  type TargetFacts,
+} from "@schrodump/engines/descriptor";
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
@@ -33,7 +39,7 @@ import {
 import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
 import { writeMongoConfig } from "../crypto/mongo-config.js";
 import type { Env } from "../env.js";
-import { createBackupPorts } from "./backup-wiring.js";
+import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
 import { runBackupJob, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
@@ -247,6 +253,84 @@ export function resolveVerifyPlan(
   return { effectiveLevel: requested, downgradeReason: null };
 }
 
+// The databases an UNSCOPED postgres target would be silently leaving behind. Empty means the dump
+// is unambiguous and may proceed; anything else is the list to put in front of the operator.
+//
+// pg_dump copies exactly one database per run — the one the connection is open to — and for an
+// unscoped target that connection is opened to `postgres`, the maintenance database. When that is
+// the only database on the server it is also where the data lives, and dumping it is right. When
+// the server holds others, it is a guess, and the wrong one: on a real deployment it turned a
+// 9.4 GB `ipog_finance` into an 876-byte artifact under a SUCCEEDED job — sized by the probe's
+// server-wide estimate, so the row even read "9.4 GB". Only a FULL_RESTORE verify caught it; a
+// CHECKSUM verify, the default, would have made it VERIFIED.
+//
+// Postgres only, on purpose. mysqldump receives `--databases <everything the probe found>` when
+// unscoped and so copies all of it; mongodump is refused/widened by its own adapter. pg_dump is
+// the one tool here that cannot be told "all of them" in the format we restore from.
+//
+// An explicit scope is never second-guessed, including an explicit `postgres`: naming it is a
+// decision, and this function only exists to stop a default from masquerading as one.
+export function postgresUnscopedAlternatives(
+  engine: EngineKind,
+  scopedDatabases: string[],
+  connectDatabase: string,
+  discoveredDatabases: string[],
+): string[] {
+  if (engine !== "postgres") return [];
+  const first = scopedDatabases[0];
+  if (first !== undefined && first.length > 0) return [];
+  return discoveredDatabases.filter((name) => name !== connectDatabase);
+}
+
+export interface DumpDescriptorInputs {
+  adapter: Pick<EngineAdapter, "buildDump">;
+  engine: EngineKind;
+  connection: TargetConnection;
+  scopedDatabases: string[];
+  facts: TargetFacts;
+  stagingPathFor: () => string | undefined;
+}
+
+// Builds the port createBackupPorts calls for the dump descriptor. A named function rather than a
+// closure inside createJobExecutor so that the refusal below is something a test can reach: the
+// executor is only ever constructed with a real runner and real probes, and a guard that lives
+// where no test can call it is a guard whose absence no test can notice.
+//
+// It throws an EngineDescriptorError, like the adapters do, because that is the class whose message
+// the pipeline writes verbatim into BackupJob.reason (backup.ts); a plain Error is sanitized down to
+// "job failed: Error" by the worker, which would leave the operator exactly as uninformed as the
+// silent default did.
+export function buildDumpDescriptorFor(
+  inputs: DumpDescriptorInputs,
+): BackupWiringDeps["buildDumpDescriptor"] {
+  return (mode, parallelism, probe) => {
+    const alternatives = postgresUnscopedAlternatives(
+      inputs.engine,
+      inputs.scopedDatabases,
+      inputs.connection.database,
+      probe.scope.databases,
+    );
+    if (alternatives.length > 0) {
+      throw new EngineDescriptorError(
+        "POSTGRES_SCOPE_REQUIRED",
+        `this target names no database, so pg_dump would copy \`${inputs.connection.database}\` — ` +
+          `the maintenance database — while the server also holds: ${alternatives.join(", ")}. ` +
+          "pg_dump copies exactly one database per run. Name the one to back up in the target's scope.",
+      );
+    }
+    const stagingPath = mode === "STAGED" ? inputs.stagingPathFor() : undefined;
+    return inputs.adapter.buildDump({
+      connection: inputs.connection,
+      serverVersionNum: probe.serverVersionNum,
+      executionMode: mode,
+      parallelism,
+      scope: dumpScopeFor(inputs.engine, probe.scope, inputs.scopedDatabases),
+      facts: inputs.facts,
+      ...(stagingPath !== undefined ? { stagingPath } : {}),
+    });
+  };
+}
+
 // The database the probe/dump connects THROUGH. For SQL engines it is a real database (the first
 // scoped one, else the engine default); for MongoDB `database` is the auth source, always admin.
 function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
@@ -282,7 +366,9 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
 // because that combination cannot produce a consistent snapshot.
 //
 // SQL engines keep reading the probe: their scope is discovery, not intent, and narrowing them from
-// the target row is a separate decision with its own consequences.
+// the target row is a separate decision with its own consequences. What the target row DOES decide
+// for postgres is refusal — see postgresUnscopedAlternatives: when the operator named no database
+// and the server holds more than the one pg_dump would default to, the dump does not run.
 export function dumpScopeFor(
   engine: EngineKind,
   probeScope: DumpScope,
@@ -558,18 +644,14 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         });
         return resolveRecipients(keys.map(toKeyRecord));
       },
-      buildDumpDescriptor: (mode, parallelism, probe) => {
-        const stagingPath = mode === "STAGED" ? stagingPathFor() : undefined;
-        return adapter.buildDump({
-          connection,
-          serverVersionNum: probe.serverVersionNum,
-          executionMode: mode,
-          parallelism,
-          scope: dumpScopeFor(engine, probe.scope, scopedDatabases),
-          facts,
-          ...(stagingPath !== undefined ? { stagingPath } : {}),
-        });
-      },
+      buildDumpDescriptor: buildDumpDescriptorFor({
+        adapter,
+        engine,
+        connection,
+        scopedDatabases,
+        facts,
+        stagingPathFor,
+      }),
       buildGlobalsDescriptor: (probe) =>
         adapter.buildGlobalsDump === undefined
           ? null

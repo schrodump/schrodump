@@ -29,13 +29,17 @@ const DESCRIPTOR: ExecutionDescriptor = {
 
 // Mimics the real DockerRunner: pipes container stdout to opts.stdout and ends it, then reports the
 // container's StatusCode as exitCode.
+// Shared with the size assertion below, so the number the test expects and the bytes the fixture
+// writes cannot drift apart.
+const FIXTURE_PAYLOAD = "-- pg_dump fixture payload\n";
+
 function fakeRunner(exitCode: number): Runner {
   return {
     run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
       // Writes real bytes before ending. It used to only end the stream, which modelled a dump that
       // produced NOTHING as a success — the very shape that shipped an empty artifact under a
       // SUCCEEDED job. A fixture that cannot tell those apart cannot catch them.
-      opts.stdout?.write(Buffer.from("-- pg_dump fixture payload\n"));
+      opts.stdout?.write(Buffer.from(FIXTURE_PAYLOAD));
       opts.stdout?.end();
       return Promise.resolve({ exitCode, stderr: "", durationMs: 1 });
     },
@@ -234,6 +238,23 @@ describe("createBackupPorts.executeAndUpload", () => {
         recipients: { recipients: [recipient], keyIds: ["k"] },
       }),
     ).rejects.toThrow();
+  });
+
+  it("records the bytes the dump actually produced as sizeRawBytes, not the probe's server-wide estimate", async () => {
+    // The estimate is the probe's sum over EVERY database on the server. Stored on the artifact it
+    // said "9.4 GB" over an 876-byte envelope that held no tables — the one number an operator uses
+    // to judge whether a backup is plausible, describing a different thing entirely.
+    const { deps, recipient } = await makeDeps(0);
+
+    const result = await createBackupPorts(deps).executeAndUpload({
+      mode: "STREAM",
+      parallelism: 1,
+      probe: PROBE,
+      recipients: { recipients: [recipient], keyIds: ["k"] },
+    });
+
+    expect(result.sizeRawBytes).toBe(Buffer.byteLength(FIXTURE_PAYLOAD));
+    expect(result.sizeRawBytes).not.toBe(PROBE.estimatedBytes);
   });
 
   it("rejects when the dump exits non-zero (no VERIFIED artifact can result)", async () => {
