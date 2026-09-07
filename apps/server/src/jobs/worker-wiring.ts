@@ -71,6 +71,15 @@ const DUMP_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 // under DUMP_TIMEOUT_MS), with teardown in withEphemeralService's finally.
 const SANDBOX_READY_TIMEOUT_MS = 60_000;
 
+// The text `scripts/smoke-compose.sh` greps container logs for when a step gives up. A verify that
+// could not run is the one failure whose cause exists only in the log, and by then it has scrolled
+// out of the forty-line tail the script prints — so the script goes looking for it by name. One
+// named constant rather than two literals, and worker-wiring.test.ts asserts the script is still
+// looking for this exact text: reworded on one side only, the grep matches nothing and the cause is
+// silently gone again.
+export const VERIFY_INCONCLUSIVE_LOG =
+  "verify inconclusive — the artifact is unchanged and nothing was claimed about it";
+
 const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
 
 // Restore writes the decrypted CLEARTEXT dump to disk; it MUST land on the configured scratch volume
@@ -767,6 +776,31 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         // way this port returns; it never rethrows to runVerifyJob (which would mark the artifact
         // FAILED on our own infra failure). The pre-flight guards below `return "INCONCLUSIVE"` for the
         // gracefully-degradable cases before any container is even started.
+        //
+        // Those guards return rather than throw, so none of them reaches the catch below — and the
+        // catch is where the cause was being written down. Four distinct conditions therefore left
+        // an operator with one sentence, "the sandbox could not run", and no way to tell them
+        // apart: exactly the gap the catch's own comment argues against, applied to one path and
+        // not to the other four. `guard` names which fired.
+        //
+        // Deliberately the SAME message as the catch, so anything already reading these logs back
+        // — scripts/smoke-compose.sh does — sees all five paths rather than the one. And
+        // deliberately no error object: these are state checks, not throws, so there is nothing
+        // here that could carry a connection string the way a driver message would.
+        const inconclusive = (guard: string): VerifyProof => {
+          deps.log.warn(
+            {
+              jobId: job.id,
+              artifactId: artifact.id,
+              engine,
+              executionMode: artifact.executionMode,
+              guard,
+            },
+            VERIFY_INCONCLUSIVE_LOG,
+          );
+          return "INCONCLUSIVE";
+        };
+
         try {
           const sandboxPassword = randomUUID();
           // The origin db the artifact restores INTO, resolved from the producing target's scope the
@@ -787,7 +821,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             sandboxPassword,
             originDatabase,
           );
-          if (sandbox === undefined) return "INCONCLUSIVE";
+          if (sandbox === undefined) return inconclusive("engine has no verify sandbox");
 
           // Per-engine split: which db the sandbox connection authenticates against vs. which db the
           // assertion inspects. Coincide for postgres/mysql; diverge for mongo (auth against admin,
@@ -797,7 +831,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           // The decrypted CLEARTEXT dump MUST stage on the scratch volume (exactly as restore
           // requires); no scratch configured → cannot run the test → INCONCLUSIVE. (scratchManager
           // re-binds the const so the nested reserveStaging closure sees it narrowed to non-null.)
-          if (scratch === null) return "INCONCLUSIVE";
+          if (scratch === null) return inconclusive("no scratch directory configured");
           const scratchManager = scratch;
 
           // Materialize the operational age identity IN MEMORY (KEK-decrypted, never on disk), exactly
@@ -809,11 +843,13 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             where: { organizationId: job.organizationId },
           });
           const keyId = resolveDecryptionKeyId(artifact.keyIds, keys.map(toKeyRecord));
-          if (keyId === null) return "INCONCLUSIVE";
+          if (keyId === null) return inconclusive("no decryption key resolves for this artifact");
           const keyRow = await prisma.encryptionKey.findFirst({
             where: { organizationId: job.organizationId, keyId },
           });
-          if (keyRow === null || keyRow.encryptedIdentity === null) return "INCONCLUSIVE";
+          if (keyRow === null || keyRow.encryptedIdentity === null) {
+            return inconclusive("the resolved key row carries no stored identity");
+          }
           const ageIdentity = readCredential(deps, keyRow.encryptedIdentity, {
             organizationId: job.organizationId,
             resource: "encryptionKey",
@@ -971,7 +1007,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 // redacted stderr, never from raw driver prose.
                 detail: err instanceof SchrodumpError ? err.message : null,
               },
-              "verify inconclusive — the artifact is unchanged and nothing was claimed about it",
+              VERIFY_INCONCLUSIVE_LOG,
             );
           }
           return proof;

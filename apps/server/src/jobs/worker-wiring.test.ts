@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
@@ -16,6 +17,7 @@ import {
   toRetentionPolicy,
   dumpScopeFor,
   verifyEngineWiring,
+  VERIFY_INCONCLUSIVE_LOG,
 } from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
 
@@ -447,5 +449,22 @@ describe("dumpScopeFor", () => {
       expect(dumpScopeFor(engine, probeFound, [])).toBe(probeFound);
       expect(dumpScopeFor(engine, probeFound, ["ignored"])).toBe(probeFound);
     }
+  });
+});
+
+describe("VERIFY_INCONCLUSIVE_LOG", () => {
+  it("is still the text scripts/smoke-compose.sh goes looking for", () => {
+    // These two live in different files and different languages, and only one of them can be read
+    // by the compiler. A verify that could not run leaves its cause in the container log and
+    // nowhere else; by the time a smoke step gives up, that line has scrolled out of the forty
+    // it prints, so the script greps for it by name. Reword the message here and not there and
+    // the grep matches nothing — the cause is silently gone again, which is the regression the
+    // log call itself exists to prevent. So the pattern is read out of the script rather than
+    // restated here, where it could drift in step with the mistake.
+    const script = readFileSync(new URL("../../../../scripts/smoke-compose.sh", import.meta.url), "utf8");
+    const pattern = script.match(/grep -F '([^']*verify inconclusive[^']*)'/)?.[1];
+
+    expect(pattern, "smoke-compose.sh no longer greps for an inconclusive verify").toBeDefined();
+    expect(VERIFY_INCONCLUSIVE_LOG).toContain(pattern);
   });
 });
