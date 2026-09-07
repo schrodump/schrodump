@@ -95,6 +95,27 @@ services:
     # A floating tag on the component that enforces that boundary is the boundary moving on its
     # own. See docs/security.md.
     image: tecnativa/docker-socket-proxy:v0.4.2
+    # The image bakes a fixed HAProxy config with `timeout client 10m` / `timeout server 10m`, and
+    # neither is configurable by environment (upstream issue #148). Ten minutes is fatal here: a
+    # dump's `container.wait()` is a long-poll that stays silent until the container exits, and a
+    # `pg_restore` verify writes nothing to stdout while it restores — so on any job longer than ten
+    # minutes the proxy severed the wait and the attach mid-flight (seen in the proxy log as an `sD`
+    # server-timeout at exactly 600s). `run()` then blocked on a wait() that never settled, until the
+    # 3h DUMP_TIMEOUT_MS ceiling, leaving the executor orphaned; a 655 MB verify hung this way in
+    # production. The runner already owns the real ceiling — DUMP_TIMEOUT_MS kills the container,
+    # which ends the attach and settles wait — so the proxy must carry the bytes for as long as the
+    # job runs and not time it: disable both idle timeouts. Patched into the in-image template before
+    # the stock entrypoint runs, so no host file has to be mounted and this stack and an
+    # Easypanel/Portainer deployment fix it the same way. The `grep` fails the container loudly
+    # rather than silently no-op'ing if a future pinned image renames the setting. See
+    # docs/security.md and packages/runner/CLAUDE.md.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        grep -q 'timeout server 10m' /usr/local/etc/haproxy/haproxy.cfg.template || { echo 'proxy: idle-timeout line missing after image bump — re-verify' >&2; exit 1; }
+        sed -i 's/timeout client 10m/timeout client 0/; s/timeout server 10m/timeout server 0/' /usr/local/etc/haproxy/haproxy.cfg.template
+        exec /usr/local/bin/docker-entrypoint.sh haproxy -f /tmp/haproxy.cfg
     restart: unless-stopped
     environment:
       CONTAINERS: 1
