@@ -13,13 +13,19 @@ import { useT } from "@/i18n/provider";
 import { JOB_STATES } from "@/lib/domain";
 import type { Job, JobState } from "@/lib/types";
 
-function JobRow({ job }: { job: Job }) {
+export function JobRow({ job }: { job: Job }) {
   const t = useT();
   return (
     <div className="space-y-3 border-b border-border px-2 py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="font-medium">{t(`job.kind.${job.kind}`)}</span>
+          {job.targetName ? <span className="font-medium">{job.targetName}</span> : null}
           <span className="text-sm text-muted-foreground">{t(`job.state.${job.state}`)}</span>
+          {/* Only when it adds something. A policy is very often named after the database it backs
+              up, and repeating the same word twice on one row reads as a rendering bug. */}
+          {job.policyName && job.policyName !== job.targetName ? (
+            <span className="text-sm text-muted-foreground">{job.policyName}</span>
+          ) : null}
           <code className="ml-auto rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
             {t("jobs.correlationId")}: {job.correlationId}
           </code>

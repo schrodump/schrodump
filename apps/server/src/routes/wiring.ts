@@ -289,6 +289,45 @@ export function toArtifactRecord(row: {
 }
 
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
+// The two routes a job takes to the database it is about. `policy` covers BACKUP and RETENTION,
+// which belong to one; `verifyArtifact` covers VERIFY and RESTORE, which act on an artifact and
+// reach the policy through the job that produced it. Declared once so the query and the mapper
+// below cannot drift into disagreeing about which relations were loaded.
+export const JOB_SUBJECT_INCLUDE = {
+  policy: { select: { name: true, target: { select: { name: true } } } },
+  verifyArtifact: {
+    select: {
+      job: { select: { policy: { select: { name: true, target: { select: { name: true } } } } } },
+    },
+  },
+} as const;
+
+// Nulls are meaningful and are NOT collapsed to a placeholder: a manual backup genuinely has no
+// policy, and a job whose policy was deleted genuinely has no target to name. Answering "unknown"
+// in the API would make the UI unable to tell "nobody scheduled this" from "the row is gone".
+type JobSubjectRelations = {
+  policy?: { name: string; target: { name: string } } | null;
+  verifyArtifact?: { job: { policy: { name: string; target: { name: string } } | null } } | null;
+};
+
+export function toJobRecord<T extends JobSubjectRelations>(
+  row: T,
+): Omit<T, "policy" | "verifyArtifact"> & {
+  policyName: string | null;
+  targetName: string | null;
+} {
+  // The relations come OUT. They were loaded to answer two questions, and returning the nested
+  // shape would put a second, differently-spelled copy of the policy on every row for any client
+  // that later reads it — the response says what the job is about, not how that was looked up.
+  const { policy, verifyArtifact, ...job } = row;
+  const resolved = policy ?? verifyArtifact?.job.policy ?? null;
+  return {
+    ...job,
+    policyName: resolved?.name ?? null,
+    targetName: resolved?.target.name ?? null,
+  };
+}
+
 export function createJobsService(
   prisma: PrismaClient,
   kek: Buffer,
@@ -314,13 +353,27 @@ export function createJobsService(
     return job.id;
   };
   return {
+    // A job row said what KIND it was and nothing about WHAT it was for, so the only handle on
+    // "which database is this" was a cuid inside the correlationId. That is the first question
+    // anyone asks while a job is running and the only one the screen could not answer — an
+    // operator watching two backups had no way to tell which of their databases was being read.
+    //
+    // The two kinds reach the same answer by different routes: a BACKUP or RETENTION belongs to a
+    // policy, which names the target; a VERIFY or RESTORE acts on an artifact, and the artifact
+    // knows the job that produced it, which has the policy. Flattened to two strings here rather
+    // than returned nested, because the shape the UI needs is "which database, which policy" and
+    // nothing about how many hops that took.
     listJobs: async (organizationId) => {
       const db = scopedPrisma(prisma, organizationId);
-      const [items, total] = await Promise.all([
-        db.backupJob.findMany({ orderBy: { createdAt: "desc" }, take: LIST_PAGE_SIZE }),
+      const [rows, total] = await Promise.all([
+        db.backupJob.findMany({
+          orderBy: { createdAt: "desc" },
+          take: LIST_PAGE_SIZE,
+          include: JOB_SUBJECT_INCLUDE,
+        }),
         db.backupJob.count(),
       ]);
-      return { items, total };
+      return { items: rows.map(toJobRecord), total };
     },
     // The counts come from a groupBy over the WHOLE table, never from `items`. A dashboard that
     // counted the returned page would report "3 unobserved backups" on a deployment with four

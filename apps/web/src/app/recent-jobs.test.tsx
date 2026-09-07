@@ -15,6 +15,8 @@ import { RecentJobs } from "./page";
 const base: Job = {
   id: "j1",
   policyId: null,
+  targetName: null,
+  policyName: null,
   kind: "VERIFY",
   state: "SUCCEEDED",
   correlationId: "verify:cmtlo0o9t004mk62i3vwh9ynz",
