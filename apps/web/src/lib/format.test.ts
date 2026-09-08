@@ -2,7 +2,14 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatDateTime, formatRelative, formatServerVersion, formatTime } from "./format";
+import {
+  formatBytes,
+  formatDateTime,
+  formatDuration,
+  formatRelative,
+  formatServerVersion,
+  formatTime,
+} from "./format";
 
 describe("formatBytes", () => {
   it("formats zero and non-positive input as 0 B", () => {
@@ -50,6 +57,22 @@ describe("formatDateTime / formatTime", () => {
     expect(out.length).toBeGreaterThan(0);
     expect(out).not.toContain("T03:04:05");
     expect(formatTime("2026-01-02T03:04:05.000Z").length).toBeGreaterThan(0);
+  });
+});
+
+describe("formatDuration", () => {
+  it("returns empty string for negative or non-finite input", () => {
+    expect(formatDuration(-1)).toBe("");
+    expect(formatDuration(Number.NaN)).toBe("");
+  });
+
+  it("scales seconds → minutes → hours, dropping a zero remainder", () => {
+    expect(formatDuration(0)).toBe("0s");
+    expect(formatDuration(45_000)).toBe("45s");
+    expect(formatDuration(92_000)).toBe("1m 32s");
+    expect(formatDuration(120_000)).toBe("2m");
+    expect(formatDuration(3_600_000)).toBe("1h");
+    expect(formatDuration(3_660_000)).toBe("1h 1m");
   });
 });
 

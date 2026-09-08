@@ -54,6 +54,21 @@ const DIVISIONS: { readonly amount: number; readonly unit: Intl.RelativeTimeForm
   { amount: Number.POSITIVE_INFINITY, unit: "year" },
 ];
 
+// A short, locale-independent elapsed time for how long a job ran or waited: "45s", "1m 32s",
+// "2h 5m". Compact on purpose — it sits inline on a dense job row, where an operator scans it, not
+// reads it. Negative or non-finite input returns "" (the caller renders the absence).
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
+}
+
 export function formatRelative(iso: string, now: Date = new Date()): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";

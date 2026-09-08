@@ -202,6 +202,11 @@ export const ptBR: Record<MessageKey, string> = {
   "jobs.title": "Jobs",
   "jobs.filterAll": "Todos os estados",
   "jobs.correlationId": "ID de correlação",
+  "jobs.ranIn": "durou {duration}",
+  "jobs.startedRelative": "iniciado {when}",
+  "jobs.queued": "esperou {duration} na fila",
+  "jobs.exit": "saída {code}",
+  "jobs.artifact": "artefato {id}",
   "jobs.log": "Log de execução",
   "jobs.empty": "Nenhum job ainda.",
 

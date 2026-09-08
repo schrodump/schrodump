@@ -63,6 +63,12 @@ export interface Job {
   kind: JobKind;
   state: JobState;
   correlationId: string;
+  // When a cron scheduled the job (null for a manual run). With startedAt it gives the queue wait —
+  // how long the worker took to pick the job up, the signal that a deployment is falling behind.
+  scheduledAt: string | null;
+  // The artifact a VERIFY or RESTORE acts on (null for BACKUP and RETENTION, which are about a
+  // policy, not an existing artifact). Lets the row point at what it operated on.
+  artifactId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
