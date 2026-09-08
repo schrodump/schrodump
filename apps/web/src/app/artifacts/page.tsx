@@ -11,10 +11,10 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { useTriggerVerify } from "@/hooks/use-mutations";
-import { useArtifacts } from "@/hooks/use-resources";
+import { useArtifacts, useDestinations } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import { formatBytes, formatServerVersion } from "@/lib/format";
+import { formatBytes, formatDateTime, formatRelative, formatServerVersion, formatTime } from "@/lib/format";
 import type { Role, VerifyLevel } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 
@@ -69,9 +69,26 @@ function VerifyLevelTag({ level, degraded }: { level: VerifyLevel; degraded: boo
   );
 }
 
-export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
+export function ArtifactRow({
+  artifact,
+  role,
+  destinationName,
+}: {
+  artifact: Artifact;
+  role: Role;
+  // Resolved by the page from the destinations list; null when it cannot be resolved (a destination
+  // that was deleted), where the raw id is shown rather than an empty cell.
+  destinationName: string | null;
+}) {
   const t = useT();
   const verify = useTriggerVerify();
+  // How many times smaller the stored object is than the logical dump — a health signal at a
+  // glance (a backup that "compressed" 1.0x is usually a backup of nothing). Guarded against a
+  // zero/absent compressed size.
+  const ratio =
+    artifact.sizeCompressedBytes > 0
+      ? artifact.sizeRawBytes / artifact.sizeCompressedBytes
+      : null;
   return (
     <details className="group border-b border-border">
       <summary className="grid cursor-pointer list-none grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-1 px-2 py-2.5 hover:bg-muted sm:grid-cols-[7.5rem_minmax(6rem,1fr)_6rem_5rem_auto] [&::-webkit-details-marker]:hidden">
@@ -93,7 +110,7 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
           {formatBytes(artifact.sizeCompressedBytes)}
         </span>
         <span className="hidden font-mono text-xs text-muted-foreground sm:block">
-          {artifact.createdAt.slice(11, 16)}
+          {formatTime(artifact.createdAt)}
         </span>
         <span className="flex justify-end gap-2">
           <Button
@@ -119,12 +136,25 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
       </summary>
 
       <dl className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-x-8 gap-y-2 bg-muted px-2 pt-1 pb-4">
+        <DetailField label={t("artifacts.detail.destination")}>
+          {destinationName ?? artifact.destinationId}
+        </DetailField>
+        <DetailField label={t("artifacts.detail.created")}>
+          {formatDateTime(artifact.createdAt)}
+        </DetailField>
+        {artifact.verifiedLevel !== null ? (
+          <DetailField label={t("artifacts.detail.lastVerified")}>
+            {formatRelative(artifact.updatedAt)}
+          </DetailField>
+        ) : null}
         <DetailField label={t("artifacts.detail.bucketKey")}>{artifact.bucketKey}</DetailField>
         <DetailField label={t("artifacts.detail.checksum")}>
           {artifact.checksumAlgorithm} · {artifact.checksum}
         </DetailField>
-        <DetailField label={t("artifacts.detail.raw")}>
-          {formatBytes(artifact.sizeRawBytes)}
+        <DetailField label={t("artifacts.detail.ratio")}>
+          {ratio === null
+            ? "—"
+            : `${ratio.toFixed(1)}× (${formatBytes(artifact.sizeRawBytes)} → ${formatBytes(artifact.sizeCompressedBytes)})`}
         </DetailField>
         <DetailField label={t("artifacts.detail.compression")}>{artifact.compression}</DetailField>
         <DetailField label={t("artifacts.detail.server")}>
@@ -137,6 +167,18 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
           <DetailField label={t("artifacts.detail.verifiedVia")}>
             {t(`verifyLevel.${artifact.verifiedLevel}`)}
             {artifact.verifiedDegraded ? ` — ${t("artifacts.downgradedReason")}` : ""}
+          </DetailField>
+        ) : null}
+        {/* Only when recorded: null is "not tracked for this engine" (see the API mapper), and
+            printing "no" for it would assert something the dump never said. */}
+        {artifact.dumpIsMultiDatabase !== null ? (
+          <DetailField label={t("artifacts.detail.multiDatabase")}>
+            {artifact.dumpIsMultiDatabase ? t("common.yes") : t("common.no")}
+          </DetailField>
+        ) : null}
+        {artifact.dependsOn.length > 0 ? (
+          <DetailField label={t("artifacts.detail.dependsOn")}>
+            {artifact.dependsOn.map((jobId) => jobId.slice(0, 8)).join(" · ")}
           </DetailField>
         ) : null}
         {/* Only when true, which is the rule this row already had and this pass does not relitigate:
@@ -155,7 +197,12 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
 export default function ArtifactsPage() {
   const t = useT();
   const artifacts = useArtifacts();
+  const destinations = useDestinations();
   const role = useCurrentRole();
+
+  // id -> name, so a row shows "Cloudflare R2" rather than a cuid. Resolved here (the page holds
+  // the destinations query) and passed down, keeping ArtifactRow a pure function of its props.
+  const destinationName = new Map((destinations.data ?? []).map((d) => [d.id, d.name]));
 
   return (
     <AppShell>
@@ -174,7 +221,12 @@ export default function ArtifactsPage() {
                 to separate what the content already separates. */}
             <div className="border-t border-border">
               {artifacts.data.items.map((artifact) => (
-                <ArtifactRow key={artifact.id} artifact={artifact} role={role} />
+                <ArtifactRow
+                  key={artifact.id}
+                  artifact={artifact}
+                  role={role}
+                  destinationName={destinationName.get(artifact.destinationId) ?? null}
+                />
               ))}
             </div>
             {artifacts.data.total > artifacts.data.items.length ? (

@@ -37,14 +37,15 @@ const base: Artifact = {
   keyIds: ["age1operational"],
   dependsOn: [],
   createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
-function renderRow(artifact: Artifact): ReactNode | void {
+function renderRow(artifact: Artifact, destinationName: string | null = "Cloudflare R2"): ReactNode | void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <I18nProvider>
-        <ArtifactRow artifact={artifact} role="operator" />
+        <ArtifactRow artifact={artifact} role="operator" destinationName={destinationName} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -150,5 +151,34 @@ describe("ArtifactRow — two tiers", () => {
     renderRow(base);
     const summary = summaryOf();
     expect(summary).toHaveTextContent(/verify/i);
+  });
+});
+
+// The data the row used to drop on the floor: which destination it lives in, how hard it compressed
+// (a backup of nothing "compresses" 1.0x), and — for a verified one — how fresh the verdict is.
+describe("ArtifactRow enrichment", () => {
+  it("resolves the destination name rather than leaving a cuid on screen", () => {
+    renderRow(base, "Cloudflare R2");
+    expect(screen.getByText("Cloudflare R2")).toBeInTheDocument();
+  });
+
+  it("falls back to the destination id when the name cannot be resolved", () => {
+    renderRow({ ...base, destinationId: "dest-xyz" }, null);
+    expect(screen.getByText("dest-xyz")).toBeInTheDocument();
+  });
+
+  it("shows the compression ratio derived from the two sizes (4 KiB -> 1 KiB = 4.0x)", () => {
+    renderRow({ ...base, sizeRawBytes: 4096, sizeCompressedBytes: 1024 });
+    expect(screen.getByText(/4\.0×/)).toBeInTheDocument();
+  });
+
+  it("stays silent about 'last verified' until a verify has reached a verdict", () => {
+    renderRow({ ...base, verifiedLevel: null });
+    expect(screen.queryByText(/last verified/i)).toBeNull();
+  });
+
+  it("shows 'last verified' once the artifact carries a verify level", () => {
+    renderRow({ ...base, verifiedLevel: "FULL_RESTORE", updatedAt: base.createdAt });
+    expect(screen.getByText(/last verified/i)).toBeInTheDocument();
   });
 });

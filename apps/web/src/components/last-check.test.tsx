@@ -7,6 +7,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
+import { formatTime } from "@/lib/format";
 import { LastCheck } from "./last-check";
 
 const KEYS = {
@@ -29,11 +30,14 @@ describe("LastCheck", () => {
     expect(screen.getByText(/never/i)).toHaveAttribute("data-check", "never");
   });
 
-  it("says passed, with the time it happened", () => {
-    renderCheck(true, "2026-09-03T15:12:00.000Z");
+  it("says passed, with the time it happened in the viewer's local zone", () => {
+    const at = "2026-09-03T15:12:00.000Z";
+    renderCheck(true, at);
     const el = screen.getByText(/writable/i);
     expect(el).toHaveAttribute("data-check", "passed");
-    expect(el).toHaveTextContent("15:12");
+    // The viewer's local time, computed the way the component does — never the raw UTC slice this
+    // used to hardcode ("15:12"), which read three hours off for a São Paulo operator.
+    expect(el).toHaveTextContent(formatTime(at));
   });
 
   it("says failed, which is a different answer from never", () => {

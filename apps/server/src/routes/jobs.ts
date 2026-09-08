@@ -55,6 +55,10 @@ export interface ArtifactRecord {
   keyIds: string[];
   dependsOn: string[];
   createdAt: Date;
+  // Last time the row changed — in practice the last verify that reached a verdict (it writes the
+  // state and level). Exposed so the UI can say "verified 3 days ago": freshness is the question
+  // the catalog is really asked, and it cannot be derived from createdAt alone.
+  updatedAt: Date;
 }
 
 // Both lists are capped. A deployment running twenty policies daily, each chaining a verify,

@@ -21,6 +21,8 @@ export const ptBR: Record<MessageKey, string> = {
 
   "common.save": "Salvar",
   "common.cancel": "Cancelar",
+  "common.yes": "Sim",
+  "common.no": "Não",
   "common.create": "Criar",
   "common.edit": "Editar",
   "common.delete": "Excluir",
@@ -212,6 +214,12 @@ export const ptBR: Record<MessageKey, string> = {
   "artifacts.detail.compression": "Compressão",
   "artifacts.detail.server": "Servidor",
   "artifacts.detail.provenance": "Proveniência",
+  "artifacts.detail.destination": "Destino",
+  "artifacts.detail.created": "Criado",
+  "artifacts.detail.lastVerified": "Última verificação",
+  "artifacts.detail.ratio": "Taxa de compressão",
+  "artifacts.detail.multiDatabase": "Dump multi-banco",
+  "artifacts.detail.dependsOn": "Depende de",
   "artifacts.detail.verifiedVia": "Verificado por",
   "artifacts.checksumOnly": "somente checksum",
   "artifacts.downgradedReason":
