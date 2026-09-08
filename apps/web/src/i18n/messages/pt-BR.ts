@@ -220,6 +220,15 @@ export const ptBR: Record<MessageKey, string> = {
   "artifacts.oplog": "Ponto no tempo (oplog)",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
+  "artifacts.delete": "Excluir",
+  "artifacts.delete.title": "Excluir artefato",
+  "artifacts.delete.description":
+    "Isto remove permanentemente o objeto, seu manifesto e (no postgres) o arquivo de globals do bucket, e depois a linha do catálogo. Não pode ser desfeito.",
+  "artifacts.delete.verifiedAck":
+    "Este artefato está VERIFIED — um restore provou que ele restaura. Excluir mesmo assim.",
+  "artifacts.delete.confirmPrompt": "Digite {token} para confirmar.",
+  "artifacts.delete.mismatch": "Não confere.",
+  "artifacts.delete.submit": "Excluir permanentemente",
   "artifacts.empty": "Nenhum artefato ainda.",
 
   "restore.title": "Restaurar artefato",

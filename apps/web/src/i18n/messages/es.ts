@@ -221,6 +221,15 @@ export const es: Record<MessageKey, string> = {
   "artifacts.oplog": "Punto en el tiempo (oplog)",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
+  "artifacts.delete": "Eliminar",
+  "artifacts.delete.title": "Eliminar artefacto",
+  "artifacts.delete.description":
+    "Esto elimina permanentemente el objeto, su manifiesto y (en postgres) el archivo de globals del bucket, y luego la fila del catálogo. No se puede deshacer.",
+  "artifacts.delete.verifiedAck":
+    "Este artefacto está VERIFIED — una restauración probó que restaura. Eliminarlo de todos modos.",
+  "artifacts.delete.confirmPrompt": "Escribe {token} para confirmar.",
+  "artifacts.delete.mismatch": "No coincide.",
+  "artifacts.delete.submit": "Eliminar permanentemente",
   "artifacts.empty": "Todavía no hay artefactos.",
 
   "restore.title": "Restaurar artefacto",

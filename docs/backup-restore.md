@@ -128,6 +128,19 @@ Restore is deliberately harder to trigger than backup.
 
 Every restore is recorded: who, what artefact, which scope, when.
 
+## Deleting an artefact
+
+Retention deletes artefacts automatically as its policy ages them out. An operator can also delete
+one by hand — to clear a `FAILED` artefact, or an old one no longer worth keeping. It is
+operator-only, irreversible, and reaches the **bucket**, not just the catalogue: the object, its
+manifest sidecar and (for PostgreSQL) the `globals` sidecar are removed, then the catalogue row.
+The action is recorded in the audit trail (`artifact.delete`).
+
+Deleting a **`VERIFIED`** artefact — one a restore has proven good — requires an explicit
+acknowledgement, because throwing away a backup you know restores is the one deletion the product
+will not let you do by reflex. `FAILED` and `UNOBSERVED` artefacts delete after the usual
+retype-to-confirm friction.
+
 ## Practical advice
 
 - Turn `FULL_RESTORE` on for at least one policy per database, even if it is weekly. A checksum

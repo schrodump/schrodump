@@ -79,6 +79,88 @@ describe("toArtifactRecord", () => {
   });
 });
 
+describe("createJobsService.deleteArtifact", () => {
+  interface Op {
+    model: string;
+    operation: string;
+    args: Record<string, unknown>;
+    query: (a: Record<string, unknown>) => Promise<unknown>;
+  }
+  function fakeFor(artifactRow: Record<string, unknown> | null) {
+    const calls: { model: string; operation: string; args: Record<string, unknown> }[] = [];
+    let wrap: ((op: Op) => Promise<unknown>) | null = null;
+    const call = (model: string, operation: string, args: Record<string, unknown>, result: unknown) => {
+      const run = (final: Record<string, unknown>) => {
+        calls.push({ model, operation, args: final });
+        return Promise.resolve(result);
+      };
+      return wrap === null ? run(args) : wrap({ model, operation, args, query: run });
+    };
+    const base = {
+      artifact: {
+        findFirst: (a: Record<string, unknown>) => call("Artifact", "findFirst", a, artifactRow),
+        delete: (a: Record<string, unknown>) => call("Artifact", "delete", a, {}),
+      },
+      // Destination reported gone, so driverForDestination returns null: the objects are already
+      // unreachable and the row must still be removable. This keeps the real S3 driver out of a unit
+      // test while still exercising the whole delete path through to artifact.delete.
+      storageDestination: {
+        findFirst: (a: Record<string, unknown>) => call("StorageDestination", "findFirst", a, null),
+      },
+      $extends: (ext: { query: { $allModels: { $allOperations: (op: Op) => Promise<unknown> } } }) => {
+        wrap = ext.query.$allModels.$allOperations;
+        return base;
+      },
+    };
+    return { calls, prisma: base as unknown as PrismaClient };
+  }
+  const svc = (prisma: PrismaClient) =>
+    createJobsService(prisma, Buffer.alloc(32), { record: () => undefined });
+  const deletedRow = (calls: { model: string; operation: string }[]) =>
+    calls.some((c) => c.model === "Artifact" && c.operation === "delete");
+
+  it("refuses a missing artifact as not_found, without touching storage or the row", async () => {
+    const f = fakeFor(null);
+    expect(await svc(f.prisma).deleteArtifact("o", "gone", { acknowledgeVerified: false })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect(deletedRow(f.calls)).toBe(false);
+  });
+
+  it("refuses a VERIFIED artifact without acknowledgement, and does NOT delete it", async () => {
+    const f = fakeFor({ id: "a1", state: "VERIFIED", destinationId: "d1", bucketKey: "k", manifestKey: "m" });
+    expect(await svc(f.prisma).deleteArtifact("o", "a1", { acknowledgeVerified: false })).toEqual({
+      ok: false,
+      reason: "verified_needs_ack",
+    });
+    // The guard is the whole point: drop it and the delete proceeds (destination gone → row deleted).
+    expect(deletedRow(f.calls)).toBe(false);
+  });
+
+  it("deletes a FAILED artifact's row with no acknowledgement needed", async () => {
+    const f = fakeFor({ id: "a1", state: "FAILED", destinationId: "d1", bucketKey: "k", manifestKey: "m" });
+    expect(await svc(f.prisma).deleteArtifact("o", "a1", { acknowledgeVerified: false })).toEqual({
+      ok: true,
+    });
+    const del = f.calls.find((c) => c.model === "Artifact" && c.operation === "delete");
+    // scopedPrisma injects the organizationId into the where — the delete is org-scoped, so one
+    // organization can never delete another's artifact by id. Asserting both pins that too.
+    expect((del?.args as { where?: { id?: string; organizationId?: string } }).where).toEqual({
+      id: "a1",
+      organizationId: "o",
+    });
+  });
+
+  it("deletes a VERIFIED artifact once the acknowledgement is given", async () => {
+    const f = fakeFor({ id: "a1", state: "VERIFIED", destinationId: "d1", bucketKey: "k", manifestKey: "m" });
+    expect(await svc(f.prisma).deleteArtifact("o", "a1", { acknowledgeVerified: true })).toEqual({
+      ok: true,
+    });
+    expect(deletedRow(f.calls)).toBe(true);
+  });
+});
+
 describe("createJobsService list bounds", () => {
   // The take lives in the wiring, and the route tests stub the whole service out — so without this
   // the cap could be deleted and every test would stay green. It is the query shape being asserted,

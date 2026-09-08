@@ -42,6 +42,13 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   table. Counting `items` would report fewer unobserved backups than exist, which is exactly the
   number the thesis forbids rounding. When the list is truncated the screen says so
   (`list.truncated`) instead of implying it showed everything.
+- **Deleting an artifact has friction, and the same two-lock shape as restore.** A viewer never
+  sees the control (`canDeleteArtifact`, operator+); the server refuses regardless. The dialog
+  makes the operator retype the artifact's short id, and a **`VERIFIED`** artifact — one a restore
+  has actually proven good — needs a second, explicit acknowledgement (`acknowledgeVerified`) that
+  the API also enforces (409 `VERIFIED_NEEDS_ACK` without it). Deletion reaches the bucket, not just
+  the catalog: the object, its manifest and the postgres globals sidecar go too. See
+  `DeleteArtifactDialog` and `docs/backup-restore.md`.
 - **Verify disabled on a policy is a persistent warning**, not a toast.
 - **A notification channel shows its last delivery failure.** A notifier that stopped delivering is
   identical to a healthy one unless the interface says otherwise — recording the failure was the

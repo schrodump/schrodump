@@ -34,6 +34,7 @@ const service: JobsService = {
         createdAt: new Date("2026-07-01T00:00:00.000Z"),
       },
     ] }),
+  deleteArtifact: () => Promise.resolve({ ok: true }),
   enqueueBackup: () => Promise.resolve("job-b"),
   enqueueVerify: () => Promise.resolve("job-v"),
   enqueueRestore: () => Promise.resolve("job-r"),
@@ -71,6 +72,64 @@ describe("jobs routes", () => {
     const res = await app.inject({ method: "POST", url: "/policies/p1/backup" });
     expect(res.statusCode).toBe(202);
     expect(JSON.parse(res.body)).toEqual({ jobId: "job-b" });
+    await app.close();
+  });
+
+  it("refuses artifact deletion from a viewer (403) — operator+ only", async () => {
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "DELETE", url: "/artifacts/a1" });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("maps a missing artifact to 404", async () => {
+    const app = await appWith("operator", {
+      deleteArtifact: () => Promise.resolve({ ok: false, reason: "not_found" }),
+    });
+    const res = await app.inject({ method: "DELETE", url: "/artifacts/gone" });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("maps a verified artifact refused for lack of acknowledgement to 409 + a code the UI can act on", async () => {
+    const app = await appWith("operator", {
+      deleteArtifact: () => Promise.resolve({ ok: false, reason: "verified_needs_ack" }),
+    });
+    const res = await app.inject({ method: "DELETE", url: "/artifacts/a1" });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("VERIFIED_NEEDS_ACK");
+    await app.close();
+  });
+
+  it("deletes for an operator (204) and forwards the acknowledgement from the body", async () => {
+    let seen: { acknowledgeVerified: boolean } | null = null;
+    const app = await appWith("operator", {
+      deleteArtifact: (_org, _id, opts) => {
+        seen = opts;
+        return Promise.resolve({ ok: true });
+      },
+    });
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/artifacts/a1",
+      payload: { acknowledgeVerified: true },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(seen).toEqual({ acknowledgeVerified: true });
+    await app.close();
+  });
+
+  it("defaults the acknowledgement to false when the body omits it", async () => {
+    let seen: { acknowledgeVerified: boolean } | null = null;
+    const app = await appWith("operator", {
+      deleteArtifact: (_org, _id, opts) => {
+        seen = opts;
+        return Promise.resolve({ ok: true });
+      },
+    });
+    const res = await app.inject({ method: "DELETE", url: "/artifacts/a1" });
+    expect(res.statusCode).toBe(204);
+    expect(seen).toEqual({ acknowledgeVerified: false });
     await app.close();
   });
 });

@@ -111,3 +111,9 @@ const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
 export function canRestore(role: Role): boolean {
   return RANK[role] >= RANK.operator;
 }
+
+// Deleting an artifact is operator+, like restore: a viewer never sees the control, and the server
+// refuses the call regardless (the UI gate is the second lock, not the only one).
+export function canDeleteArtifact(role: Role): boolean {
+  return RANK[role] >= RANK.operator;
+}

@@ -79,9 +79,25 @@ export interface ArtifactListDTO {
   counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
 }
 
+// The outcome of a manual delete. `verified_needs_ack` is not a failure to hide — it is the
+// product refusing to throw away a proven-good backup on a single click, and the operator has to
+// say they mean it. `not_found` covers both a missing id and one in another organization (the
+// scoped query cannot tell them apart, and must not).
+export type DeleteArtifactResult =
+  | { ok: true }
+  | { ok: false; reason: "not_found" | "verified_needs_ack" };
+
 export interface JobsService {
   listJobs(organizationId: string): Promise<JobListDTO>;
   listArtifacts(organizationId: string): Promise<ArtifactListDTO>;
+  // Permanently delete an artifact: its object, its manifest sidecar (and the postgres globals
+  // sibling), then the catalog row. A VERIFIED artifact is refused unless acknowledgeVerified is
+  // set — deleting a backup a restore has proven good is a deliberate act, not a stray click.
+  deleteArtifact(
+    organizationId: string,
+    artifactId: string,
+    opts: { acknowledgeVerified: boolean },
+  ): Promise<DeleteArtifactResult>;
   // Enqueue a manual BACKUP job for a policy; returns the jobId.
   enqueueBackup(organizationId: string, policyId: string): Promise<string>;
   // Enqueue a VERIFY job for an artifact.
@@ -119,6 +135,9 @@ export interface JobsRoutesDeps {
 }
 
 const IdParams = z.object({ id: z.string().min(1) });
+// The acknowledgement that lets a VERIFIED artifact be deleted. Defaults false so the safe path is
+// the default: a caller that sends nothing cannot delete a proven-good backup by omission.
+const DeleteArtifactBody = z.object({ acknowledgeVerified: z.boolean().default(false) });
 
 export function jobsRoutes(deps: JobsRoutesDeps) {
   return (app: FastifyInstance): void => {
@@ -154,6 +173,34 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
         if (!params.success) return reply.status(400).send({ error: "invalid id" });
         const jobId = await deps.service.enqueueVerify(contextOf(request).organizationId, params.data.id);
         return reply.status(202).send({ jobId });
+      },
+    );
+
+    // operator+, and the deletion is recorded automatically as `artifact.delete` by the audit hook.
+    app.delete(
+      "/artifacts/:id",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = IdParams.safeParse(request.params);
+        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        const body = DeleteArtifactBody.safeParse(request.body ?? {});
+        if (!body.success) return reply.status(400).send({ error: "invalid request" });
+        const result = await deps.service.deleteArtifact(
+          contextOf(request).organizationId,
+          params.data.id,
+          { acknowledgeVerified: body.data.acknowledgeVerified },
+        );
+        if (!result.ok) {
+          if (result.reason === "not_found") {
+            return reply.status(404).send({ error: "no such artifact" });
+          }
+          // The refusal the operator has to answer, not an error to bury: a VERIFIED artifact is a
+          // restore-proven backup. The code lets the UI ask for the acknowledgement specifically.
+          return reply
+            .status(409)
+            .send({ error: "a verified artifact needs acknowledgement to delete", code: "VERIFIED_NEEDS_ACK" });
+        }
+        return reply.status(204).send();
       },
     );
 
