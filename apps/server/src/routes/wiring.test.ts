@@ -21,6 +21,8 @@ const row = {
   jobId: "j1",
   destinationId: "d1",
   state: "UNOBSERVED",
+  verifiedLevel: null,
+  verifiedDegraded: false,
   bucketKey: "org/backup.age",
   manifestKey: "org/backup.manifest.json",
   engine: "postgres",
@@ -61,6 +63,19 @@ describe("toArtifactRecord", () => {
   it("carries executionMode so the UI can gate restore the same way the server does", () => {
     expect(toArtifactRecord(row).executionMode).toBe("STAGED");
     expect(toArtifactRecord({ ...row, executionMode: "STREAM" }).executionMode).toBe("STREAM");
+  });
+
+  // Without these the dashboard cannot tell a green proven by a real restore from a checksum-only
+  // one, and a downgraded checksum (an unscoped replica-set dump) reads as a full-restore green.
+  it("carries the verify level and its degraded flag so the UI can tell the greens apart", () => {
+    const full = toArtifactRecord({ ...row, verifiedLevel: "FULL_RESTORE", verifiedDegraded: false });
+    expect(full.verifiedLevel).toBe("FULL_RESTORE");
+    expect(full.verifiedDegraded).toBe(false);
+    const degraded = toArtifactRecord({ ...row, verifiedLevel: "CHECKSUM", verifiedDegraded: true });
+    expect(degraded.verifiedLevel).toBe("CHECKSUM");
+    expect(degraded.verifiedDegraded).toBe(true);
+    // null survives as null — an artifact no verify has reached a verdict on, not a false "checksum".
+    expect(toArtifactRecord(row).verifiedLevel).toBe(null);
   });
 });
 

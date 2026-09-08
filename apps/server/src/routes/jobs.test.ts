@@ -15,6 +15,8 @@ const service: JobsService = {
         jobId: "j1",
         destinationId: "d1",
         state: "UNOBSERVED",
+        verifiedLevel: null,
+        verifiedDegraded: false,
         bucketKey: "org/backup.age",
         manifestKey: "org/backup.manifest.json",
         engine: "postgres",

@@ -92,6 +92,21 @@ On a **sealed** destination, `FULL_RESTORE` degrades to `CHECKSUM` — Schrodump
 key to open the artefact. That trade is described in
 [security.md](security.md#sealed-mode-real-custody-separation).
 
+`FULL_RESTORE` also degrades to `CHECKSUM` for an artefact it cannot honestly restore-check: an
+**unscoped** MySQL/MariaDB or MongoDB archive — a multi-database dump, and a MongoDB replica set is
+always dumped whole. Restoring one into the sandbox would count objects in a *system* database that
+never holds the application data, which would either pass a bad backup or fail a good one; a
+checksum is the true claim available instead. PostgreSQL is exempt — its `-Fc` dump restores into a
+fixed sandbox database where the check counts every non-system schema.
+
+Because a `VERIFIED` green can therefore mean either "a restore proved it restores" or only "the
+bytes are intact", the catalog records **which**: every artefact carries the verify level that
+actually ran, and a green whose `FULL_RESTORE` was **downgraded** to `CHECKSUM` is flagged as such,
+so a checksum-only green is never read as a restore-proven one. For a MongoDB replica set — whose
+archive v1 cannot restore-verify at all — that flag is permanent, and a periodic **manual** restore
+rehearsal (`scripts/rehearse-recovery.sh`, which runs without Schrodump) is the only thing that
+proves the data will come back.
+
 ## Restoring
 
 Restore is deliberately harder to trigger than backup.

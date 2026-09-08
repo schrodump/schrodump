@@ -9,6 +9,13 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   `UNOBSERVED` amber, `FAILED` red. There is no "OK", there is no grey for unverified, and the
   dashboard's primary counter is _"N unobserved backups"_ — never "N ok". See `StatusBadge` and
   `state-counters.tsx`, and the thesis in the root file.
+  - **A green also says HOW it was earned.** `VERIFIED` can mean a real `FULL_RESTORE` or only a
+    `CHECKSUM` (bytes intact, restore unproven), so the artifact row carries the effective
+    `verifiedLevel` beside the badge — and a `CHECKSUM` that was **downgraded** from a requested
+    `FULL_RESTORE` (`verifiedDegraded`, e.g. an unscoped replica-set dump v1 cannot restore-verify)
+    reads as a caution, never as the restore-proven green beside it. `StatusBadge` stays the ternary
+    state; the level tag (`VerifyLevelTag` in `artifacts/page.tsx`) is the qualifier. `null` level
+    (never verified, or pre-dating the field) says nothing — it is not a false "checksum".
 - **Credentials are write-only in the UI.** The server's value never reaches the front end and
   never fills a field. Configured → show "configured" + allow replacing. See `CredentialField`.
 - **In edit mode an empty secret field means "keep what is stored"** — never `""`. It is the only

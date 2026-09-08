@@ -213,6 +213,10 @@ export const en = {
   "artifacts.detail.compression": "Compression",
   "artifacts.detail.server": "Server",
   "artifacts.detail.provenance": "Provenance",
+  "artifacts.detail.verifiedVia": "Verified via",
+  "artifacts.checksumOnly": "checksum only",
+  "artifacts.downgradedReason":
+    "Full restore is not possible for this artifact; only its checksum was verified.",
   "artifacts.detail.raw": "Original size",
   "artifacts.oplog": "Point-in-time (oplog)",
   "artifacts.verify": "Verify",

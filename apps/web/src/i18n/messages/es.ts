@@ -213,6 +213,10 @@ export const es: Record<MessageKey, string> = {
   "artifacts.detail.compression": "Compresión",
   "artifacts.detail.server": "Servidor",
   "artifacts.detail.provenance": "Procedencia",
+  "artifacts.detail.verifiedVia": "Verificado por",
+  "artifacts.checksumOnly": "solo checksum",
+  "artifacts.downgradedReason":
+    "La restauración completa no es posible para este artefacto; solo se verificó su checksum.",
   "artifacts.detail.raw": "Tamaño original",
   "artifacts.oplog": "Punto en el tiempo (oplog)",
   "artifacts.verify": "Verificar",

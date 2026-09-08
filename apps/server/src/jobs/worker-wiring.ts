@@ -59,7 +59,7 @@ import { producerVersion } from "../version.js";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { driverCodeOf } from "../probe/test-connection.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
-import { runVerifyJob, type VerifyLevel, type VerifyProof } from "./verify.js";
+import { runVerifyJob, type VerifyLevel, type VerifyOutcome, type VerifyProof } from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
 
 // The pipeline always gzips the dump before encryption (see backup-wiring.ts), regardless of the
@@ -251,6 +251,26 @@ export function resolveVerifyPlan(
     };
   }
   return { effectiveLevel: requested, downgradeReason: null };
+}
+
+// What to record on the artifact about HOW it reached its state, from the verify outcome and
+// whether resolveVerifyPlan already degraded the level. Pure, and exported, so the derivation is
+// asserted in a unit test rather than only reached through the whole worker.
+//
+// Returns null when nothing should be written: verify NONE and an INCONCLUSIVE FULL_RESTORE both
+// leave the artifact untouched (finalState UNOBSERVED), so this must leave verifiedLevel untouched
+// too — a prior verify's level stays, exactly as its state does. `verifiedDegraded` folds BOTH
+// downgrade sources: resolveVerifyPlan's (unscoped/STAGED, carried in `planDowngraded`) and
+// runVerifyJob's own sealed-destination downgrade (`outcome.degraded`).
+export function verifiedProvenance(
+  outcome: Pick<VerifyOutcome, "finalState" | "effectiveLevel" | "degraded">,
+  planDowngraded: boolean,
+): { verifiedLevel: VerifyLevel; verifiedDegraded: boolean } | null {
+  if (outcome.finalState !== "VERIFIED" && outcome.finalState !== "FAILED") return null;
+  return {
+    verifiedLevel: outcome.effectiveLevel,
+    verifiedDegraded: planDowngraded || outcome.degraded,
+  };
 }
 
 // The databases an UNSCOPED postgres target would be silently leaving behind. Empty means the dump
@@ -1109,10 +1129,20 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       },
     });
 
-    await runVerifyJob(
+    const outcome = await runVerifyJob(
       { jobId: job.id, artifactId: artifact.id, verifyLevel: plan.effectiveLevel, sealed },
       ports,
     );
+
+    // Record HOW the artifact reached its state so the dashboard can tell a full-restore green from
+    // a checksum-only one — the ternary state alone blurs them, and a downgraded FULL_RESTORE (an
+    // unscoped replica set, a sealed destination) is exactly the green that must not read as a real
+    // restore. Null when the verify left the artifact untouched (NONE / INCONCLUSIVE): then the
+    // stored level, like the state, must not move either.
+    const provenance = verifiedProvenance(outcome, plan.downgradeReason !== null);
+    if (provenance !== null) {
+      await prisma.artifact.update({ where: { id: artifact.id }, data: provenance });
+    }
   };
 
   const runRestore = async (job: ClaimedJob): Promise<void> => {
