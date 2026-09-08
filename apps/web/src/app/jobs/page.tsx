@@ -11,10 +11,24 @@ import { Select } from "@/components/ui/select";
 import { useJobs } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { JOB_STATES } from "@/lib/domain";
+import { formatDateTime, formatDuration, formatRelative } from "@/lib/format";
 import type { Job, JobState } from "@/lib/types";
 
 export function JobRow({ job }: { job: Job }) {
   const t = useT();
+  // How long it ran (a finished job) and how long it waited to start (the queue latency a cron
+  // deployment falling behind shows up as). Both derived from timestamps the row never used to show.
+  const ranMs =
+    job.startedAt !== null && job.finishedAt !== null
+      ? new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime()
+      : null;
+  const queueWaitMs =
+    job.scheduledAt !== null && job.startedAt !== null
+      ? new Date(job.startedAt).getTime() - new Date(job.scheduledAt).getTime()
+      : null;
+  // Exit 0 is the quiet normal and stays off the row; a non-zero code is the forensic the reason
+  // line often summarises but does not give.
+  const showExit = job.exitCode !== null && job.exitCode !== 0;
   return (
     <div className="space-y-3 border-b border-border px-2 py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -29,6 +43,25 @@ export function JobRow({ job }: { job: Job }) {
           <code className="ml-auto rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
             {t("jobs.correlationId")}: {job.correlationId}
           </code>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted-foreground">
+          {ranMs !== null ? (
+            <span>{t("jobs.ranIn", { duration: formatDuration(ranMs) })}</span>
+          ) : job.startedAt !== null ? (
+            <span>{t("jobs.startedRelative", { when: formatRelative(job.startedAt) })}</span>
+          ) : null}
+          {queueWaitMs !== null && queueWaitMs >= 1000 ? (
+            <span>{t("jobs.queued", { duration: formatDuration(queueWaitMs) })}</span>
+          ) : null}
+          {showExit ? (
+            <span className="text-[var(--color-state-failed)]">
+              {t("jobs.exit", { code: String(job.exitCode) })}
+            </span>
+          ) : null}
+          {job.artifactId !== null ? (
+            <span>{t("jobs.artifact", { id: job.artifactId.slice(0, 8) })}</span>
+          ) : null}
+          <span className="ml-auto">{formatDateTime(job.createdAt)}</span>
         </div>
         {job.reason ? <p className="text-sm text-muted-foreground">{job.reason}</p> : null}
         {job.stderr ? (

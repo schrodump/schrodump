@@ -200,6 +200,11 @@ export const en = {
   "jobs.title": "Jobs",
   "jobs.filterAll": "All states",
   "jobs.correlationId": "Correlation ID",
+  "jobs.ranIn": "ran in {duration}",
+  "jobs.startedRelative": "started {when}",
+  "jobs.queued": "waited {duration} in queue",
+  "jobs.exit": "exit {code}",
+  "jobs.artifact": "artifact {id}",
   "jobs.log": "Execution log",
   "jobs.empty": "No jobs yet.",
 

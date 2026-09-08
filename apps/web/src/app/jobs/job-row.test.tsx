@@ -21,6 +21,8 @@ const base: Job = {
   kind: "BACKUP",
   state: "RUNNING",
   correlationId: "backup:cmtqofm340015nv7icksk39yj",
+  scheduledAt: null,
+  artifactId: null,
   startedAt: "2026-09-07T17:08:06.000Z",
   finishedAt: null,
   exitCode: null,
@@ -61,5 +63,45 @@ describe("JobRow says what the job is about", () => {
     renderRow(base);
     expect(screen.queryByText(/unknown|desconhec/i)).toBeNull();
     expect(screen.getByText(/backup:cmtqofm/i)).toBeTruthy();
+  });
+});
+
+// The timing the row used to drop: how long it ran, how long it waited to start, its exit code, and
+// what artifact it acted on.
+describe("JobRow says how the job went", () => {
+  it("shows how long a finished job ran (92s → 1m 32s)", () => {
+    renderRow({
+      ...base,
+      state: "SUCCEEDED",
+      startedAt: "2026-09-07T17:08:00.000Z",
+      finishedAt: "2026-09-07T17:09:32.000Z",
+    });
+    expect(screen.getByText(/1m 32s/)).toBeInTheDocument();
+  });
+
+  it("shows the queue wait when a scheduled job started late", () => {
+    renderRow({
+      ...base,
+      state: "SUCCEEDED",
+      scheduledAt: "2026-09-07T02:00:00.000Z",
+      startedAt: "2026-09-07T02:00:45.000Z",
+      finishedAt: "2026-09-07T02:01:00.000Z",
+    });
+    expect(screen.getByText(/45s in queue|queue/i)).toBeInTheDocument();
+  });
+
+  it("shows a non-zero exit code", () => {
+    renderRow({ ...base, state: "FAILED", exitCode: 1, finishedAt: base.startedAt });
+    expect(screen.getByText(/exit 1/i)).toBeInTheDocument();
+  });
+
+  it("stays quiet on exit 0 — the normal case is not clutter", () => {
+    renderRow({ ...base, state: "SUCCEEDED", exitCode: 0, finishedAt: base.startedAt });
+    expect(screen.queryByText(/exit 0/i)).toBeNull();
+  });
+
+  it("points at the artifact a verify acted on", () => {
+    renderRow({ ...base, kind: "VERIFY", artifactId: "cmtabcd1234567890" });
+    expect(screen.getByText(/cmtabcd1/)).toBeInTheDocument();
   });
 });

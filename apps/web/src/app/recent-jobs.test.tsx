@@ -20,6 +20,8 @@ const base: Job = {
   kind: "VERIFY",
   state: "SUCCEEDED",
   correlationId: "verify:cmtlo0o9t004mk62i3vwh9ynz",
+  scheduledAt: null,
+  artifactId: null,
   startedAt: "2026-09-03T15:14:00.000Z",
   finishedAt: "2026-09-03T15:14:20.000Z",
   exitCode: 0,

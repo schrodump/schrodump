@@ -203,6 +203,11 @@ export const es: Record<MessageKey, string> = {
   "jobs.title": "Jobs",
   "jobs.filterAll": "Todos los estados",
   "jobs.correlationId": "ID de correlación",
+  "jobs.ranIn": "duró {duration}",
+  "jobs.startedRelative": "iniciado {when}",
+  "jobs.queued": "esperó {duration} en la cola",
+  "jobs.exit": "salida {code}",
+  "jobs.artifact": "artefacto {id}",
   "jobs.log": "Log de ejecución",
   "jobs.empty": "Todavía no hay jobs.",
 
