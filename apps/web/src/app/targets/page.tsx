@@ -13,6 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useDeleteTarget, useTestConnection } from "@/hooks/use-mutations";
 import { useTargets } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
+import type { ProbeFailureCode } from "@/lib/domain";
 import { formatServerVersion } from "@/lib/format";
 import type { Target } from "@/lib/types";
 
@@ -62,10 +63,19 @@ function TestConnection({ targetId }: { targetId: string }) {
   );
 }
 
-function TargetRow({ target }: { target: Target }) {
+export function TargetRow({ target }: { target: Target }) {
   const t = useT();
   const remove = useDeleteTarget();
   const [editing, setEditing] = useState(false);
+  // What the target actually backs up, which the row never showed even after the scope became a
+  // chosen thing. Empty across all three is a whole-instance dump (a mongo replica set, an unscoped
+  // mysql), NOT "unknown" — so it says so rather than leaving a blank.
+  const scopeNames = [
+    ...target.scope.databases,
+    ...target.scope.schemas,
+    ...target.scope.collections,
+  ];
+  const scopeText = scopeNames.length > 0 ? scopeNames.join(", ") : t("targets.scope.wholeInstance");
 
   if (editing) {
     return (
@@ -85,6 +95,9 @@ function TargetRow({ target }: { target: Target }) {
             <p className="font-mono text-xs text-[var(--color-foreground-soft)]">
               {target.engine} · {target.host}:{target.port}
             </p>
+            <p className="font-mono text-xs text-[var(--color-foreground-soft)]">
+              {t("targets.scopeLine", { scope: scopeText })}
+            </p>
             {/* The recorded probe, which the row never showed: the guided checklist reads it and
                 this is where an operator actually looks. Never-run is amber, not a grey dash —
                 it is an open question, and a dash reads as "not applicable". */}
@@ -97,6 +110,13 @@ function TargetRow({ target }: { target: Target }) {
                 lastFailed: "targets.probe.lastFailed",
               }}
             />
+            {/* The persisted failure CODE, said in words — the row showed "last failed at 14:02"
+                but never why. A code, never the driver's message, which embeds the credential. */}
+            {target.lastProbeOk === false && target.lastProbeFailure !== null ? (
+              <p className="text-xs text-[var(--color-state-failed)]">
+                {t(`targets.probe.reason.${target.lastProbeFailure as ProbeFailureCode}`)}
+              </p>
+            ) : null}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <TestConnection targetId={target.id} />
