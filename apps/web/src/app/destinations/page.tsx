@@ -46,7 +46,7 @@ function Canary({ destinationId }: { destinationId: string }) {
   );
 }
 
-function DestinationRow({ destination }: { destination: Destination }) {
+export function DestinationRow({ destination }: { destination: Destination }) {
   const t = useT();
   const remove = useDeleteDestination();
   const [editing, setEditing] = useState(false);
@@ -70,6 +70,14 @@ function DestinationRow({ destination }: { destination: Destination }) {
               {destination.bucket}
               {destination.prefix ? `/${destination.prefix}` : ""} ·{" "}
               {t(`sealMode.${destination.sealMode}`)}
+            </p>
+            {/* Where the bucket actually lives, which the row never showed: an operator running
+                two R2 accounts and an S3 one could not tell them apart. endpoint is null for AWS
+                (the region is the locator there); path-style is the flag some S3-compatibles need. */}
+            <p className="flex flex-wrap gap-x-2 font-mono text-xs text-[var(--color-foreground-soft)]">
+              <span>{destination.region}</span>
+              {destination.endpoint !== null ? <span>{destination.endpoint}</span> : null}
+              {destination.forcePathStyle ? <span>{t("destinations.pathStyle")}</span> : null}
             </p>
             {/* The recorded canary. A bucket nobody has written to is an open question, and the
                 row is where an operator looks for it. */}
