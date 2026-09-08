@@ -16,6 +16,8 @@ const artifact: Artifact = {
   jobId: "job-1",
   destinationId: "destination-1",
   state: "UNOBSERVED",
+  verifiedLevel: null,
+  verifiedDegraded: false,
   bucketKey: "org/shop/2026-01-01.dump",
   manifestKey: "org/shop/2026-01-01.manifest.json",
   engine: "postgres",

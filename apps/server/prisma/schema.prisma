@@ -407,6 +407,16 @@ model Artifact {
   jobId               String               @unique
   destinationId       String
   state               ArtifactState        @default(UNOBSERVED)
+  // How the artifact reached the state above: the verify level that actually ran. NULL until a
+  // verify sets VERIFIED or FAILED (and on artifacts written before this was tracked). The ternary
+  // state alone cannot tell a green proven by a real FULL_RESTORE from one only CHECKSUM-verified,
+  // and the dashboard must not blur them — see docs/backup-restore.md and the root CLAUDE.md thesis.
+  verifiedLevel       VerifyLevel?
+  // True when that level was a DOWNGRADE from what was asked: a FULL_RESTORE policy whose artifact
+  // cannot be restore-verified in v1 (an unscoped replica-set / multi-database archive), or a sealed
+  // destination the server holds no identity for. A VERIFIED with this set is a checksum-only green
+  // against the operator's intent — the exact case that has to read differently from a real restore.
+  verifiedDegraded    Boolean              @default(false)
   bucketKey           String
   manifestKey         String
   engine              EngineKind

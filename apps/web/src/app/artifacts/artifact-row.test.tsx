@@ -20,6 +20,8 @@ const base: Artifact = {
   jobId: "job-1",
   destinationId: "destination-1",
   state: "VERIFIED",
+  verifiedLevel: null,
+  verifiedDegraded: false,
   bucketKey: "org/shop/2026-01-01.archive",
   manifestKey: "org/shop/2026-01-01.manifest.json",
   engine: "mongodb",
@@ -47,6 +49,38 @@ function renderRow(artifact: Artifact): ReactNode | void {
     </QueryClientProvider>,
   );
 }
+
+// The whole point of #1: a green proven by a real restore must not look like one only checksummed,
+// and a checksum that was DOWNGRADED from a requested full restore (an unscoped replica-set dump)
+// must read as a caution — otherwise the dashboard blurs "it restores" into "its bytes are intact",
+// which is the one distinction the product exists to keep.
+describe("ArtifactRow and how the green was earned", () => {
+  it("marks a downgraded checksum as a caution beside the green", () => {
+    renderRow({ ...base, state: "VERIFIED", verifiedLevel: "CHECKSUM", verifiedDegraded: true });
+    const chip = screen.getByTestId("verify-level-CHECKSUM-degraded");
+    expect(chip).toHaveTextContent(/checksum only/i);
+    // It carries the reason for the operator who hovers it.
+    expect(chip.getAttribute("title")).toMatch(/full restore is not possible/i);
+  });
+
+  it("states a real full restore quietly, without the caution testid", () => {
+    renderRow({ ...base, state: "VERIFIED", verifiedLevel: "FULL_RESTORE", verifiedDegraded: false });
+    expect(screen.getByTestId("verify-level-FULL_RESTORE")).toBeTruthy();
+    expect(screen.queryByTestId("verify-level-FULL_RESTORE-degraded")).toBeNull();
+  });
+
+  it("shows a requested (undegraded) checksum as neutral, not a caution", () => {
+    renderRow({ ...base, state: "VERIFIED", verifiedLevel: "CHECKSUM", verifiedDegraded: false });
+    expect(screen.getByTestId("verify-level-CHECKSUM")).toBeTruthy();
+    expect(screen.queryByTestId("verify-level-CHECKSUM-degraded")).toBeNull();
+  });
+
+  it("says nothing about a level that was never recorded — null is not a false 'checksum'", () => {
+    renderRow({ ...base, state: "VERIFIED", verifiedLevel: null, verifiedDegraded: false });
+    expect(screen.queryByTestId("verify-level-CHECKSUM")).toBeNull();
+    expect(screen.queryByTestId("verify-level-FULL_RESTORE")).toBeNull();
+  });
+});
 
 describe("ArtifactRow and the oplog fact", () => {
   it("says so when the archive carries an oplog", () => {

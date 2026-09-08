@@ -212,6 +212,10 @@ export const ptBR: Record<MessageKey, string> = {
   "artifacts.detail.compression": "Compressão",
   "artifacts.detail.server": "Servidor",
   "artifacts.detail.provenance": "Proveniência",
+  "artifacts.detail.verifiedVia": "Verificado por",
+  "artifacts.checksumOnly": "somente checksum",
+  "artifacts.downgradedReason":
+    "A restauração completa não é possível para este artefato; só o checksum foi verificado.",
   "artifacts.detail.raw": "Tamanho original",
   "artifacts.oplog": "Ponto no tempo (oplog)",
   "artifacts.verify": "Verificar",

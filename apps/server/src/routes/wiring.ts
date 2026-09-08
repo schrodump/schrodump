@@ -249,6 +249,8 @@ export function toArtifactRecord(row: {
   jobId: string;
   destinationId: string;
   state: string;
+  verifiedLevel: string | null;
+  verifiedDegraded: boolean;
   bucketKey: string;
   manifestKey: string;
   engine: string;
@@ -270,6 +272,11 @@ export function toArtifactRecord(row: {
     jobId: row.jobId,
     destinationId: row.destinationId,
     state: row.state,
+    // Passed through as recorded: verifiedLevel is null until a verify reaches a verdict, and a
+    // green with verifiedDegraded true is a checksum the operator asked full restore for — the row
+    // must be able to say which, so the dashboard does not paint both greens the same.
+    verifiedLevel: row.verifiedLevel,
+    verifiedDegraded: row.verifiedDegraded,
     bucketKey: row.bucketKey,
     manifestKey: row.manifestKey,
     engine: row.engine,

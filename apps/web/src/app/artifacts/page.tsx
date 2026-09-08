@@ -12,8 +12,9 @@ import { useCurrentRole } from "@/hooks/use-current-role";
 import { useTriggerVerify } from "@/hooks/use-mutations";
 import { useArtifacts } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
+import { cn } from "@/lib/cn";
 import { formatBytes, formatServerVersion } from "@/lib/format";
-import type { Role } from "@/lib/domain";
+import type { Role, VerifyLevel } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 
 // Exported so the row can be asserted directly. The page around it needs the resource hooks; the
@@ -41,6 +42,32 @@ function DetailField({ label, children }: { label: string; children: React.React
   );
 }
 
+// The qualifier the StatusBadge deliberately does NOT carry: how a VERIFIED/FAILED green (or red)
+// was actually reached. A real FULL_RESTORE and a requested CHECKSUM are stated quietly; a CHECKSUM
+// that was DOWNGRADED from a FULL_RESTORE the artifact could not answer (an unscoped replica-set
+// dump, a sealed destination) reads as a caution — because that green is weaker than the operator
+// asked for, and painting it like the restore-proven one beside it is exactly the blur the product
+// forbids. Silent when the level was never recorded (null), the honest thing to say about it.
+function VerifyLevelTag({ level, degraded }: { level: VerifyLevel; degraded: boolean }) {
+  const t = useT();
+  const caution = level === "CHECKSUM" && degraded;
+  return (
+    <span
+      data-testid={`verify-level-${level}${degraded ? "-degraded" : ""}`}
+      title={caution ? t("artifacts.downgradedReason") : undefined}
+      className={cn(
+        "inline-flex items-center rounded-[3px] px-1.5 py-0.5",
+        "font-mono text-[0.6rem] font-medium tracking-[0.06em] uppercase",
+        caution
+          ? "bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]"
+          : "bg-muted text-muted-foreground",
+      )}
+    >
+      {t(caution ? "artifacts.checksumOnly" : `verifyLevel.${level}`)}
+    </span>
+  );
+}
+
 export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role }) {
   const t = useT();
   const verify = useTriggerVerify();
@@ -49,8 +76,11 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
       <summary className="grid cursor-pointer list-none grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-1 px-2 py-2.5 hover:bg-muted sm:grid-cols-[7.5rem_minmax(6rem,1fr)_6rem_5rem_auto] [&::-webkit-details-marker]:hidden">
         {/* justify-self, because a grid child stretches to its track by default and the chip would
             paint its background across the whole column — the badge has to hug its own word. */}
-        <span className="justify-self-start">
+        <span className="flex items-center gap-1.5 justify-self-start">
           <StatusBadge state={artifact.state} />
+          {artifact.verifiedLevel !== null ? (
+            <VerifyLevelTag level={artifact.verifiedLevel} degraded={artifact.verifiedDegraded} />
+          ) : null}
         </span>
         <span className="font-mono text-sm font-medium">
           {t(`engine.${artifact.engine}`)}{" "}
@@ -99,6 +129,12 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
         <DetailField label={t("artifacts.detail.sealedTo")}>
           {artifact.keyIds.join(" · ")}
         </DetailField>
+        {artifact.verifiedLevel !== null ? (
+          <DetailField label={t("artifacts.detail.verifiedVia")}>
+            {t(`verifyLevel.${artifact.verifiedLevel}`)}
+            {artifact.verifiedDegraded ? ` — ${t("artifacts.downgradedReason")}` : ""}
+          </DetailField>
+        ) : null}
         {/* Only when true, which is the rule this row already had and this pass does not relitigate:
             an archive WITH an oplog restores to a single instant. `false` (a mongo dump carrying
             none) and `null` (an engine that has no such thing) both stay silent. Whether a recorded

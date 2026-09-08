@@ -21,6 +21,13 @@ export interface Artifact {
   jobId: string;
   destinationId: string;
   state: ArtifactState;
+  // How that state was reached: the verify level that actually ran, and whether it was a downgrade
+  // from what the policy asked. `state` alone cannot tell a green proven by a real restore from one
+  // only checksum-verified — and a downgraded checksum (an unscoped replica-set dump v1 cannot
+  // restore-verify) is a green the operator never asked for. null when no verify has reached a
+  // verdict, or on artifacts written before this was tracked.
+  verifiedLevel: VerifyLevel | null;
+  verifiedDegraded: boolean;
   bucketKey: string;
   manifestKey: string;
   engine: EngineKind;

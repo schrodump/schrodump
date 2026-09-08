@@ -19,6 +19,7 @@ import {
   originDatabaseFor,
   postgresUnscopedAlternatives,
   resolveVerifyPlan,
+  verifiedProvenance,
   sanitizeReason,
   sourceHasOplogFor,
   toBackupProbe,
@@ -144,6 +145,46 @@ describe("resolveVerifyPlan", () => {
       effectiveLevel: "CHECKSUM",
       downgradeReason: null,
     });
+  });
+});
+
+describe("verifiedProvenance", () => {
+  it("records a real full restore as an undegraded FULL_RESTORE", () => {
+    expect(
+      verifiedProvenance({ finalState: "VERIFIED", effectiveLevel: "FULL_RESTORE", degraded: false }, false),
+    ).toEqual({ verifiedLevel: "FULL_RESTORE", verifiedDegraded: false });
+  });
+
+  it("marks degraded when resolveVerifyPlan downgraded the level (unscoped/STAGED)", () => {
+    // The plan-level downgrade (an unscoped replica-set dump) is invisible to runVerifyJob — it was
+    // handed CHECKSUM as the requested level — so the flag has to come from planDowngraded here.
+    expect(
+      verifiedProvenance({ finalState: "VERIFIED", effectiveLevel: "CHECKSUM", degraded: false }, true),
+    ).toEqual({ verifiedLevel: "CHECKSUM", verifiedDegraded: true });
+  });
+
+  it("marks degraded when runVerifyJob itself downgraded (sealed destination)", () => {
+    expect(
+      verifiedProvenance({ finalState: "VERIFIED", effectiveLevel: "CHECKSUM", degraded: true }, false),
+    ).toEqual({ verifiedLevel: "CHECKSUM", verifiedDegraded: true });
+  });
+
+  it("records the level for a FAILED artifact too — a checksum condemnation differs from a restore one", () => {
+    expect(
+      verifiedProvenance({ finalState: "FAILED", effectiveLevel: "CHECKSUM", degraded: false }, false),
+    ).toEqual({ verifiedLevel: "CHECKSUM", verifiedDegraded: false });
+  });
+
+  it("returns null when the verify left the artifact untouched (UNOBSERVED) — nothing to record", () => {
+    // The gate: an INCONCLUSIVE FULL_RESTORE or a NONE level never called setArtifactState, so this
+    // must not write a level over whatever a prior verify left. Drop the gate and this returns a
+    // value, overwriting a genuine prior verdict's provenance.
+    expect(
+      verifiedProvenance({ finalState: "UNOBSERVED", effectiveLevel: "FULL_RESTORE", degraded: false }, false),
+    ).toBeNull();
+    expect(
+      verifiedProvenance({ finalState: "UNOBSERVED", effectiveLevel: "NONE", degraded: false }, true),
+    ).toBeNull();
   });
 });
 
