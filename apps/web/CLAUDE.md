@@ -107,6 +107,12 @@ Every fetch is same-origin with `credentials: "include"`. The value is baked at 
 - **Server numbers do not reach the screen raw.** `serverVersionNum` is an encoded integer
   (`70015` = MongoDB 7.0.15); always pass it through `formatServerVersion`. Sizes through
   `formatBytes`.
+- **Timestamps render in the viewer's zone, never sliced from the ISO string.** They travel as UTC
+  ISO; `formatDateTime` / `formatTime` / `formatRelative` (`lib/format.ts`) render them at the
+  browser's locale and timezone. The old `at.slice(11, 16)` showed UTC, so a São Paulo operator read
+  a 02:00 job as 05:00 — the quiet mismatch that makes a person distrust the whole screen. Freshness
+  ("verified 3 days ago") uses `formatRelative`; it answers the question the dashboard is really
+  asking better than an absolute stamp.
 
 ## Test-connection and RBAC
 

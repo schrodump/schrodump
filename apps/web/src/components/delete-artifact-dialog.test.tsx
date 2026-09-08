@@ -35,6 +35,7 @@ const base: Artifact = {
   keyIds: ["age1operational"],
   dependsOn: [],
   createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
 };
 const token = base.id.slice(0, 8);
 

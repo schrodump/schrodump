@@ -51,10 +51,13 @@ describe("toArtifactRecord", () => {
     expect(() => JSON.stringify(record)).not.toThrow();
   });
 
-  it("does not leak internal columns", () => {
+  it("drops organizationId but now exposes updatedAt, which the freshness display reads", () => {
     const record = toArtifactRecord(row);
+    // organizationId stays internal — the client is already scoped to its org and never needs it.
     expect("organizationId" in record).toBe(false);
-    expect("updatedAt" in record).toBe(false);
+    // updatedAt is deliberately exposed now: the row renders "verified N ago" from it. It used to
+    // be dropped as internal; surfacing it is the change this asserts.
+    expect("updatedAt" in record).toBe(true);
   });
 
   // The restore gate is executionMode-based (runRestoreJob refuses STAGED). Dropping the column

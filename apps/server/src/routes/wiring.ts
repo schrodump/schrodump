@@ -268,6 +268,7 @@ export function toArtifactRecord(row: {
   keyIds: string[];
   dependsOn: string[];
   createdAt: Date;
+  updatedAt: Date;
 }): ArtifactRecord {
   return {
     id: row.id,
@@ -302,6 +303,7 @@ export function toArtifactRecord(row: {
     keyIds: row.keyIds,
     dependsOn: row.dependsOn,
     createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 

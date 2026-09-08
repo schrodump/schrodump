@@ -19,6 +19,8 @@ export const en = {
 
   "common.save": "Save",
   "common.cancel": "Cancel",
+  "common.yes": "Yes",
+  "common.no": "No",
   "common.create": "Create",
   "common.edit": "Edit",
   "common.delete": "Delete",
@@ -213,6 +215,12 @@ export const en = {
   "artifacts.detail.compression": "Compression",
   "artifacts.detail.server": "Server",
   "artifacts.detail.provenance": "Provenance",
+  "artifacts.detail.destination": "Destination",
+  "artifacts.detail.created": "Created",
+  "artifacts.detail.lastVerified": "Last verified",
+  "artifacts.detail.ratio": "Compression ratio",
+  "artifacts.detail.multiDatabase": "Multi-database dump",
+  "artifacts.detail.dependsOn": "Depends on",
   "artifacts.detail.verifiedVia": "Verified via",
   "artifacts.checksumOnly": "checksum only",
   "artifacts.downgradedReason":

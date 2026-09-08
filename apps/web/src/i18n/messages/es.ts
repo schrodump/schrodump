@@ -21,6 +21,8 @@ export const es: Record<MessageKey, string> = {
 
   "common.save": "Guardar",
   "common.cancel": "Cancelar",
+  "common.yes": "Sí",
+  "common.no": "No",
   "common.create": "Crear",
   "common.edit": "Editar",
   "common.delete": "Eliminar",
@@ -213,6 +215,12 @@ export const es: Record<MessageKey, string> = {
   "artifacts.detail.compression": "Compresión",
   "artifacts.detail.server": "Servidor",
   "artifacts.detail.provenance": "Procedencia",
+  "artifacts.detail.destination": "Destino",
+  "artifacts.detail.created": "Creado",
+  "artifacts.detail.lastVerified": "Última verificación",
+  "artifacts.detail.ratio": "Ratio de compresión",
+  "artifacts.detail.multiDatabase": "Volcado multi-base",
+  "artifacts.detail.dependsOn": "Depende de",
   "artifacts.detail.verifiedVia": "Verificado por",
   "artifacts.checksumOnly": "solo checksum",
   "artifacts.downgradedReason":

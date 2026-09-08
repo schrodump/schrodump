@@ -48,6 +48,8 @@ export interface Artifact {
   keyIds: string[];
   dependsOn: string[];
   createdAt: string;
+  // Last time the row changed — the last verify to reach a verdict. Rendered as "verified N ago".
+  updatedAt: string;
 }
 
 export interface Job {
