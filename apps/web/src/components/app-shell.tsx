@@ -12,10 +12,12 @@ import type { MessageKey } from "@/i18n/messages/en";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/feedback";
 import { PasswordRotation } from "@/components/password-rotation";
-import { useMustChangePassword } from "@/hooks/use-current-role";
+import { useCurrentRole, useMustChangePassword } from "@/hooks/use-current-role";
 import { cn } from "@/lib/cn";
 
-const NAV: { href: string; key: MessageKey }[] = [
+// adminOnly hides the link for non-admins — the page and the API refuse them anyway, so showing a
+// link that leads to a 403 would only invite a dead end. The audit trail is admin-only.
+const NAV: { href: string; key: MessageKey; adminOnly?: boolean }[] = [
   { href: "/", key: "nav.dashboard" },
   { href: "/targets", key: "nav.targets" },
   { href: "/destinations", key: "nav.destinations" },
@@ -23,6 +25,7 @@ const NAV: { href: string; key: MessageKey }[] = [
   { href: "/notifications", key: "nav.notifications" },
   { href: "/jobs", key: "nav.jobs" },
   { href: "/artifacts", key: "nav.artifacts" },
+  { href: "/audit", key: "nav.audit", adminOnly: true },
   { href: "/settings", key: "nav.settings" },
 ];
 
@@ -52,6 +55,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: session, isPending } = useSession();
   const mustRotate = useMustChangePassword();
+  const role = useCurrentRole();
+  const nav = NAV.filter((item) => item.adminOnly !== true || role === "admin");
 
   useEffect(() => {
     if (!isPending && session === null) router.replace("/login");
@@ -76,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {t("app.name")}
           </Link>
           <nav className="flex flex-1 flex-wrap gap-1" aria-label={t("nav.dashboard")}>
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}

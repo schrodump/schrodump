@@ -198,6 +198,23 @@ export interface JobList {
   total: number;
 }
 
+// One recorded action from the audit trail. `actorEmail` is null for a job's credential reads —
+// job execution has no user, so the UI shows "system" there rather than inventing a name.
+export interface AuditEntry {
+  id: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  correlationId: string;
+  actorEmail: string | null;
+  createdAt: string;
+}
+
+export interface AuditList {
+  items: AuditEntry[];
+  total: number;
+}
+
 // `counts` is computed across the whole table, NOT from `items`. The dashboard's primary number is
 // "N unobserved backups"; deriving it from a truncated page would understate the open questions,
 // which is the one number this product must never round down.

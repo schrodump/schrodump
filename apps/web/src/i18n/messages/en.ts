@@ -13,8 +13,14 @@ export const en = {
   "nav.policies": "Policies",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artifacts",
+  "nav.audit": "Audit",
   "nav.notifications": "Notifications",
   "nav.settings": "Settings",
+  "audit.title": "Audit trail",
+  "audit.description":
+    "Who did what, and when — restores, changes, deletions, and the credential reads jobs make.",
+  "audit.empty": "No audit entries yet.",
+  "audit.system": "system",
   "nav.signOut": "Sign out",
 
   "common.save": "Save",

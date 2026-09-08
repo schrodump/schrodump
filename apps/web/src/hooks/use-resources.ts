@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
   ArtifactList,
+  AuditList,
   Destination,
   EncryptionKey,
   Instance,
@@ -22,6 +23,12 @@ export function useArtifacts() {
 
 export function useJobs() {
   return useQuery({ queryKey: ["jobs"], queryFn: () => api.get<JobList>("/jobs") });
+}
+
+// admin-only on the server; a non-admin's query 403s and the page renders that as an error rather
+// than an empty trail (which would read as "nothing happened").
+export function useAuditLog() {
+  return useQuery({ queryKey: ["audit-log"], queryFn: () => api.get<AuditList>("/audit-log") });
 }
 
 export function useTargets() {
