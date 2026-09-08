@@ -9,6 +9,7 @@ import { useEffect, type ReactNode } from "react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { LOCALES, useI18n, type Locale } from "@/i18n/provider";
 import type { MessageKey } from "@/i18n/messages/en";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/feedback";
 import { PasswordRotation } from "@/components/password-rotation";
@@ -77,7 +78,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen">
       <header className="border-b">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-3">
-          <Link href="/" className="font-semibold">
+          <Link href="/" className="flex items-center gap-2 font-semibold">
+            <BrandMark className="h-7 w-7" />
             {t("app.name")}
           </Link>
           <nav className="flex flex-1 flex-wrap gap-1" aria-label={t("nav.dashboard")}>

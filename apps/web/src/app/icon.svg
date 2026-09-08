@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <style>
+    .head { fill: #1E1E1E; }
+    .dash { fill: #F7F6F3; }
+    @media (prefers-color-scheme: dark) {
+      .head { fill: #F5F4F0; }
+      .dash { fill: #141312; }
+    }
+  </style>
+  <path class="head" d="M122 92 L182 150 L330 150 L390 92 L402 101 L402 360 Q402 430 332 430 L180 430 Q110 430 110 360 L110 101 Z"/>
+  <path d="M189 233 L217 261 L189 289 L161 261 Z" fill="#BA760D"/>
+  <rect class="dash" x="285" y="250" width="76" height="22" rx="11"/>
+</svg>
