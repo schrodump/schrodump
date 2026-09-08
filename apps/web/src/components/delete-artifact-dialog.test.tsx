@@ -6,12 +6,18 @@
 // acknowledgement — is the guard against a reflexive click throwing away a proven-good backup.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
+import { api } from "@/lib/api";
 import type { Artifact } from "@/lib/types";
 import { DeleteArtifactButton, DeleteArtifactDialog } from "./delete-artifact-dialog";
+
+// Observe the delete without a real fetch.
+vi.mock("@/lib/api", () => ({
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(() => Promise.resolve(undefined)) },
+}));
 
 const base: Artifact = {
   id: "art01234deadbeef",
@@ -116,5 +122,24 @@ describe("DeleteArtifactDialog escapes a preventDefault wrapper via a portal", (
     // preventDefault. If it were inline, wrapper.contains(dialog) would be true.
     expect(wrapper.contains(dialog)).toBe(false);
     expect(document.body.contains(dialog)).toBe(true);
+  });
+});
+
+// The production bug: clicking the confirm button did nothing — no request, no error — because a
+// click on a type="submit" button did not fire the form's submit in the real stack (only
+// requestSubmit did). The fix drives the delete from the button's onClick, like the Verify button.
+// jsdom does NOT reproduce the real-browser bug (fireEvent.click here fires the form submit), so
+// this cannot mutation-prove that specific defect; it guards the behaviour that matters — a click
+// with a matching token fires the delete with the right arguments.
+describe("DeleteArtifactDialog fires the delete on a button click", () => {
+  it("calls the delete API when the confirm button is clicked", async () => {
+    wrap(<DeleteArtifactDialog artifact={base} onClose={() => undefined} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: token } });
+    fireEvent.click(screen.getByRole("button", { name: /delete permanently/i }));
+    await waitFor(() =>
+      expect(api.delete).toHaveBeenCalledWith(`/artifacts/${base.id}`, {
+        acknowledgeVerified: false,
+      }),
+    );
   });
 });

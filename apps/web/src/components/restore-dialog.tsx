@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ErrorState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
@@ -58,8 +58,10 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
   // retyped its name exactly.
   const canSubmit = scoped ? database.length > 0 && (!overExisting || nameMatches) : true;
 
-  function onSubmit(event: FormEvent) {
-    event.preventDefault();
+  // Driven by the button's onClick, not the form's submit-on-click: a click on a type="submit"
+  // button does not fire this stack's form submit (only requestSubmit does), so the restore never
+  // enqueued. onSubmit is kept for Enter in the fields. (Same fix as DeleteArtifactDialog.)
+  function confirmRestore() {
     if (!canSubmit) return;
     restore.mutate({ artifactId: artifact.id, target, confirmExistingDatabase: overExisting });
   }
@@ -81,7 +83,10 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
       }}
     >
       <form
-        onSubmit={onSubmit}
+        onSubmit={(event) => {
+          event.preventDefault();
+          confirmRestore();
+        }}
         className="max-h-full w-full max-w-lg space-y-4 overflow-auto rounded-lg border border-border bg-background p-6 shadow-lg"
       >
         <div>
@@ -179,9 +184,10 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
 
         <div className="flex gap-2">
           <Button
-            type="submit"
+            type="button"
             variant="destructive"
             disabled={!canSubmit || restore.isPending || restore.isSuccess}
+            onClick={confirmRestore}
           >
             {restore.isPending ? t("common.loading") : t("restore.submit")}
           </Button>
