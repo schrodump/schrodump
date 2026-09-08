@@ -85,6 +85,11 @@ this trail does and does not contain, because the gap is the part you would have
   a new call site cannot read a credential without saying which organization, which resource and
   why.
 
+**Reading it:** an administrator reads the trail in the UI — the *Audit* page, backed by
+`GET /audit-log` — newest first, the actor shown by email or as *system* for the credential reads
+job execution makes. It is admin-only: reading the record of who holds power over the data is itself
+a privileged act, and the API refuses everyone below admin.
+
 **Not recorded, and this is the honest limit:**
 
 - **Request payloads.** Deliberately. Bodies here carry database passwords and S3 secret keys, and

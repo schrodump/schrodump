@@ -30,6 +30,7 @@ import { loadEnv } from "./env.js";
 import { serverVersion } from "./version.js";
 import { createLogger, newCorrelationId } from "./observability/pino.js";
 import { prismaTargetStore } from "./routes/targets.js";
+import { prismaAuditStore } from "./routes/audit.js";
 import {
   createEncryptionKeyService,
   createJobsService,
@@ -152,6 +153,7 @@ export async function main(): Promise<void> {
     encryptionKeys: createEncryptionKeyService(prisma, kek),
     selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
     memberStore: (organizationId) => prismaMemberStore(prisma, auth, organizationId),
+    auditStore: (organizationId) => prismaAuditStore(prisma, organizationId),
     instanceConfig: () => ({
       version: serverVersion(),
       scratchPath: env.SCHRODUMP_SCRATCH_PATH ?? null,

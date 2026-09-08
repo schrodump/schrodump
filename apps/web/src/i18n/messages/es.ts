@@ -15,8 +15,14 @@ export const es: Record<MessageKey, string> = {
   "nav.policies": "Políticas",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artefactos",
+  "nav.audit": "Auditoría",
   "nav.notifications": "Notificaciones",
   "nav.settings": "Configuración",
+  "audit.title": "Registro de auditoría",
+  "audit.description":
+    "Quién hizo qué, y cuándo — restauraciones, cambios, eliminaciones y las lecturas de credenciales que hacen los trabajos.",
+  "audit.empty": "Aún no hay entradas de auditoría.",
+  "audit.system": "sistema",
   "nav.signOut": "Cerrar sesión",
 
   "common.save": "Guardar",

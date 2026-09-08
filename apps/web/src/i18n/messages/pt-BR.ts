@@ -15,8 +15,14 @@ export const ptBR: Record<MessageKey, string> = {
   "nav.policies": "Políticas",
   "nav.jobs": "Jobs",
   "nav.artifacts": "Artefatos",
+  "nav.audit": "Auditoria",
   "nav.notifications": "Notificações",
   "nav.settings": "Configurações",
+  "audit.title": "Trilha de auditoria",
+  "audit.description":
+    "Quem fez o quê, e quando — restaurações, mudanças, exclusões e as leituras de credencial que os jobs fazem.",
+  "audit.empty": "Nenhum registro de auditoria ainda.",
+  "audit.system": "sistema",
   "nav.signOut": "Sair",
 
   "common.save": "Salvar",
