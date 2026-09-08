@@ -103,9 +103,13 @@ Because a `VERIFIED` green can therefore mean either "a restore proved it restor
 bytes are intact", the catalog records **which**: every artefact carries the verify level that
 actually ran, and a green whose `FULL_RESTORE` was **downgraded** to `CHECKSUM` is flagged as such,
 so a checksum-only green is never read as a restore-proven one. For a MongoDB replica set — whose
-archive v1 cannot restore-verify at all — that flag is permanent, and a periodic **manual** restore
-rehearsal (`scripts/rehearse-recovery.sh`, which runs without Schrodump) is the only thing that
-proves the data will come back.
+archive v1 cannot restore-verify at all — that flag is permanent, and the only thing that proves the
+data will come back is a periodic **manual** rehearsal: pull the artefact from the bucket and replay
+it with standard tools (`aws s3 cp` → `age -d -i <escrow-identity>` → `gunzip` → `mongorestore
+--archive` into a throwaway `mongod`), then spot-check the collections. That is the same
+Schrodump-independent approach `scripts/rehearse-recovery.sh` takes for the metadata self-backup
+(there with `pg_restore`) — and on the day it matters, a rehearsal that leaned on Schrodump would be
+leaning on the thing that is gone.
 
 ## Restoring
 
