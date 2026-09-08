@@ -91,3 +91,30 @@ describe("DeleteArtifactDialog gating", () => {
     expect(submit().disabled).toBe(true);
   });
 });
+
+// The bug this fixes, seen in production: the trigger lives in the artifact row inside a
+// `<span onClick={preventDefault}>` (which stops a click from toggling the <details> row). An inline
+// dialog is a DOM descendant of that span, so a click on the submit button bubbled up to it and
+// preventDefault silently cancelled the form submit — enabled button, no request, no error. The fix
+// is to portal the dialog out of that subtree. Asserting the STRUCTURE (the dialog is not a
+// descendant of a wrapper around it) is the reliable, mutation-provable guard: revert the portal and
+// the dialog lands back inside the wrapper and this fails.
+describe("DeleteArtifactDialog escapes a preventDefault wrapper via a portal", () => {
+  it("does not render as a descendant of the element that wraps it", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <I18nProvider>
+          <div data-testid="row-wrapper" onClick={(event) => event.preventDefault()}>
+            <DeleteArtifactDialog artifact={base} onClose={() => undefined} />
+          </div>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    const dialog = screen.getByRole("dialog");
+    const wrapper = screen.getByTestId("row-wrapper");
+    // Portaled to document.body, so a click on its submit button never bubbles to the wrapper's
+    // preventDefault. If it were inline, wrapper.contains(dialog) would be true.
+    expect(wrapper.contains(dialog)).toBe(false);
+    expect(document.body.contains(dialog)).toBe(true);
+  });
+});

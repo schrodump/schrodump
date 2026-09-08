@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { ErrorState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,7 +64,11 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
     restore.mutate({ artifactId: artifact.id, target, confirmExistingDatabase: overExisting });
   }
 
-  return (
+  // Portal to document.body: the trigger lives inside the artifact row's `<span
+  // onClick={preventDefault}>`, and an inline dialog would be a DOM descendant of it — so a click on
+  // the submit button bubbles up and preventDefault silently cancels the form submit. The portal
+  // moves the dialog out of that subtree. (Same trap DeleteArtifactDialog documents.)
+  return createPortal(
     <div
       ref={dialogRef}
       role="dialog"
@@ -185,7 +190,8 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
           </Button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
