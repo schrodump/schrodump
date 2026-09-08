@@ -26,6 +26,8 @@ import { generateAgeKeyPair, recipientFingerprint } from "../crypto/artifact.js"
 import type { EncryptionKeyRoutesDeps } from "./encryption-keys.js";
 import { LIST_PAGE_SIZE } from "./jobs.js";
 import type { ArtifactRecord, JobsService } from "./jobs.js";
+import { driverForDestination } from "../jobs/destination-driver.js";
+import { globalsObjectKey } from "../jobs/restore-executor.js";
 
 export function prismaDestinationStore(
   prisma: PrismaClient,
@@ -405,6 +407,38 @@ export function createJobsService(
       const counts = { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 };
       for (const group of grouped) counts[group.state] = group._count._all;
       return { items: rows.map(toArtifactRecord), total, counts };
+    },
+    deleteArtifact: async (organizationId, artifactId, opts) => {
+      const db = scopedPrisma(prisma, organizationId);
+      const artifact = await db.artifact.findFirst({ where: { id: artifactId } });
+      // Scoped query: a row in another org reads as absent, and must — the answer to "does this
+      // exist for you" is no, not 403 (which would confirm the id to someone who cannot see it).
+      if (artifact === null) return { ok: false, reason: "not_found" };
+      // A VERIFIED artifact is the one green a restore has actually proven. Refuse to delete it on
+      // a bare request; the caller has to acknowledge that is what they are throwing away.
+      if (artifact.state === "VERIFIED" && !opts.acknowledgeVerified) {
+        return { ok: false, reason: "verified_needs_ack" };
+      }
+      // Delete the objects first, then the row: a row removed before its objects would orphan the
+      // bytes forever (nothing else knows the keys). If the destination is gone the objects are
+      // already unreachable — the catalog row must still be removable, so a null driver is not
+      // fatal. DeleteObjects treats an absent key as success, so the postgres globals sibling costs
+      // nothing for the engines that never wrote one. The delete is recorded against
+      // correlationId, mirroring how retention and the worker attribute credential access.
+      const resolved = await driverForDestination(prisma, kek, organizationId, artifact.destinationId, {
+        audit,
+        purpose: `delete artifact ${artifactId}`,
+        correlationId: `delete:${artifactId}`,
+      });
+      if (resolved !== null) {
+        await resolved.driver.delete([
+          artifact.bucketKey,
+          artifact.manifestKey,
+          globalsObjectKey(artifact.bucketKey),
+        ]);
+      }
+      await db.artifact.delete({ where: { id: artifactId } });
+      return { ok: true };
     },
     // Real dispatch (probe / descriptor / runner composition) is handled by the worker that picks
     // up the PENDING job; here we only enqueue it.

@@ -221,6 +221,15 @@ export const en = {
   "artifacts.oplog": "Point-in-time (oplog)",
   "artifacts.verify": "Verify",
   "artifacts.restore": "Restore",
+  "artifacts.delete": "Delete",
+  "artifacts.delete.title": "Delete artifact",
+  "artifacts.delete.description":
+    "This permanently removes the object, its manifest and (for postgres) the globals sidecar from the bucket, then the catalog row. It cannot be undone.",
+  "artifacts.delete.verifiedAck":
+    "This artifact is VERIFIED — a restore proved it restores. Delete it anyway.",
+  "artifacts.delete.confirmPrompt": "Type {token} to confirm.",
+  "artifacts.delete.mismatch": "That does not match.",
+  "artifacts.delete.submit": "Delete permanently",
   "artifacts.empty": "No artifacts yet.",
 
   "restore.title": "Restore artifact",

@@ -5,6 +5,7 @@
 
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
+import { DeleteArtifactButton } from "@/components/delete-artifact-dialog";
 import { RestoreButton } from "@/components/restore-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,9 @@ export function ArtifactRow({ artifact, role }: { artifact: Artifact; role: Role
           </Button>
           <span onClick={(event) => event.preventDefault()}>
             <RestoreButton artifact={artifact} role={role} />
+          </span>
+          <span onClick={(event) => event.preventDefault()}>
+            <DeleteArtifactButton artifact={artifact} role={role} />
           </span>
         </span>
       </summary>

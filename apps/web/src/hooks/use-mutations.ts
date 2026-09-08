@@ -141,6 +141,20 @@ export function useTriggerRestore() {
   });
 }
 
+// acknowledgeVerified rides in the body only when the operator ticked it for a VERIFIED artifact;
+// the server refuses a VERIFIED delete without it. Invalidates artifacts (the list AND its counts)
+// so the dashboard's unobserved/verified tally corrects the moment a row is gone.
+export function useDeleteArtifact() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { artifactId: string; acknowledgeVerified: boolean }) =>
+      api.delete<void>(`/artifacts/${input.artifactId}`, {
+        acknowledgeVerified: input.acknowledgeVerified,
+      }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["artifacts"] }),
+  });
+}
+
 export function useCreateNotificationChannel() {
   const client = useQueryClient();
   return useMutation({
