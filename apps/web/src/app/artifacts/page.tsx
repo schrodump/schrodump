@@ -8,14 +8,14 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { DeleteArtifactButton } from "@/components/delete-artifact-dialog";
 import { RestoreButton } from "@/components/restore-dialog";
 import { StatusBadge } from "@/components/status-badge";
+import { VerifyLevelChip } from "@/components/verify-level-chip";
 import { Button } from "@/components/ui/button";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { useTriggerVerify } from "@/hooks/use-mutations";
 import { useArtifacts, useDestinations } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
-import { cn } from "@/lib/cn";
 import { formatBytes, formatDateTime, formatRelative, formatServerVersion, formatTime } from "@/lib/format";
-import type { Role, VerifyLevel } from "@/lib/domain";
+import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 
 // Exported so the row can be asserted directly. The page around it needs the resource hooks; the
@@ -40,32 +40,6 @@ function DetailField({ label, children }: { label: string; children: React.React
         {children}
       </dd>
     </div>
-  );
-}
-
-// The qualifier the StatusBadge deliberately does NOT carry: how a VERIFIED/FAILED green (or red)
-// was actually reached. A real FULL_RESTORE and a requested CHECKSUM are stated quietly; a CHECKSUM
-// that was DOWNGRADED from a FULL_RESTORE the artifact could not answer (an unscoped replica-set
-// dump, a sealed destination) reads as a caution — because that green is weaker than the operator
-// asked for, and painting it like the restore-proven one beside it is exactly the blur the product
-// forbids. Silent when the level was never recorded (null), the honest thing to say about it.
-function VerifyLevelTag({ level, degraded }: { level: VerifyLevel; degraded: boolean }) {
-  const t = useT();
-  const caution = level === "CHECKSUM" && degraded;
-  return (
-    <span
-      data-testid={`verify-level-${level}${degraded ? "-degraded" : ""}`}
-      title={caution ? t("artifacts.downgradedReason") : undefined}
-      className={cn(
-        "inline-flex items-center rounded-[3px] px-1.5 py-0.5",
-        "font-mono text-[0.6rem] font-medium tracking-[0.06em] uppercase",
-        caution
-          ? "bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]"
-          : "bg-muted text-muted-foreground",
-      )}
-    >
-      {t(caution ? "artifacts.checksumOnly" : `verifyLevel.${level}`)}
-    </span>
   );
 }
 
@@ -96,9 +70,11 @@ export function ArtifactRow({
             paint its background across the whole column — the badge has to hug its own word. */}
         <span className="flex items-center gap-1.5 justify-self-start">
           <StatusBadge state={artifact.state} />
-          {artifact.verifiedLevel !== null ? (
-            <VerifyLevelTag level={artifact.verifiedLevel} degraded={artifact.verifiedDegraded} />
-          ) : null}
+          <VerifyLevelChip
+            level={artifact.verifiedLevel}
+            degraded={artifact.verifiedDegraded}
+            state={artifact.state}
+          />
         </span>
         <span className="font-mono text-sm font-medium">
           {t(`engine.${artifact.engine}`)}{" "}

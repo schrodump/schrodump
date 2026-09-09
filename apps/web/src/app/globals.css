@@ -3,156 +3,174 @@
 
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+/* The token contract, extracted from the redesigned screens (the Foundations page). Every colour is
+   authored for both themes on ONE line with light-dark(): the browser resolves it from
+   `color-scheme`, so the app follows the operating system without a media query, and the two
+   themes cannot drift apart because neither is written without the other. `[data-theme]` (or the
+   `.light`/`.dark` class a future toggle would set) forces one side.
 
+   Neutrals carry a faint warm bias toward the amber rather than being pure grey. Every pair used as
+   text on a surface was measured against WCAG 2.1 AA in both themes; the lowest in the system is
+   state-verified on its own chip, 4.51:1 (light). Two values moved to clear the line: the light
+   amber (#A9690A → #9A5F09; 4.12 → 4.84:1 on ground) and the dark failed tint (13% → 10%, so FAILED
+   text on its chip reads 4.60:1). Change a value and re-measure; the numbers are the contract. */
 :root {
-  /* Neutrals carry a cool hue (286) rather than a pure grey. A pure mid-grey reads as
-     unconsidered; the bias is small enough to be felt rather than seen, and it is the same hue
-     the interactive chrome sits on.
+  color-scheme: light dark;
 
-     `background` is an off-white and `card` is pure white, so an elevated surface has somewhere
-     to go. Before this they were both #fff, which is why every panel needed a border to exist at
-     all — and why sixteen files reach for <Card>. */
-  --background: oklch(0.985 0.002 286);
-  --foreground: oklch(0.17 0.006 286);
-  /* Secondary body text. Absent before, which is why prose that should recede was written with
-     muted-foreground — a label colour — and came out too faint to read comfortably. */
-  --foreground-soft: oklch(0.44 0.012 286);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.17 0.006 286);
-  --primary: oklch(0.21 0.006 286);
-  --primary-foreground: oklch(0.985 0.002 286);
-  --secondary: oklch(0.962 0.003 286);
-  --secondary-foreground: oklch(0.21 0.006 286);
-  --muted: oklch(0.962 0.003 286);
-  /* 0.52, not the 0.6 this started as: measured 3.79:1 on the page and 3.54:1 on a muted row,
-     both under AA. At 0.52 it is 5.29:1 and 4.94:1. Small uppercase labels are the most common
-     use of this token, which is the worst place to be under the line. */
-  --muted-foreground: oklch(0.52 0.012 286);
-  --accent: oklch(0.962 0.003 286);
-  --accent-foreground: oklch(0.21 0.006 286);
-  --destructive: oklch(0.577 0.245 27.3);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.92 0.004 286);
-  /* A second, heavier rule for the edges that separate regions rather than rows. Spending one
-     border weight on everything is what flattens a hierarchy. */
-  --border-strong: oklch(0.85 0.006 286);
-  --input: oklch(0.92 0.004 286);
-  --ring: oklch(0.7 0.015 286);
-  --radius: 0.625rem;
+  /* surfaces — ground, card, elevated. Depth by contrast, not by shadow. Two border weights: the
+     row rule separates rows inside a region, the region rule separates regions and edges inputs.
+     Spending one weight on everything is what flattened the old hierarchy. */
+  --ground: light-dark(#f7f6f3, #141311);
+  --card: light-dark(#fffdfa, #1b1a17);
+  --elevated: light-dark(#f0eee8, #232019);
+  --rule: light-dark(rgba(30, 30, 30, 0.1), rgba(245, 243, 239, 0.08));
+  --rule-region: light-dark(rgba(30, 30, 30, 0.2), rgba(245, 243, 239, 0.16));
 
-  /* Ternary backup state. UNOBSERVED is deliberately amber — never gray, never green.
-     Every pair below was measured against WCAG AA (4.5:1) as chip text on its own chip, and
-     against the page:
-       verified   5.31:1 on chip · 5.78:1 on page   (was 4.52:1 on chip — passing by 0.02)
-       unobserved 4.86:1 on chip · 5.40:1 on page
-       failed     5.01:1 on chip · 5.89:1 on page
-     The colours are NOT reassigned, only given headroom: what they mean is a product decision,
-     not a design one. */
-  --state-verified: oklch(0.48 0.14 152);
-  --state-verified-bg: oklch(0.95 0.05 152);
-  --state-unobserved: oklch(0.52 0.13 72);
-  --state-unobserved-bg: oklch(0.955 0.07 85);
-  --state-failed: oklch(0.52 0.21 27);
-  --state-failed-bg: oklch(0.955 0.06 25);
+  /* ink — three weights only. Subtle is for the tracked uppercase labels and mono annotations,
+     and it still clears AA on every surface. */
+  --fg: light-dark(#1e1e1e, #f5f3ef);
+  --fg-muted: light-dark(#56534e, #b5aea4);
+  --fg-subtle: light-dark(#6e6963, #948e85);
+
+  /* THE AMBER RULE. One hue does three jobs — the accent (primary action, focus ring), the
+     UNOBSERVED state, and caution — and they stay apart by FORM, not by shade: the state is always
+     a diamond marker with a mono uppercase word, the accent is always a filled button or a ring,
+     caution is always tinted text or a tinted panel. Never a marker for caution, never a fill for
+     the state. The brand mark's eye is this same colour on purpose. */
+  --amber: light-dark(#9a5f09, #d68f26);
+  --amber-hover: light-dark(#845008, #c8811e);
+  --amber-ink: light-dark(#fffdfa, #141311);
+  --amber-soft: light-dark(rgba(186, 118, 13, 0.11), rgba(214, 143, 38, 0.14));
+  --amber-line: light-dark(rgba(186, 118, 13, 0.34), rgba(214, 143, 38, 0.38));
+
+  --caution: var(--amber);
+  --caution-soft: var(--amber-soft);
+  --caution-line: var(--amber-line);
+
+  /* artifact states — the data verdict. Colour AND shape, never colour alone; UNOBSERVED is amber,
+     never grey, never green. What they mean is a product decision, not a design one. */
+  --state-unobserved: var(--amber);
+  --state-unobserved-soft: var(--amber-soft);
+  --state-unobserved-line: var(--amber-line);
+  --state-verified: light-dark(#1c7a62, #5cb39a);
+  --state-verified-soft: light-dark(rgba(28, 122, 98, 0.1), rgba(92, 179, 154, 0.13));
+  --state-verified-line: light-dark(rgba(28, 122, 98, 0.3), rgba(92, 179, 154, 0.34));
+  --state-failed: light-dark(#b23a2c, #e0685a);
+  --state-failed-soft: light-dark(rgba(178, 58, 44, 0.09), rgba(224, 104, 90, 0.1));
+  --state-failed-line: light-dark(rgba(178, 58, 44, 0.28), rgba(224, 104, 90, 0.34));
+
+  /* job states — the process outcome. Deliberately quiet greys off the ink scale, and deliberately
+     NOT the state palette: a succeeded job is not a verified backup. Only a failed run borrows the
+     danger ink; a verify that could not run (INCONCLUSIVE) is as quiet as a pending one. */
+  --job-running: var(--fg);
+  --job-succeeded: var(--fg-muted);
+  --job-unknown: var(--fg-muted);
+  --job-pending: var(--fg-subtle);
+  --job-cancelled: var(--fg-subtle);
+  --job-failed: light-dark(#8f0808, #ff8a8a);
+
+  /* danger — destructive actions and refusals. A separate red from state-failed on purpose: a
+     delete button and a condemned backup must not read as the same thing. */
+  --danger: light-dark(#b00c0c, #c41e1e);
+  --danger-hover: light-dark(#8f0808, #dd2c2c);
+  --danger-ink: light-dark(#fff3f1, #fff1ef);
+  --danger-text: light-dark(#8f0808, #ff8a8a);
+  --danger-soft: light-dark(rgba(176, 12, 12, 0.1), rgba(196, 30, 30, 0.16));
+  --danger-line: light-dark(rgba(176, 12, 12, 0.42), rgba(221, 44, 44, 0.55));
 }
 
-
-/* The dark palette was written and then never reached: nothing in the application has ever set
-   the `.dark` class, so eighteen carefully chosen tokens were dead code and every deployment
-   shipped light-only. It now follows the operating system, which is the setting an operator has
-   already made — and `.dark` stays as the override hook a future toggle will use.
-
-   Ratios measured the same way: verified 8.40:1 on chip, unobserved 8.62:1, failed 5.81:1;
-   muted-foreground 4.75:1 on a muted row. */
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    --background: oklch(0.145 0.005 286);
-    --foreground: oklch(0.97 0 0);
-    --foreground-soft: oklch(0.76 0.012 286);
-    --card: oklch(0.185 0.006 286);
-    --card-foreground: oklch(0.97 0 0);
-    --primary: oklch(0.92 0.004 286);
-    --primary-foreground: oklch(0.21 0.006 286);
-    --secondary: oklch(0.22 0.006 286);
-    --secondary-foreground: oklch(0.97 0 0);
-    --muted: oklch(0.22 0.006 286);
-    --muted-foreground: oklch(0.62 0.012 286);
-    --accent: oklch(0.22 0.006 286);
-    --accent-foreground: oklch(0.97 0 0);
-    --destructive: oklch(0.7 0.19 22.2);
-    --destructive-foreground: oklch(0.98 0 0);
-    --border: oklch(1 0 0 / 12%);
-    --border-strong: oklch(1 0 0 / 22%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.55 0.015 286);
-    --state-verified: oklch(0.8 0.16 152);
-    --state-verified-bg: oklch(0.27 0.055 152);
-    --state-unobserved: oklch(0.84 0.15 85);
-    --state-unobserved-bg: oklch(0.29 0.06 80);
-    --state-failed: oklch(0.76 0.18 25);
-    --state-failed-bg: oklch(0.29 0.075 25);
-  }
+/* Forcing a theme is forcing color-scheme; light-dark() does the rest. */
+.light,
+[data-theme="light"] {
+  color-scheme: light;
 }
-
-.dark {
-  --background: oklch(0.145 0.005 286);
-  --foreground: oklch(0.97 0 0);
-  --foreground-soft: oklch(0.76 0.012 286);
-  --card: oklch(0.185 0.006 286);
-  --card-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.92 0.004 286);
-  --primary-foreground: oklch(0.21 0.006 286);
-  --secondary: oklch(0.22 0.006 286);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.22 0.006 286);
-  --muted-foreground: oklch(0.62 0.012 286);
-  --accent: oklch(0.22 0.006 286);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.7 0.19 22.2);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --border-strong: oklch(1 0 0 / 22%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.55 0.015 286);
-  --state-verified: oklch(0.8 0.16 152);
-  --state-verified-bg: oklch(0.27 0.055 152);
-  --state-unobserved: oklch(0.84 0.15 85);
-  --state-unobserved-bg: oklch(0.29 0.06 80);
-  --state-failed: oklch(0.76 0.18 25);
-  --state-failed-bg: oklch(0.29 0.075 25);
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
 }
-
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-foreground-soft: var(--foreground-soft);
+  /* The faces are vendored (src/fonts); next/font sets these two variables on <html>. */
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* shadcn names — the existing components keep compiling and simply restyle */
+  --color-background: var(--ground);
+  --color-foreground: var(--fg);
   --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--fg);
+  --color-muted: var(--elevated);
+  --color-muted-foreground: var(--fg-muted);
+  --color-subtle-foreground: var(--fg-subtle);
+  --color-border: var(--rule);
+  --color-border-region: var(--rule-region);
+  --color-input: var(--rule-region);
+  --color-ring: var(--amber);
+  --color-primary: var(--amber);
+  --color-primary-hover: var(--amber-hover);
+  --color-primary-foreground: var(--amber-ink);
+  /* `accent` IS the amber here — not shadcn's grey hover surface. Hover surfaces use `muted`. */
+  --color-accent: var(--amber);
+  --color-accent-foreground: var(--amber-ink);
+  --color-accent-soft: var(--amber-soft);
+  --color-accent-border: var(--amber-line);
+  --color-destructive: var(--danger);
+  --color-destructive-hover: var(--danger-hover);
+  --color-destructive-foreground: var(--danger-ink);
+  --color-destructive-text: var(--danger-text);
+  --color-destructive-soft: var(--danger-soft);
+  --color-destructive-border: var(--danger-line);
+
+  /* domain names — the distinction the product exists to make. They must survive any sync or
+     refactor under these names: collapsed into a generic success/warning/error, the product loses
+     it. */
+  --color-caution: var(--caution);
+  --color-caution-soft: var(--caution-soft);
+  --color-caution-border: var(--caution-line);
   --color-state-verified: var(--state-verified);
-  --color-state-verified-bg: var(--state-verified-bg);
+  --color-state-verified-soft: var(--state-verified-soft);
+  --color-state-verified-border: var(--state-verified-line);
   --color-state-unobserved: var(--state-unobserved);
-  --color-state-unobserved-bg: var(--state-unobserved-bg);
+  --color-state-unobserved-soft: var(--state-unobserved-soft);
+  --color-state-unobserved-border: var(--state-unobserved-line);
   --color-state-failed: var(--state-failed);
-  --color-state-failed-bg: var(--state-failed-bg);
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --color-state-failed-soft: var(--state-failed-soft);
+  --color-state-failed-border: var(--state-failed-line);
+  --color-job-running: var(--job-running);
+  --color-job-succeeded: var(--job-succeeded);
+  --color-job-unknown: var(--job-unknown);
+  --color-job-pending: var(--job-pending);
+  --color-job-cancelled: var(--job-cancelled);
+  --color-job-failed: var(--job-failed);
+
+  /* TRANSITIONAL aliases for the names the pre-redesign screens still use. Each screen drops them
+     as it is ported; delete an alias when its last use goes, and this block with the last alias.
+     New code never uses these. */
+  --color-foreground-soft: var(--fg-muted);
+  --color-border-strong: var(--rule-region);
+  --color-secondary: var(--elevated);
+  --color-secondary-foreground: var(--fg);
+  --color-state-verified-bg: var(--state-verified-soft);
+  --color-state-unobserved-bg: var(--state-unobserved-soft);
+  --color-state-failed-bg: var(--state-failed-soft);
+
+  /* four radii — chip, control, panel, dialog — with the Tailwind steps mapped onto them, so a
+     `rounded-md` input and a `rounded-lg` card land on the scale without a rename */
+  --radius-chip: 6px;
+  --radius-control: 9px;
+  --radius-panel: 14px;
+  --radius-dialog: 16px;
+  --radius-sm: var(--radius-chip);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-panel);
+  --radius-xl: var(--radius-dialog);
+
+  --shadow-card:
+    0 1px 0 light-dark(transparent, rgba(255, 255, 255, 0.03)),
+    0 8px 24px -12px light-dark(rgba(30, 30, 30, 0.28), rgba(0, 0, 0, 0.7));
+  --shadow-dialog: 0 40px 90px -30px light-dark(rgba(30, 30, 30, 0.35), rgba(0, 0, 0, 0.85));
 }
 
 @layer base {
@@ -163,9 +181,21 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
-  /* Visible keyboard focus for accessibility. */
+  /* One ring, every control: amber, visible — and the one place the accent may appear on a
+     destructive control. */
   :focus-visible {
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
+  }
+  /* Four things move: a running job's clock, the RUNNING pulse, a row's caret, hover colour. Under
+     reduced motion they stop. The elapsed counter keeps counting — it is information, not motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
   }
 }

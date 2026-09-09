@@ -32,6 +32,7 @@ export const en = {
   "common.delete": "Delete",
   "common.retry": "Retry",
   "common.loading": "Loading…",
+  "common.blocked": "Blocked",
   "common.error": "Something went wrong",
   "common.errorDetail": "The request failed: {message}",
   "common.configured": "Configured",
@@ -237,6 +238,7 @@ export const en = {
   "artifacts.detail.dependsOn": "Depends on",
   "artifacts.detail.verifiedVia": "Verified via",
   "artifacts.checksumOnly": "checksum only",
+  "artifacts.noVerdict": "no verdict yet",
   "artifacts.downgradedReason":
     "Full restore is not possible for this artifact; only its checksum was verified.",
   "artifacts.detail.raw": "Original size",
