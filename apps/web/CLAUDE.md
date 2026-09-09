@@ -214,6 +214,18 @@ screens that follow:
   it off, the staged mode is withheld with its reason and a full-restore verify is warned as one
   that would only ever end "could not run". A channel that is recording failures offers "Disable
   instead" before "Delete": deleting it throws away the only evidence deliveries were not arriving.
+- **The out-of-app screens and settings.** Sign-in, first-run setup and the bootstrap-password
+  wall share `AuthFrame`: the mark, a title, one sentence, the form, nothing else — the server
+  refuses everything else in those states, and a control that would only produce an error is
+  worse than none. The password floor is the server's own (`auth.ts minPasswordLength`, twelve),
+  asked for in the form only to save a round trip that ends in the same refusal. The four settings
+  panels share `SettingsPanel`; a non-admin is told so in the lock tone, never shown an empty
+  list. Anything the server shows once — the escrow identity, a minted temporary password — sits
+  in a code block behind an `AcknowledgeCheckbox`, and the button that dismisses it carries the
+  reason while the box is unticked, because dismissing is irreversible. A self-backup that
+  SUCCEEDED wears the UNOBSERVED ink: nobody restored it, and green is for what a restore opened.
+  The guided card counts its steps, and a check the server recorded as refused says so on its row
+  instead of looking like one nobody has tried.
 
 ## How it talks to the server
 

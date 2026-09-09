@@ -132,3 +132,23 @@ describe("GuidedSetup — the canary and probe steps close", () => {
     await waitFor(() => expect(screen.queryByText(/canary/i)).toBeNull());
   });
 });
+
+describe("GuidedSetup — a refused check is not an unrun one", () => {
+  it("says the canary ran and was refused, instead of leaving the step looking untried", async () => {
+    renderWith({ destinations: [{ ...DESTINATION, lastCanaryAt: "2026-09-01T00:00:00.000Z", lastCanaryOk: false }] });
+    await waitFor(() =>
+      expect(screen.getByText(/encryption keys/i).closest("li")).toHaveAttribute("data-done", "true"),
+    );
+    expect(screen.getByText(/It ran and was refused — the bucket has not been proven writable/)).toBeInTheDocument();
+  });
+
+  it("counts the steps done in the header", async () => {
+    renderWith();
+    await waitFor(() =>
+      expect(screen.getByText(/encryption keys/i).closest("li")).toHaveAttribute("data-done", "true"),
+    );
+    // keys, destination, target, policy are present in the fixture; the two checks are not.
+    expect(screen.getByText("4 of 6 done")).toBeInTheDocument();
+  });
+});
+

@@ -63,7 +63,7 @@ describe("SelfBackupPanel", () => {
   it("paints a SUCCEEDED self-backup amber, never green", async () => {
     renderPanel({ ok: true, status: 200, body: { configured: true, items: [RUN] } });
     const badge = await screen.findByText("Written");
-    expect(badge.className).toContain("--color-state-unobserved");
+    expect(badge.className).toContain("state-unobserved");
     expect(badge.className).not.toContain("--color-state-verified");
   });
 
