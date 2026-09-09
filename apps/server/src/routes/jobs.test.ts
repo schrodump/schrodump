@@ -14,6 +14,8 @@ const service: JobsService = {
         id: "a1",
         jobId: "j1",
         destinationId: "d1",
+        targetName: null,
+        policyName: null,
         state: "UNOBSERVED",
         verifiedLevel: null,
         verifiedDegraded: false,

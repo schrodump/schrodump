@@ -12,6 +12,12 @@ export interface ArtifactRecord {
   id: string;
   jobId: string;
   destinationId: string;
+  // What was backed up, resolved by the server through the job that wrote the artifact: the policy
+  // it ran under and that policy's target. Both null when the policy was deleted — an absence the
+  // UI renders as absence, never as a placeholder that reads like a name. Without these the row led
+  // with the bucket key, a storage path, because nothing else on it said what the artifact was.
+  targetName: string | null;
+  policyName: string | null;
   state: string;
   // How the artifact reached that state: the verify level that actually ran, and whether it was a
   // downgrade from what the policy asked. Exposed because `state` alone cannot separate a green

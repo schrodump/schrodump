@@ -8,7 +8,7 @@ import { generateAgeKeyPair } from "../crypto/artifact.js";
 import {
   createEncryptionKeyService,
   createJobsService,
-  JOB_SUBJECT_INCLUDE,
+  ARTIFACT_SUBJECT_INCLUDE, JOB_SUBJECT_INCLUDE,
   toArtifactRecord,
   toJobRecord,
 } from "./wiring.js";
@@ -42,6 +42,23 @@ const row = {
 };
 
 describe("toArtifactRecord", () => {
+  it("names the target and policy the artifact was written for, resolved through its job", () => {
+    // The row used to lead with the bucket key — a storage path — because nothing on it said WHAT
+    // was backed up. The job knows: it ran under a policy, and the policy points at a target.
+    const record = toArtifactRecord({
+      ...row,
+      job: { policy: { name: "nightly-eu", target: { name: "payments-us" } } },
+    });
+    expect(record.targetName).toBe("payments-us");
+    expect(record.policyName).toBe("nightly-eu");
+  });
+
+  it("answers null, not a placeholder, when the policy is gone or the relation was not loaded", () => {
+    expect(toArtifactRecord(row).targetName).toBe(null);
+    expect(toArtifactRecord({ ...row, job: { policy: null } }).targetName).toBe(null);
+    expect(toArtifactRecord({ ...row, job: { policy: null } }).policyName).toBe(null);
+  });
+
   it("converts BigInt sizes to number so Fastify can JSON-serialize the row", () => {
     const record = toArtifactRecord(row);
     expect(record.sizeRawBytes).toBe(9_000_000_000);
@@ -223,6 +240,8 @@ describe("createJobsService list bounds", () => {
     const call = spy.calls.find((c) => c.model === "Artifact" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
+    // The subject rides along in the same query, declared once so query and mapper agree.
+    expect((call?.args as { include?: unknown } | undefined)?.include).toEqual(ARTIFACT_SUBJECT_INCLUDE);
     // Zeroes because the fake groupBy returns nothing — the point is that the shape is present and
     // comes from the database rather than from items.length.
     expect(result.counts).toEqual({ VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 });

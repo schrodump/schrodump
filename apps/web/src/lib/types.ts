@@ -20,6 +20,10 @@ export interface Artifact {
   id: string;
   jobId: string;
   destinationId: string;
+  // What was backed up — the policy's target and the policy — resolved by the server through the
+  // job that wrote it. Null when the policy is gone: rendered as absence, never as a placeholder.
+  targetName: string | null;
+  policyName: string | null;
   state: ArtifactState;
   // How that state was reached: the verify level that actually ran, and whether it was a downgrade
   // from what the policy asked. `state` alone cannot tell a green proven by a real restore from one

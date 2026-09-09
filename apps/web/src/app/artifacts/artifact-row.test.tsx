@@ -19,6 +19,8 @@ const base: Artifact = {
   id: "artifact-1",
   jobId: "job-1",
   destinationId: "destination-1",
+  targetName: null,
+  policyName: null,
   state: "VERIFIED",
   verifiedLevel: null,
   verifiedDegraded: false,

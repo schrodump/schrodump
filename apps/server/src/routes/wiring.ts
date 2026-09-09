@@ -269,11 +269,16 @@ export function toArtifactRecord(row: {
   dependsOn: string[];
   createdAt: Date;
   updatedAt: Date;
+  // Loaded through ARTIFACT_SUBJECT_INCLUDE. Optional so a caller that did not ask for the subject
+  // still maps; absent or null answers null, never a placeholder.
+  job?: { policy: { name: string; target: { name: string } | null } | null } | null;
 }): ArtifactRecord {
   return {
     id: row.id,
     jobId: row.jobId,
     destinationId: row.destinationId,
+    targetName: row.job?.policy?.target?.name ?? null,
+    policyName: row.job?.policy?.name ?? null,
     state: row.state,
     // Passed through as recorded: verifiedLevel is null until a verify reaches a verdict, and a
     // green with verifiedDegraded true is a checksum the operator asked full restore for — the row
@@ -319,6 +324,13 @@ export const JOB_SUBJECT_INCLUDE = {
       job: { select: { policy: { select: { name: true, target: { select: { name: true } } } } } },
     },
   },
+} as const;
+
+// An artifact's subject, reached through the job that wrote it: the policy names the run, the
+// policy's target says what was backed up. Declared once, like JOB_SUBJECT_INCLUDE, so the query
+// and the mapper cannot drift into disagreeing about which relations were loaded.
+export const ARTIFACT_SUBJECT_INCLUDE = {
+  job: { select: { policy: { select: { name: true, target: { select: { name: true } } } } } },
 } as const;
 
 // Nulls are meaningful and are NOT collapsed to a placeholder: a manual backup genuinely has no
@@ -402,7 +414,11 @@ export function createJobsService(
     listArtifacts: async (organizationId) => {
       const db = scopedPrisma(prisma, organizationId);
       const [rows, total, grouped] = await Promise.all([
-        db.artifact.findMany({ orderBy: { createdAt: "desc" }, take: LIST_PAGE_SIZE }),
+        db.artifact.findMany({
+          orderBy: { createdAt: "desc" },
+          take: LIST_PAGE_SIZE,
+          include: ARTIFACT_SUBJECT_INCLUDE,
+        }),
         db.artifact.count(),
         db.artifact.groupBy({ by: ["state"], _count: { _all: true } }),
       ]);
