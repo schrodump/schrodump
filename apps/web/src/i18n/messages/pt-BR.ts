@@ -48,6 +48,11 @@ export const ptBR: Record<MessageKey, string> = {
   "theme.system": "Sistema",
   "theme.light": "Claro",
   "theme.dark": "Escuro",
+  "menu.label": "Conta e preferências",
+  "theme.systemNow": "agora {mode}",
+  "locale.native.en": "English",
+  "locale.native.pt-BR": "Português (Brasil)",
+  "locale.native.es": "Español",
 
   "state.verified": "Verificado",
   "state.unobserved": "Não observado",

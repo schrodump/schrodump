@@ -46,6 +46,11 @@ export const en = {
   "theme.system": "System",
   "theme.light": "Light",
   "theme.dark": "Dark",
+  "menu.label": "Account and preferences",
+  "theme.systemNow": "now {mode}",
+  "locale.native.en": "English",
+  "locale.native.pt-BR": "Português (Brasil)",
+  "locale.native.es": "Español",
 
   "state.verified": "Verified",
   "state.unobserved": "Unobserved",

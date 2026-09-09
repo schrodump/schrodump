@@ -48,6 +48,11 @@ export const es: Record<MessageKey, string> = {
   "theme.system": "Sistema",
   "theme.light": "Claro",
   "theme.dark": "Oscuro",
+  "menu.label": "Cuenta y preferencias",
+  "theme.systemNow": "ahora {mode}",
+  "locale.native.en": "English",
+  "locale.native.pt-BR": "Português (Brasil)",
+  "locale.native.es": "Español",
 
   "state.verified": "Verificado",
   "state.unobserved": "No observado",

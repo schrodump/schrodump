@@ -226,13 +226,17 @@ screens that follow:
   SUCCEEDED wears the UNOBSERVED ink: nobody restored it, and green is for what a restore opened.
   The guided card counts its steps, and a check the server recorded as refused says so on its row
   instead of looking like one nobody has tried.
-- **The top bar** (`app-shell.tsx`): the mark and the name, the nav as segments in the order the
-  product reads (what is proven, what ran, then the configuration), the locale as a code, and a
-  `ThemeToggle` with three states — system, light, dark. An explicit choice stamps `data-theme`
-  on `<html>`, which the `light-dark()` tokens read, and is stored under one localStorage key
-  that the root layout applies before the first paint. The transitional aliases and the legacy
-  button names are gone: every screen is on the contract now, and a new one has nothing to fall
-  back on.
+- **The top bar** (`app-shell.tsx`): the mark at 36px and the name, the nav as segments in the
+  order the product reads (what is proven, what ran, then the configuration), and one
+  `AccountMenu` for the three things that are about the person — language, theme, sign out. The
+  trigger shows the current language's flag (`country-flag-icons`, SVG: an emoji flag renders as
+  two letters on Windows) and its code, nothing more, so the bar keeps its width for the nav. The
+  theme has three states — system, light, dark (`useThemeChoice`); an explicit choice stamps
+  `data-theme` on `<html>`, which the `light-dark()` tokens read, and is stored under one
+  localStorage key that the root layout applies before the first paint. Beside "System" the menu
+  says what the browser currently reports ("now dark"), because an OS in dark mode and a browser
+  set to light look, from the page, like a toggle that does not work. The transitional aliases
+  and the legacy button names are gone: every screen is on the contract now.
 - **Dashboard and audit.** The counters keep one shape whether the fleet is clean or on fire:
   UNOBSERVED leads at display size with its diamond, VERIFIED and FAILED stay subordinate, and
   FAILED is grey with "nothing to answer for" until there is something to be red about. Under
