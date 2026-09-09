@@ -237,12 +237,14 @@ screens that follow:
   says what the browser currently reports ("now dark"), because an OS in dark mode and a browser
   set to light look, from the page, like a toggle that does not work. The transitional aliases
   and the legacy button names are gone: every screen is on the contract now.
-- **Dashboard and audit.** The counters keep one shape whether the fleet is clean or on fire:
+- **The catalog is the home screen** (`app/page.tsx`; `/artifacts` redirects there). The product's
+  first question is how many backups nobody has checked, and that is the catalog's header — so
+  there is no separate dashboard to keep in step with it. The counters keep one shape whether
+  the fleet is clean or on fire:
   UNOBSERVED leads at display size with its diamond, VERIFIED and FAILED stay subordinate, and
   FAILED is grey with "nothing to answer for" until there is something to be red about. Under
-  them, one line says the numbers were counted server-side over the whole table. Recent jobs
-  spend the row on the reason, never the correlation id; the state cell is the `JobStateChip`.
-  The audit trail is admin-only on the server; the page shows the lock sentence for other roles
+  them, one line says the numbers were counted server-side over the whole table, and the oldest
+  UNOBSERVED artifact is named as the oldest open question. The audit trail is admin-only on the server; the page shows the lock sentence for other roles
   instead of an empty list, groups entries by the viewer's day, filters the PAGE by action or
   actor ("system" is a job's own credential read), and the footer says what a filter narrowed
   and what the table holds.

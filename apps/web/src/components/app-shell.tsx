@@ -19,8 +19,7 @@ import { cn } from "@/lib/cn";
 // adminOnly hides the link for non-admins — the page and the API refuse them anyway, so showing a
 // link that leads to a 403 would only invite a dead end. The audit trail is admin-only.
 const NAV: { href: string; key: MessageKey; adminOnly?: boolean }[] = [
-  { href: "/", key: "nav.dashboard" },
-  { href: "/artifacts", key: "nav.artifacts" },
+  { href: "/", key: "nav.artifacts" },
   { href: "/jobs", key: "nav.jobs" },
   { href: "/targets", key: "nav.targets" },
   { href: "/destinations", key: "nav.destinations" },
@@ -64,7 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <BrandMark className="size-9" />
             {t("app.name")}
           </Link>
-          <nav className="flex flex-1 flex-wrap items-center gap-0.5" aria-label={t("nav.dashboard")}>
+          <nav className="flex flex-1 flex-wrap items-center gap-0.5" aria-label={t("nav.label")}>
             {nav.map((item) => {
               const active = pathname === item.href;
               return (
