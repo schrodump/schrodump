@@ -19,6 +19,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     // inherits them; `font-sans` on body is the default face, `font-mono` opts a machine fact in.
     <html lang="en" suppressHydrationWarning className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-screen font-sans antialiased">
+        {/* The stored theme, stamped before the first paint: a page that hydrates light and then
+            turns dark is a flash the operator sees on every navigation. One key, read once. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('schrodump-theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t}}catch(e){}",
+          }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>

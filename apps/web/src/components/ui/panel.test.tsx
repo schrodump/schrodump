@@ -3,7 +3,6 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Alert, AlertTitle } from "./alert";
 import { Panel } from "./panel";
 
 describe("Panel — tone carries the meaning", () => {
@@ -25,11 +24,11 @@ describe("Panel — tone carries the meaning", () => {
     expect(screen.getByText("nothing was filled in").className).toContain("destructive");
   });
 
-  it("Alert keeps role=alert and maps warning onto the caution tone", () => {
+  it("a panel that must be announced takes role=alert itself, in the caution tone", () => {
     render(
-      <Alert variant="warning">
-        <AlertTitle>Verify is off for this policy</AlertTitle>
-      </Alert>,
+      <Panel tone="warning" role="alert">
+        Verify is off for this policy
+      </Panel>,
     );
     const alert = screen.getByRole("alert");
     expect(alert).toHaveAttribute("data-tone", "warning");

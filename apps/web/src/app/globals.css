@@ -145,17 +145,6 @@
   --color-job-cancelled: var(--job-cancelled);
   --color-job-failed: var(--job-failed);
 
-  /* TRANSITIONAL aliases for the names the pre-redesign screens still use. Each screen drops them
-     as it is ported; delete an alias when its last use goes, and this block with the last alias.
-     New code never uses these. */
-  --color-foreground-soft: var(--fg-muted);
-  --color-border-strong: var(--rule-region);
-  --color-secondary: var(--elevated);
-  --color-secondary-foreground: var(--fg);
-  --color-state-verified-bg: var(--state-verified-soft);
-  --color-state-unobserved-bg: var(--state-unobserved-soft);
-  --color-state-failed-bg: var(--state-failed-soft);
-
   /* four radii — chip, control, panel, dialog — with the Tailwind steps mapped onto them, so a
      `rounded-md` input and a `rounded-lg` card land on the scale without a rename */
   --radius-chip: 6px;

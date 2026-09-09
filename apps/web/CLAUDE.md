@@ -153,7 +153,7 @@ The semantic components, each carrying one law and a test that proves it by muta
   reads before the button, so in a right-aligned footer it sits to the left of the action it
   explains.
 - **`Panel`** — seven tones; tone carries the meaning. A `lock` is deliberately not red: a
-  constraint is not a failure. `Alert` is a `Panel` with `role="alert"` and the legacy variant names.
+  constraint is not a failure. A panel that must be announced takes `role="alert"` itself.
 
 The composition pieces came with the artifact catalog port and are meant to be reused by the
 screens that follow:
@@ -226,6 +226,13 @@ screens that follow:
   SUCCEEDED wears the UNOBSERVED ink: nobody restored it, and green is for what a restore opened.
   The guided card counts its steps, and a check the server recorded as refused says so on its row
   instead of looking like one nobody has tried.
+- **The top bar** (`app-shell.tsx`): the mark and the name, the nav as segments in the order the
+  product reads (what is proven, what ran, then the configuration), the locale as a code, and a
+  `ThemeToggle` with three states — system, light, dark. An explicit choice stamps `data-theme`
+  on `<html>`, which the `light-dark()` tokens read, and is stored under one localStorage key
+  that the root layout applies before the first paint. The transitional aliases and the legacy
+  button names are gone: every screen is on the contract now, and a new one has nothing to fall
+  back on.
 - **Dashboard and audit.** The counters keep one shape whether the fleet is clean or on fire:
   UNOBSERVED leads at display size with its diamond, VERIFIED and FAILED stay subordinate, and
   FAILED is grey with "nothing to answer for" until there is something to be red about. Under

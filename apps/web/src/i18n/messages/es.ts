@@ -44,6 +44,10 @@ export const es: Record<MessageKey, string> = {
   "locale.en": "Inglés",
   "locale.pt-BR": "Portugués (Brasil)",
   "locale.es": "Español",
+  "theme.label": "Tema",
+  "theme.system": "Sistema",
+  "theme.light": "Claro",
+  "theme.dark": "Oscuro",
 
   "state.verified": "Verificado",
   "state.unobserved": "No observado",

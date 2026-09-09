@@ -40,7 +40,7 @@ export function CredentialField({
       {configured && !replacing ? (
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">{t("common.configured")}</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => setReplacing(true)}>
+          <Button type="button" variant="quiet" size="sm" onClick={() => setReplacing(true)}>
             {t("common.replace")}
           </Button>
         </div>
