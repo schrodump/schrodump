@@ -244,6 +244,13 @@ export interface ArtifactList {
   items: Artifact[];
   total: number;
   counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
+  // How the VERIFIED ones were verified — a restore that reproduced the database, or a hash that
+  // matched the manifest. The two greens are not the same claim.
+  verifiedByLevel: { FULL_RESTORE: number; CHECKSUM: number };
+  // Distinct destinations holding at least one artifact.
+  destinations: number;
+  // The UNOBSERVED artifact that has waited longest for a verdict: the oldest open question.
+  oldestUnobserved: { id: string; createdAt: string; targetName: string | null; executionMode: ExecutionMode } | null;
 }
 
 // Public recipients only — an identity never appears in this payload, which is what makes the

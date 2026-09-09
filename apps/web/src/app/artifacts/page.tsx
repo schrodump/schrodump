@@ -10,6 +10,7 @@ import { DeleteArtifactButton } from "@/components/delete-artifact-dialog";
 import { RestoreButton } from "@/components/restore-dialog";
 import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { StatusBadge } from "@/components/status-badge";
+import { StateCounters } from "@/components/state-counters";
 import { VerifyLevelChip } from "@/components/verify-level-chip";
 import { Button } from "@/components/ui/button";
 import { DetailGrid, type Fact } from "@/components/ui/detail-grid";
@@ -226,11 +227,18 @@ function groupByDay(items: Artifact[], now: Date): { key: string; label: "today"
 
 // The catalog has no plural rules beyond one-versus-many, so the singular gets its own key rather
 // than a "1 artifacts" that reads as a bug.
-function summaryOf(t: ReturnType<typeof useT>, data: { total: number; counts: { UNOBSERVED: number } }): string {
+function summaryOf(
+  t: ReturnType<typeof useT>,
+  data: { total: number; destinations: number; counts: { UNOBSERVED: number } },
+): string {
   const pct = data.total > 0 ? ((data.counts.UNOBSERVED / data.total) * 100).toFixed(1) : "0.0";
+  const destinations =
+    data.destinations === 1
+      ? t("artifacts.destinations.one")
+      : t("artifacts.destinations", { count: data.destinations.toLocaleString() });
   return data.total === 1
-    ? t("artifacts.summary.one", { pct })
-    : t("artifacts.summary", { total: String(data.total), pct });
+    ? t("artifacts.summary.one", { destinations, pct })
+    : t("artifacts.summary", { total: data.total.toLocaleString(), destinations, pct });
 }
 
 function groupCountOf(t: ReturnType<typeof useT>, count: number): string {
@@ -277,8 +285,32 @@ export default function ArtifactsPage() {
 
       {data !== undefined ? (
         <div className="mt-5 space-y-3">
-          {/* The fleet's shape, from the server's counts over the whole table — never from the page.
-              The share that is still a question leads, because it is the number that matters. */}
+          {/* The catalog leads with the same figure the dashboard does, in the catalog's own words,
+              and names the oldest open question under it — the artifact that has waited longest
+              for anyone to look. All of it from the server's counts over the whole table. */}
+          <StateCounters
+            counts={data.counts}
+            total={data.total}
+            verifiedByLevel={data.verifiedByLevel}
+            caption={t("artifacts.caption")}
+            hint={t("artifacts.hint")}
+            facts={
+              data.oldestUnobserved !== null ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10.5px] tracking-[0.13em] uppercase text-subtle-foreground">
+                  <span>{t("artifacts.oldestUnverified")}</span>
+                  <span className="rounded-sm border border-state-unobserved-border bg-state-unobserved-soft px-2 py-0.5 tracking-[0.04em] normal-case text-state-unobserved">
+                    {t("artifacts.oldestValue", {
+                      age: formatRelative(data.oldestUnobserved.createdAt),
+                      target: data.oldestUnobserved.targetName ?? data.oldestUnobserved.id.slice(0, 8),
+                      mode: t(`executionMode.${data.oldestUnobserved.executionMode}`),
+                    })}
+                  </span>
+                </div>
+              ) : undefined
+            }
+          />
+          {/* The fleet's shape as a bar: the share that is still a question leads, because it is
+              the number that matters. */}
           <ProportionBar
             label={summaryOf(t, data)}
             parts={[

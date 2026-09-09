@@ -20,7 +20,7 @@ function serviceWith(enqueueRestore = vi.fn(() => Promise.resolve("job-r"))): Jo
         stats: { oldestPendingScheduledAt: null, failedLast24h: 0, inconclusiveLast24h: 0 },
       }),
     listArtifacts: () =>
-    Promise.resolve({ items: [], total: 0, counts: { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 } }),
+    Promise.resolve({ items: [], total: 0, counts: { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 }, verifiedByLevel: { FULL_RESTORE: 0, CHECKSUM: 0 }, destinations: 0, oldestUnobserved: null }),
     deleteArtifact: () => Promise.resolve({ ok: true }),
     enqueueBackup: () => Promise.resolve("b"),
     enqueueVerify: () => Promise.resolve("v"),
