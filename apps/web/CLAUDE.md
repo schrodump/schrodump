@@ -146,9 +146,37 @@ The semantic components, each carrying one law and a test that proves it by muta
 - **`Button`** — six variants (primary, secondary, quiet, ghost, accent, danger; the three legacy
   names map onto them) and **`disabledReason`**, the design system's only way to disable: the
   reason is rendered beside the control as "Blocked — …" and announced through `aria-describedby`.
-  There are no bare greyed-out controls in this product.
+  There are no bare greyed-out controls in this product. Passing the prop at all (even `null`) keeps
+  the button inside its wrapper span: the first version added the wrapper only when a reason
+  appeared, React swapped `<button>` for `<span><button/></span>` and REMOUNTED the control, and a
+  reference held across the change (a test's, a focus ring's) pointed at a detached node. The reason
+  reads before the button, so in a right-aligned footer it sits to the left of the action it
+  explains.
 - **`Panel`** — seven tones; tone carries the meaning. A `lock` is deliberately not red: a
   constraint is not a failure. `Alert` is a `Panel` with `role="alert"` and the legacy variant names.
+
+The composition pieces came with the artifact catalog port and are meant to be reused by the
+screens that follow:
+
+- **`DialogShell`** + **`SubjectRow`** (`ui/dialog.tsx`) — a portal to `document.body` (a dialog
+  inside a `<summary>` row would inherit its `preventDefault`), Escape closes, focus lands inside.
+  The subject row names WHAT the dialog acts on — state glyph, target name, engine/mode, size, short
+  id — before any wording, so a wrong-row click is caught by reading, not by regret.
+- **`RetypeToConfirm`** and **`AcknowledgeCheckbox`** — the two friction gates. Retype for the
+  case with a single name (the artifact id, the target database); acknowledge where there is none to
+  retype (a full-cluster overwrite reaches every database on the destination) or where the loss
+  needs a sentence read out (deleting a `VERIFIED` artifact). The primary action carries the reason
+  it is blocked through `disabledReason`; a gate never silently greys a button.
+- **The overwrite copy is true to `restore.ts`.** There is no sandbox for a restore. Off means a
+  database that already holds data is refused and the job says so; on means live data is replaced.
+  The design's first draft claimed an isolated run — a comforting sentence the code does not honour.
+- **`FilterChip`**, **`DetailGrid`**, **`ProportionBar`**, **`ruled-list.tsx`** (`ColumnHeaders`,
+  `GroupHeader`, `ListFooter`) — the list vocabulary. `DetailGrid` drops a null fact instead of
+  printing "—": an absent value is absence. `ListFooter` says how many of the total are shown, and
+  always that the counters come from the whole table. Rows are grouped by the viewer's local day
+  (`dayGroupOf`), newest group and newest row first regardless of arrival order. Counts have a
+  singular key (`artifacts.groupCount.one`) — the catalog has no plural rules beyond one-or-many,
+  and "1 artifacts" reads as a bug.
 
 ## How it talks to the server
 

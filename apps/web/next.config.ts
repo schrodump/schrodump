@@ -14,6 +14,9 @@ const server = process.env.SCHRODUMP_API_URL ?? "http://localhost:8080";
 const nextConfig: NextConfig = {
   // The production image ships only traced files; without this the runtime would need the whole
   // node_modules of the app. Tracing is rooted at the monorepo, not at apps/web.
+  // `next dev` would otherwise append a generated "agent rules" block to apps/web/CLAUDE.md on
+  // every start, leaving the tree dirty; that file is hand-written and reviewed.
+  agentRules: false,
   output: "standalone",
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
   async rewrites() {
