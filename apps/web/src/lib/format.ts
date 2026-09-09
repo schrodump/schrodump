@@ -110,3 +110,21 @@ export function formatDate(iso: string): string {
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
 }
+
+// The zone the screen renders in, named, with its offset — "America/Sao_Paulo · UTC−03:00". A ledger
+// of timestamps says which clock it is on, once, in its footer; the old UTC slice bug is exactly
+// the kind of mismatch a reader cannot detect without this line.
+export function timeZoneNote(now: Date = new Date()): string {
+  let zone = "local";
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local";
+  } catch {
+    // Older engines: keep the placeholder; the offset below still tells the reader which clock.
+  }
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "−" : "+";
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${zone} · UTC${sign}${hh}:${mm}`;
+}

@@ -35,6 +35,8 @@ const base: Job = {
   exitCode: 0,
   stderr: null,
   reason: "verify level NONE — artifact remains UNOBSERVED",
+  artifact: null,
+  restoreTarget: null,
   createdAt: "2026-09-03T15:14:00.000Z",
 };
 

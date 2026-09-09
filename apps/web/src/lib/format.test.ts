@@ -10,6 +10,7 @@ import {
   formatRelative,
   formatServerVersion,
   formatTime,
+  timeZoneNote,
 } from "./format";
 
 describe("formatBytes", () => {
@@ -111,5 +112,16 @@ describe("dayGroupOf", () => {
 
   it("groups an unparseable value under an empty key rather than dropping it", () => {
     expect(dayGroupOf("not a date", now)).toEqual({ key: "", label: null });
+  });
+});
+
+describe("timeZoneNote", () => {
+  it("names the zone and its offset in the ±hh:mm form", () => {
+    const note = timeZoneNote(new Date("2026-09-09T12:00:00Z"));
+    expect(note).toMatch(/^[A-Za-z_/+-]+ · UTC[+−]\d{2}:\d{2}$/u);
+    // The offset is the viewer's, computed from the same clock the screen renders on.
+    const minutes = -new Date("2026-09-09T12:00:00Z").getTimezoneOffset();
+    const hh = String(Math.floor(Math.abs(minutes) / 60)).padStart(2, "0");
+    expect(note.endsWith(`${hh}:${String(Math.abs(minutes) % 60).padStart(2, "0")}`)).toBe(true);
   });
 });

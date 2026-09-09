@@ -177,6 +177,21 @@ screens that follow:
   (`dayGroupOf`), newest group and newest row first regardless of arrival order. Counts have a
   singular key (`artifacts.groupCount.one`) — the catalog has no plural rules beyond one-or-many,
   and "1 artifacts" reads as a bug.
+- **`MetricTile`** — a number, its name, its unit line, one sentence on what it means. The tone
+  IS the meaning: `caution` for a number asking for attention, `danger` for a broken process,
+  `quiet` for a count that is neither — a verify that could not run is not a failure and is not
+  painted like one. The jobs ledger's four tiles read `counts`/`stats` the server computed over the
+  whole table; a tile that counted the page would say "0 failed" on the day the list got trimmed.
+- **The jobs ledger** (`app/jobs/page.tsx`). A job state is a process outcome, so every row also
+  shows the verdict on the data it touched — `job.artifact` with the artifact's own glyph and ink,
+  never borrowed from the job palette. Timing reads from a clock the page hands down (`now`), which
+  ticks only while a RUNNING or PENDING row exists; the row itself owns no timer, which is what
+  keeps it testable. Five minutes is the one threshold (`LONG_WAIT_MS`) that turns a queue wait into
+  "workers behind" on the row, in the fact, and on the tile. A downgraded verify is recognised from
+  the worker's reason sentence (`isDowngrade`, see `apps/server/src/jobs/verify.ts`) — the seam is
+  in one place, waiting for a structured flag. A filter narrows the PAGE; the footer then says how
+  many of the page's rows match and how many jobs the table holds, rather than letting "showing 3
+  of 1,284" imply the three are all there is.
 
 ## How it talks to the server
 

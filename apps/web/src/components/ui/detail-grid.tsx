@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 export type Fact = {
   label: string;
   value: ReactNode | null | undefined;
-  tone?: "plain" | "caution" | "danger" | "verified";
+  tone?: "plain" | "caution" | "danger" | "verified" | "unobserved" | "failed";
 };
 
 const TONE: Record<NonNullable<Fact["tone"]>, string> = {
@@ -18,6 +18,10 @@ const TONE: Record<NonNullable<Fact["tone"]>, string> = {
   caution: "text-caution",
   danger: "text-destructive-text",
   verified: "text-state-verified",
+  // The artifact states keep their own inks, distinct from caution: an UNOBSERVED artifact is a
+  // question, not a warning, and the marker beside it — not the colour alone — says which.
+  unobserved: "text-state-unobserved",
+  failed: "text-state-failed",
 };
 
 const present = (fact: Fact): boolean =>

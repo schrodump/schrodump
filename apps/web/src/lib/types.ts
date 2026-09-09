@@ -9,6 +9,7 @@ import type {
   JobKind,
   JobState,
   ProbeFailureCode,
+  RestoreTarget,
   Role,
   SealMode,
   VerifyLevel,
@@ -79,6 +80,13 @@ export interface Job {
   stderr: string | null;
   reason: string | null;
   createdAt: string;
+  // The artifact this run is about — the one a VERIFY or RESTORE acts on, or the one a BACKUP
+  // produced (null until it has) — with the state it is in NOW. The ledger shows the verdict on the
+  // data beside every reference, because a job state is a process outcome and says nothing about
+  // whether the data is there.
+  artifact: { id: string; state: ArtifactState } | null;
+  // A RESTORE's scope; null for every other kind.
+  restoreTarget: RestoreTarget | null;
 }
 
 // POST /targets/discover, and /targets/:id/test-connection. `databases` is what the server holds,
@@ -200,6 +208,16 @@ export interface SelfBackupList {
 export interface JobList {
   items: Job[];
   total: number;
+  // Over the WHOLE table, never the page: a chip counted from the newest two hundred rows would
+  // shrink the moment the list got trimmed.
+  counts: { byState: Record<JobState, number>; byKind: Record<JobKind, number> };
+  stats: {
+    // The scheduled time of the PENDING job that has waited longest; with "now" it is how far
+    // behind the workers are.
+    oldestPendingScheduledAt: string | null;
+    failedLast24h: number;
+    inconclusiveLast24h: number;
+  };
 }
 
 // One recorded action from the audit trail. `actorEmail` is null for a job's credential reads —
