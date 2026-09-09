@@ -1,0 +1,85 @@
+{
+  "projectId": "fe1bcdc9-cd00-44b6-9dbd-b13a602c8a1b",
+  "shape": "package",
+  "pkg": "@schrodump/web",
+  "globalName": "SchrodumpDS",
+  "srcDir": "src/components",
+  "tsconfig": "tsconfig.json",
+  "buildCmd": "node .design-sync/prepare.mjs",
+  "cssEntry": "styles/tailwind.css",
+  "extraFonts": [
+    "../../../../fonts.css"
+  ],
+  "provider": {
+    "component": "Providers"
+  },
+  "componentSrcMap": {
+    "Providers": null,
+    "I18nProvider": null
+  },
+  "docsDir": "../../../../docs",
+  "dtsPropsFor": {
+    "StatusBadge": "/** The artifact verdict: colour AND shape. UNOBSERVED is amber, never grey, never green. */ state: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\";",
+    "StateMarker": "state: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\";",
+    "StateGlyph": "state: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\"; /** px; default 10 */ size?: number;",
+    "SubjectRow": "state: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\"; /** what the dialog acts on, e.g. the target name */ name: string; /** machine facts: engine/mode, size, short id */ facts: string[];",
+    "FilterChip": "label: string; /** the count from the server over the whole table */ count: string | number; active?: boolean; /** tints the chip with that state's colour */ state?: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\"; onClick: () => void;",
+    "VerifyLevelChip": "/** how the green was earned; null when no verify has reached a verdict */ level: \"NONE\" | \"CHECKSUM\" | \"FULL_RESTORE\" | null; /** a CHECKSUM that ran only because FULL_RESTORE was unavailable: reads as an amber caution */ degraded: boolean; state: \"VERIFIED\" | \"UNOBSERVED\" | \"FAILED\";",
+    "JobStateChip": "/** process outcome, never the artifact palette; INCONCLUSIVE = the check could not run */ state: \"PENDING\" | \"RUNNING\" | \"SUCCEEDED\" | \"FAILED\" | \"INCONCLUSIVE\" | \"CANCELLED\"; exitCode?: number;",
+    "StateCounters": "/** from the server over the whole table, never a `.length` */ counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number }; total?: number; verifiedByLevel?: { FULL_RESTORE: number; CHECKSUM: number }; caption?: string; hint?: string; /** fact pills, e.g. the oldest unverified artifact */ facts?: React.ReactNode;",
+    "LocaleFlag": "locale: \"en\" | \"pt-BR\" | \"es\"; className?: string;",
+    "DetailGrid": "facts: { label: string; /** null renders as an absence dash, never as an empty cell */ value: React.ReactNode | null | undefined; tone?: \"plain\" | \"caution\" | \"danger\" | \"verified\" | \"unobserved\" | \"failed\" }[]; className?: string;",
+    "LastCheck": "/** null until a check has run */ ok: boolean | null; /** ISO timestamp, shown in the viewer's zone; null until a check has run */ at: string | null; /** i18n message keys for the three sentences (never / last ok / last failed) */ keys: { never: string; lastOk: string; lastFailed: string };",
+    "VerdictPanel": "result: { ok: boolean; serverVersionNum: number | null; /** a failure CODE, never a driver message */ failure: string | null; driverCode: string | null; databases: { name: string; sizeBytes: number }[]; isReplicaSet: boolean | null }; hostPort: string; user: string; tls: boolean;",
+    "Input": "id?: string; className?: string; type?: string; name?: string; value?: string; defaultValue?: string; placeholder?: string; readOnly?: boolean; disabled?: boolean; required?: boolean; autoComplete?: string; onChange?: React.ChangeEventHandler<HTMLInputElement>; ref?: React.Ref<HTMLInputElement>;",
+    "Select": "id?: string; className?: string; name?: string; value?: string; defaultValue?: string; disabled?: boolean; children?: React.ReactNode; onChange?: React.ChangeEventHandler<HTMLSelectElement>; ref?: React.Ref<HTMLSelectElement>;",
+    "Button": "children?: React.ReactNode; className?: string; id?: string; /** primary = the one main action (amber fill); accent = amber-tinted secondary; secondary/quiet/ghost = descending emphasis; danger = destructive, never amber */ variant?: \"primary\" | \"accent\" | \"secondary\" | \"quiet\" | \"ghost\" | \"danger\"; size?: \"default\" | \"sm\" | \"icon\"; type?: \"button\" | \"submit\" | \"reset\"; onClick?: React.MouseEventHandler<HTMLButtonElement>; /** THE way to disable: the reason renders beside the button as `BLOCKED \u2014 \u2026`. There is no bare `disabled`. */ disabledReason?: string | null;"
+  },
+  "overrides": {
+    "RuledList": {
+      "cardMode": "column"
+    },
+    "ColumnHeaders": {
+      "cardMode": "column"
+    },
+    "GroupHeader": {
+      "cardMode": "column"
+    },
+    "ListFooter": {
+      "cardMode": "column"
+    },
+    "StateCounters": {
+      "cardMode": "column"
+    },
+    "ProportionBar": {
+      "cardMode": "column"
+    },
+    "MetricTile": {
+      "cardMode": "column"
+    },
+    "DetailGrid": {
+      "cardMode": "column"
+    },
+    "DialogShell": {
+      "cardMode": "single",
+      "viewport": "760x620"
+    },
+    "AuthFrame": {
+      "cardMode": "single",
+      "viewport": "720x600"
+    },
+    "SaveBar": {
+      "cardMode": "column"
+    },
+    "FormHeader": {
+      "cardMode": "column"
+    },
+    "SettingsPanel": {
+      "cardMode": "column"
+    },
+    "VerdictPanel": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
