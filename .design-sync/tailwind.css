@@ -1,0 +1,53 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA */
+
+/* The design-sync stylesheet: the app's real token contract and Tailwind layer, compiled once by
+   build-css.mjs into .cache/tailwind.css for the Claude Design bundle. The utilities are generated
+   from the component sources AND the authored previews, so a preview's layout glue resolves too. */
+@import "../apps/web/src/app/globals.css";
+@source "../apps/web/src/components";
+@source "./previews";
+
+/* next/font sets these two variables on <html> at runtime; the bundle has no Next, so the family
+   names the @font-face rules in fonts.css declare are bound here instead. */
+:root {
+  --font-instrument-sans: "Instrument Sans";
+  --font-jetbrains-mono: "JetBrains Mono";
+}
+
+/* layout.tsx puts `font-sans antialiased` on <body>; a preview card's body has no class list. */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Utilities the design agent's own layout glue may use. Tailwind v4 compiles ahead of time: a class
+   that no scanned source uses does not exist in the shipped stylesheet, so the common families are
+   safelisted here. The token colour families are enumerated in full; spacing and layout cover the
+   values the screens use. Anything outside this list still resolves through `style` + `var(--*)`. */
+@source inline("{sm:,md:,lg:,}{flex,inline-flex,grid,block,inline-block,hidden}");
+@source inline("{flex-col,flex-row,flex-wrap,flex-1,shrink-0,grow,ml-auto,mr-auto,mx-auto}");
+@source inline("items-{start,center,end,baseline,stretch}");
+@source inline("justify-{start,center,end,between}");
+@source inline("{gap,gap-x,gap-y,space-y,space-x}-{0,0.5,1,1.5,2,2.5,3,4,5,6,8,10,12}");
+@source inline("{p,px,py,pt,pb,pl,pr,m,mx,my,mt,mb,ml,mr}-{0,0.5,1,1.5,2,2.5,3,4,5,6,8,10,12}");
+@source inline("{w,h}-{full,auto,px,3,4,5,6,8,9,10,12,16,24,32,48,64}");
+@source inline("size-{3,4,5,6,8,9,10,12,16}");
+@source inline("min-h-{screen,full}");
+@source inline("max-w-{xs,sm,md,lg,xl,2xl,3xl,4xl,5xl,6xl,full}");
+@source inline("{sm:,md:,lg:,}grid-cols-{1,2,3,4,5,6,12}");
+@source inline("col-span-{1,2,3,4,6,12}");
+@source inline("text-{xs,sm,base,lg,xl,2xl,3xl,4xl,5xl,left,center,right,pretty,balance}");
+@source inline("text-{[10.5px],[12.5px],[13px]}");
+@source inline("font-{sans,mono,normal,medium,semibold,bold}");
+@source inline("{uppercase,normal-case,tabular-nums,truncate,break-all}");
+@source inline("leading-{none,tight,snug,normal,relaxed,7}");
+@source inline("tracking-{tight,normal,wide,[0.04em],[0.06em],[0.13em]}");
+@source inline("{bg,text,border}-{background,foreground,card,card-foreground,muted,muted-foreground,subtle-foreground,border,border-region,input,ring,primary,primary-hover,primary-foreground,accent,accent-foreground,accent-soft,accent-border,destructive,destructive-hover,destructive-foreground,destructive-text,destructive-soft,destructive-border,caution,caution-soft,caution-border,state-verified,state-verified-soft,state-verified-border,state-unobserved,state-unobserved-soft,state-unobserved-border,state-failed,state-failed-soft,state-failed-border,job-running,job-succeeded,job-unknown,job-pending,job-cancelled,job-failed,transparent}");
+@source inline("hover:{bg-muted,bg-primary-hover,bg-destructive-hover,text-foreground,border-border-region}");
+@source inline("{border,border-0,border-2,border-t,border-b,border-l,border-r,border-dashed}");
+@source inline("rounded-{none,sm,md,lg,xl,full,chip,control,panel,dialog}");
+@source inline("shadow-{none,card,dialog}");
+@source inline("{px-[18px],overflow-hidden,overflow-auto,overflow-x-auto,relative,absolute,fixed,inset-0,sticky,top-0,z-10,z-50,cursor-pointer,select-none,sr-only,antialiased,divide-y,divide-border,outline-none,opacity-50,opacity-70,transition-colors,animate-pulse}");

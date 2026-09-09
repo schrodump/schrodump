@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA */
+
+/* The two vendored faces apps/web/src/fonts/index.ts registers through next/font/local (SIL OFL
+   1.1, variable). Same files, same weight ranges, declared as plain @font-face for the bundle. */
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../apps/web/src/fonts/instrument-sans.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Instrument Sans";
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../apps/web/src/fonts/instrument-sans-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../apps/web/src/fonts/jetbrains-mono.woff2") format("woff2");
+}
