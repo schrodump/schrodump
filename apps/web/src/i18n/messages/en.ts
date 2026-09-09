@@ -42,6 +42,10 @@ export const en = {
   "locale.en": "English",
   "locale.pt-BR": "Portuguese (Brazil)",
   "locale.es": "Spanish",
+  "theme.label": "Theme",
+  "theme.system": "System",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
 
   "state.verified": "Verified",
   "state.unobserved": "Unobserved",

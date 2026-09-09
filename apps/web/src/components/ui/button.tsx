@@ -8,8 +8,7 @@ import { cn } from "@/lib/cn";
 
 // Six variants, one shape. The amber fill is reserved for the one primary action on a screen;
 // `accent` (outlined amber) is Verify — an invitation to answer a question, not a commitment;
-// `danger` is the irreversible ones. The three legacy names map onto these so the screens that
-// predate the design system restyle without a rename.
+// `danger` is the irreversible ones.
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control text-[13px] font-medium transition-colors outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-accent-soft disabled:pointer-events-none",
   {
@@ -24,13 +23,6 @@ const buttonVariants = cva(
         accent: "border border-accent-border bg-accent-soft text-accent",
         danger:
           "border border-destructive-border bg-destructive font-semibold text-destructive-foreground hover:bg-destructive-hover",
-        // legacy names
-        default:
-          "border border-primary bg-primary font-semibold text-primary-foreground hover:bg-primary-hover",
-        destructive:
-          "border border-destructive-border bg-destructive font-semibold text-destructive-foreground hover:bg-destructive-hover",
-        outline:
-          "border border-border text-muted-foreground hover:border-border-region hover:text-foreground",
       },
       size: {
         default: "px-4 py-2",
