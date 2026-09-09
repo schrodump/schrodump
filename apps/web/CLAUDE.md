@@ -203,6 +203,17 @@ screens that follow:
   server will say — which policies still point here — instead of after the 409; a viewer sees no
   action at all, the server refusing the write being the first lock and the missing button the
   second. TLS is still the boolean the API holds; the design's four-mode select is a server change.
+- **The configuration trio** (destinations, policies, channels). One family of forms through
+  `ui/form-bits.tsx` (`FormHeader`, `FieldLabel`, `SaveBar`): the primary action carries the
+  first thing to fix, the locked fields in edit stay on screen with the reason (`Panel` tone
+  `lock`), and every refusal is the server's own sentence under "Refused by the server". The
+  policy row reads its cron (`lib/cron.ts`: five fields, lists, ranges, steps; `readCron` names
+  only the shapes that have an honest sentence, `nextRun` walks the local clock) and says when it
+  fires next, or that it will not and why — a disabled policy has no next run, an unreadable
+  expression says so in caution and blocks Save. `scratch.configured` comes from `/instance`: with
+  it off, the staged mode is withheld with its reason and a full-restore verify is warned as one
+  that would only ever end "could not run". A channel that is recording failures offers "Disable
+  instead" before "Delete": deleting it throws away the only evidence deliveries were not arriving.
 
 ## How it talks to the server
 

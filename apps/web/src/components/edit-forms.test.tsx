@@ -182,3 +182,33 @@ describe("PolicyForm in edit mode", () => {
     expect(patch?.body).not.toHaveProperty("destinationId");
   });
 });
+
+describe("PolicyForm refuses what the scheduler could not run", () => {
+  it("blocks Save with the reason while the cron does not parse", async () => {
+    captureFetch();
+    const user = renderWith(<PolicyForm onDone={() => undefined} scratchConfigured policy={POLICY} />);
+    await user.clear(screen.getByLabelText("Schedule (cron)"));
+    await user.type(screen.getByLabelText("Schedule (cron)"), "every night");
+    expect(save()).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/does not parse as five-field cron/i);
+  });
+
+  it("withholds the staged mode, with its reason, when scratch is not configured", () => {
+    captureFetch();
+    renderWith(<PolicyForm onDone={() => undefined} scratchConfigured={false} policy={POLICY} />);
+    expect(screen.getByRole("option", { name: "Staged" })).toBeDisabled();
+    expect(screen.getByText(/Staged needs scratch, which is not configured/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Parallelism")).toBeDisabled();
+  });
+});
+
+describe("DestinationForm says why Save is blocked", () => {
+  it("names the first missing field, in the order the form is filled", async () => {
+    captureFetch();
+    const user = renderWith(<DestinationForm onDone={() => undefined} />);
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/name the destination/i);
+    await user.type(screen.getByLabelText("Name"), "r2");
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a region is required/i);
+  });
+});
+
