@@ -92,7 +92,12 @@ const SANDBOX_READY_TIMEOUT_MS = 60_000;
 export const VERIFY_INCONCLUSIVE_LOG =
   "verify inconclusive — the artifact is unchanged and nothing was claimed about it";
 
-const ScopeSchema = z.object({ databases: z.array(z.string()).default([]) });
+// `schemas` is read for postgres alone (dumpScopeFor): the operator's explicit `-n` intent, which
+// the interface never sets. Both default to empty, so a legacy row without either key parses.
+const ScopeSchema = z.object({
+  databases: z.array(z.string()).default([]),
+  schemas: z.array(z.string()).default([]),
+});
 
 // Restore writes the decrypted CLEARTEXT dump to disk; it MUST land on the configured scratch volume
 // (gc-swept, and host-encrypted in the deploy), never a tmpdir fallback. The decryption identity is
@@ -313,6 +318,8 @@ export interface DumpDescriptorInputs {
   engine: EngineKind;
   connection: TargetConnection;
   scopedDatabases: string[];
+  // The target's own schema scope — intent, never discovery (see dumpScopeFor).
+  scopedSchemas: string[];
   facts: TargetFacts;
   stagingPathFor: () => string | undefined;
 }
@@ -350,7 +357,7 @@ export function buildDumpDescriptorFor(
       serverVersionNum: probe.serverVersionNum,
       executionMode: mode,
       parallelism,
-      scope: dumpScopeFor(inputs.engine, probe.scope, inputs.scopedDatabases),
+      scope: dumpScopeFor(inputs.engine, probe.scope, inputs.scopedDatabases, inputs.scopedSchemas),
       facts: inputs.facts,
       ...(stagingPath !== undefined ? { stagingPath } : {}),
     });
@@ -375,8 +382,22 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
 // deferred follow-up), so a scoped mongo target resolves its actual db here.
 // The scope the DUMP runs with, which is not always what the probe discovered.
 //
-// For the SQL engines the probe's scope is the right answer: it reports the databases the
-// credential can reach, and that is what gets dumped.
+// For mysql/mariadb the probe's scope is the right answer: it reports the databases the credential
+// can reach, and that is what gets dumped.
+//
+// For postgres the probe's DATABASES are still discovery the dump can use, but its SCHEMAS must
+// never reach pg_dump. The probe lists every non-system schema of the connected database, and the
+// adapter turns each entry of scope.schemas into a `-n` flag — so every postgres dump ran
+// schema-scoped, and pg_dump's contract for `-n` is that it dumps only objects IN those schemas:
+// extensions are database-level objects and are left out. Measured with citext on postgres 18:
+// `pg_dump -Fc -n public` carries TYPE and TABLE entries and no EXTENSION entry, and restoring it
+// into an empty database fails at the first citext column with `type "public.citext" does not
+// exist`; the same dump without `-n` carries `EXTENSION citext` and restores clean, over an empty
+// database and over a live one that already holds the extension. Observed in production: every
+// FULL_RESTORE verify of a database using citext FAILED with exactly that error, under backups
+// that had SUCCEEDED for as long as the adapter existed — the smoke and the integration fixtures
+// had no extension, so nothing in the gate could see it. Only the target's own scope.schemas (the
+// operator's explicit intent, which the interface never sets for postgres) becomes `-n`.
 //
 // MongoDB is different, and the difference made replica sets impossible to back up. probeMongodb
 // reports scope.databases as EVERY database the credential can list, and buildDump refuses
@@ -399,9 +420,13 @@ export function dumpScopeFor(
   engine: EngineKind,
   probeScope: DumpScope,
   targetDatabases: string[],
+  targetSchemas: string[],
 ): DumpScope {
-  if (engine !== "mongodb") return probeScope;
-  return { databases: targetDatabases, schemas: [], collections: [] };
+  if (engine === "mongodb") return { databases: targetDatabases, schemas: [], collections: [] };
+  if (engine === "postgres") {
+    return { databases: probeScope.databases, schemas: targetSchemas, collections: [] };
+  }
+  return probeScope;
 }
 
 // Whether the archive this dump is about to produce carries an oplog. mongodb's buildDump emits
@@ -567,6 +592,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     const adapter = resolveAdapter(engine);
     const scopeParse = ScopeSchema.safeParse(target.scope);
     const scopedDatabases = scopeParse.success ? scopeParse.data.databases : [];
+    const scopedSchemas = scopeParse.success ? scopeParse.data.schemas : [];
     const connectDatabase = probeDatabaseFor(engine, scopedDatabases);
 
     // Decrypt the credential to USE it — hand it to the probe/driver. It never leaves this scope.
@@ -675,6 +701,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         engine,
         connection,
         scopedDatabases,
+        scopedSchemas,
         facts,
         stagingPathFor,
       }),
@@ -734,7 +761,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               dumpIsMultiDatabaseFor(
                 engine,
                 mode,
-                dumpScopeFor(engine, probe.scope, scopedDatabases).databases,
+                dumpScopeFor(engine, probe.scope, scopedDatabases, scopedSchemas).databases,
               ) ?? null,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
