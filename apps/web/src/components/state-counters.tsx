@@ -3,6 +3,7 @@
 
 "use client";
 
+import type { ReactNode } from "react";
 import { StateGlyph } from "@/components/status-badge";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
@@ -15,7 +16,24 @@ import type { ArtifactState } from "@/lib/domain";
 // the fleet is clean is a layout the operator has to re-learn on the day it is not. FAILED is grey
 // until there is something to be red about: a permanent red digit is a permanent alarm, and an
 // alarm that is always on is furniture.
-export function StateCounters({ counts, total }: { counts: Record<ArtifactState, number>; total?: number }) {
+export function StateCounters({
+  counts,
+  total,
+  verifiedByLevel,
+  caption,
+  hint,
+  facts,
+}: {
+  counts: Record<ArtifactState, number>;
+  total?: number;
+  // Splits the green: a restore that reproduced the database is not the same claim as a hash
+  // that matched, and the header says how many of each.
+  verifiedByLevel?: { FULL_RESTORE: number; CHECKSUM: number };
+  caption?: string;
+  hint?: string;
+  // A line of named facts under the figures — the oldest open question, for one.
+  facts?: ReactNode;
+}) {
   const t = useT();
   const nothingWritten = total === 0;
   const failedZero = counts.FAILED === 0;
@@ -31,10 +49,10 @@ export function StateCounters({ counts, total }: { counts: Record<ArtifactState,
             <span className="font-mono text-[76px] leading-[0.9] font-medium tracking-[-0.05em] tabular-nums">
               {counts.UNOBSERVED.toLocaleString()}
             </span>
-            <span className="text-base font-medium text-foreground">{t("dashboard.unobserved.caption")}</span>
+            <span className="text-base font-medium text-foreground">{caption ?? t("dashboard.unobserved.caption")}</span>
           </div>
           <span className="max-w-[46ch] text-sm text-muted-foreground text-pretty">
-            {nothingWritten ? t("dashboard.firstRunHint") : t("dashboard.unobservedHint")}
+            {nothingWritten ? t("dashboard.firstRunHint") : (hint ?? t("dashboard.unobservedHint"))}
           </span>
         </div>
 
@@ -47,7 +65,14 @@ export function StateCounters({ counts, total }: { counts: Record<ArtifactState,
             <span className="font-mono text-3xl leading-tight font-medium tracking-[-0.03em] tabular-nums text-state-verified">
               {counts.VERIFIED.toLocaleString()}
             </span>
-            <span className="font-mono text-[10.5px] tracking-[0.06em] text-subtle-foreground">{t("dashboard.verified.label")}</span>
+            <span className="font-mono text-[10.5px] tracking-[0.06em] text-subtle-foreground">
+              {verifiedByLevel !== undefined
+                ? t("counters.verifiedBy", {
+                    full: verifiedByLevel.FULL_RESTORE.toLocaleString(),
+                    checksum: verifiedByLevel.CHECKSUM.toLocaleString(),
+                  })
+                : t("dashboard.verified.label")}
+            </span>
           </div>
           <div data-testid="count-FAILED" data-lead="false" className="flex flex-col gap-1">
             <div
@@ -77,6 +102,7 @@ export function StateCounters({ counts, total }: { counts: Record<ArtifactState,
           </div>
         </div>
       </div>
+      {facts !== undefined ? <div className="mt-3">{facts}</div> : null}
       <p className="mt-2 font-mono text-[10px] tracking-[0.13em] uppercase text-subtle-foreground">{t("dashboard.countedNote")}</p>
     </div>
   );

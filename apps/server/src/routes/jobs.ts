@@ -102,6 +102,19 @@ export interface ArtifactListDTO {
   total: number;
   // Computed across the WHOLE table, not the returned page. See the wiring for why.
   counts: { VERIFIED: number; UNOBSERVED: number; FAILED: number };
+  // How the VERIFIED ones were verified: a restore that reproduced the database, or a hash that
+  // matched the manifest. The two greens are not the same claim, and the header says which.
+  verifiedByLevel: { FULL_RESTORE: number; CHECKSUM: number };
+  // Distinct destinations holding at least one artifact.
+  destinations: number;
+  // The UNOBSERVED artifact that has waited longest for a verdict — the oldest open question,
+  // named by its target and execution mode so the number has a subject.
+  oldestUnobserved: {
+    id: string;
+    createdAt: Date;
+    targetName: string | null;
+    executionMode: string;
+  } | null;
 }
 
 // The outcome of a manual delete. `verified_needs_ack` is not a failure to hide — it is the

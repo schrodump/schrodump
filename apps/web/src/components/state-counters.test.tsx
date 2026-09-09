@@ -75,3 +75,24 @@ describe("StateCounters — failed is grey until there is something to be red ab
   });
 });
 
+describe("StateCounters — the catalog's words", () => {
+  it("splits the green by how it was earned, and carries the facts line", () => {
+    render(
+      <I18nProvider>
+        <StateCounters
+          counts={{ UNOBSERVED: 617, VERIFIED: 588, FAILED: 79 }}
+          total={1284}
+          verifiedByLevel={{ FULL_RESTORE: 412, CHECKSUM: 176 }}
+          caption="artifacts written and never opened"
+          hint="Each one may hold your data, or nothing."
+          facts={<span>Oldest unverified 41 days ago</span>}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("count-VERIFIED")).toHaveTextContent("412 by full restore · 176 checksum only");
+    expect(screen.getByText("artifacts written and never opened")).toBeInTheDocument();
+    expect(screen.getByText("Each one may hold your data, or nothing.")).toBeInTheDocument();
+    expect(screen.getByText("Oldest unverified 41 days ago")).toBeInTheDocument();
+  });
+});
+

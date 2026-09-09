@@ -248,6 +248,22 @@ describe("createJobsService list bounds", () => {
     expect(result.counts).toEqual({ VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 });
   });
 
+  it("answers the catalog header from the table: how the verified were verified, how many buckets, the oldest open question", async () => {
+    const spy = spyPrisma();
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listArtifacts("org-1");
+
+    const groups = spy.calls.filter((c) => c.model === "Artifact" && c.operation === "groupBy");
+    expect(groups.map((c) => (c.args as { by: string[] }).by)).toEqual([["state"], ["verifiedLevel"], ["destinationId"]]);
+    // Only the VERIFIED ones are split by level: an UNOBSERVED artifact has no level to count.
+    expect((groups[1]?.args as { where?: { state?: string } }).where?.state).toBe("VERIFIED");
+    const oldest = spy.calls.find((c) => c.model === "Artifact" && c.operation === "findFirst");
+    expect((oldest?.args as { where?: { state?: string }; orderBy?: unknown }).where?.state).toBe("UNOBSERVED");
+    expect((oldest?.args as { orderBy?: unknown }).orderBy).toEqual({ createdAt: "asc" });
+    expect(result.verifiedByLevel).toEqual({ FULL_RESTORE: 0, CHECKSUM: 0 });
+    expect(result.destinations).toBe(0);
+    expect(result.oldestUnobserved).toBeNull();
+  });
+
   it("bounds the job list", async () => {
     const spy = spyPrisma();
     await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs("org-1");

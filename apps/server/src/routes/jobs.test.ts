@@ -18,7 +18,7 @@ const service: JobsService = {
       stats: { oldestPendingScheduledAt: null, failedLast24h: 0, inconclusiveLast24h: 0 },
     }),
   listArtifacts: () =>
-    Promise.resolve({ counts: { VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 }, total: 1, items: [
+    Promise.resolve({ counts: { VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 }, verifiedByLevel: { FULL_RESTORE: 0, CHECKSUM: 0 }, destinations: 1, oldestUnobserved: null, total: 1, items: [
       {
         id: "a1",
         jobId: "j1",

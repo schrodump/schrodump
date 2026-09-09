@@ -472,7 +472,7 @@ export function createJobsService(
     // number would be a lie.
     listArtifacts: async (organizationId) => {
       const db = scopedPrisma(prisma, organizationId);
-      const [rows, total, grouped] = await Promise.all([
+      const [rows, total, grouped, byLevel, byDestination, oldest] = await Promise.all([
         db.artifact.findMany({
           orderBy: { createdAt: "desc" },
           take: LIST_PAGE_SIZE,
@@ -480,10 +480,45 @@ export function createJobsService(
         }),
         db.artifact.count(),
         db.artifact.groupBy({ by: ["state"], _count: { _all: true } }),
+        db.artifact.groupBy({ by: ["verifiedLevel"], where: { state: "VERIFIED" }, _count: { _all: true } }),
+        db.artifact.groupBy({ by: ["destinationId"], _count: { _all: true } }),
+        // The head of an ascending query, never a page scan: the oldest open question is the
+        // one the page is least likely to hold.
+        db.artifact.findFirst({
+          where: { state: "UNOBSERVED" },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            createdAt: true,
+            executionMode: true,
+            job: { select: { policy: { select: { target: { select: { name: true } } } } } },
+          },
+        }),
       ]);
       const counts = { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 };
       for (const group of grouped) counts[group.state] = group._count._all;
-      return { items: rows.map(toArtifactRecord), total, counts };
+      const verifiedByLevel = { FULL_RESTORE: 0, CHECKSUM: 0 };
+      for (const group of byLevel) {
+        if (group.verifiedLevel === "FULL_RESTORE" || group.verifiedLevel === "CHECKSUM") {
+          verifiedByLevel[group.verifiedLevel] = group._count._all;
+        }
+      }
+      return {
+        items: rows.map(toArtifactRecord),
+        total,
+        counts,
+        verifiedByLevel,
+        destinations: byDestination.length,
+        oldestUnobserved:
+          oldest === null
+            ? null
+            : {
+                id: oldest.id,
+                createdAt: oldest.createdAt,
+                targetName: oldest.job?.policy?.target?.name ?? null,
+                executionMode: oldest.executionMode,
+              },
+      };
     },
     deleteArtifact: async (organizationId, artifactId, opts) => {
       const db = scopedPrisma(prisma, organizationId);
