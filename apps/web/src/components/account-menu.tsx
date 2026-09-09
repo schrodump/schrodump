@@ -54,6 +54,15 @@ function SectionLabel({ children }: { children: string }) {
 
 const ROW = "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
 
+// "ops@example.test" → "OP", "ana.ribeiro@…" → "AR": the person, before the flag. Without it the
+// trigger read as a language picker and nothing else.
+export function initialsOf(email: string): string {
+  const local = email.split("@")[0] ?? "";
+  const parts = local.split(/[._\-+]+/).filter((part) => part.length > 0);
+  const letters = parts.length >= 2 ? `${parts[0]![0]}${parts[1]![0]}` : local.slice(0, 2);
+  return letters.toUpperCase();
+}
+
 export function AccountMenu({ email, onSignOut }: { email: string; onSignOut: () => void }) {
   const { locale, setLocale, t } = useI18n();
   const { choice, setChoice, system } = useThemeChoice();
@@ -81,16 +90,22 @@ export function AccountMenu({ email, onSignOut }: { email: string; onSignOut: ()
       <button
         type="button"
         aria-label={t("menu.label")}
+        title={`${t("menu.label")} · ${email}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "inline-flex h-9 items-center gap-2 rounded-control border px-2.5 transition-colors",
+          "inline-flex h-9 items-center gap-2 rounded-full border py-1 pr-2.5 pl-1 transition-colors",
           open ? "border-border-region bg-muted" : "border-border hover:border-border-region hover:bg-muted",
         )}
       >
+        <span
+          aria-hidden="true"
+          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary font-mono text-[11px] font-medium tracking-[0.04em] text-primary-foreground"
+        >
+          {initialsOf(email)}
+        </span>
         <LocaleFlag locale={locale} />
-        <span className="font-mono text-[10.5px] tracking-[0.08em] text-muted-foreground">{CODE[locale]}</span>
         <svg aria-hidden="true" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.4" className={cn("text-subtle-foreground transition-transform", open && "rotate-180")}>
           <path d="M1 3l3 3 3-3" />
         </svg>

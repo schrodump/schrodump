@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
-import { AccountMenu } from "./account-menu";
+import { AccountMenu, initialsOf } from "./account-menu";
 import { THEME_STORAGE_KEY } from "./theme-toggle";
 
 afterEach(() => {
@@ -23,12 +23,19 @@ function renderMenu(onSignOut = vi.fn()) {
 }
 
 describe("AccountMenu", () => {
-  it("shows only the current language's flag and code until opened", () => {
+  it("reads as the person's control: initials, then the current language's flag, until opened", () => {
     renderMenu();
     const trigger = screen.getByRole("button", { name: "Account and preferences" });
-    expect(trigger).toHaveTextContent("EN");
+    expect(trigger).toHaveTextContent("OP");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("takes the initials from the email's local part", () => {
+    expect(initialsOf("ops@example.test")).toBe("OP");
+    expect(initialsOf("ana.ribeiro@northwind.example")).toBe("AR");
+    expect(initialsOf("sre-oncall@northwind.example")).toBe("SO");
+    expect(initialsOf("k@x.io")).toBe("K");
   });
 
   it("lists the languages in their own names, marks the current one, and switches on a pick", async () => {
@@ -40,7 +47,7 @@ describe("AccountMenu", () => {
 
     await user.click(screen.getByRole("menuitemradio", { name: /Português \(Brasil\)/ }));
     // The whole provider switched: the trigger now reads in Portuguese, and the menu closed.
-    expect(screen.getByRole("button", { name: "Conta e preferências" })).toHaveTextContent("PT-BR");
+    expect(screen.getByRole("button", { name: "Conta e preferências" })).toBeInTheDocument();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
