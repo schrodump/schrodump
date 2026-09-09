@@ -7,7 +7,16 @@ import type { AuthContext, Role } from "../auth/rbac.js";
 import { jobsRoutes, LIST_PAGE_SIZE, type JobsService } from "./jobs.js";
 
 const service: JobsService = {
-  listJobs: () => Promise.resolve({ items: [{ id: "j1" }], total: 1 }),
+  listJobs: () =>
+    Promise.resolve({
+      items: [{ id: "j1" }],
+      total: 1,
+      counts: {
+        byState: { PENDING: 0, RUNNING: 1, SUCCEEDED: 0, FAILED: 0, INCONCLUSIVE: 0, CANCELLED: 0 },
+        byKind: { BACKUP: 1, RESTORE: 0, VERIFY: 0, RETENTION: 0 },
+      },
+      stats: { oldestPendingScheduledAt: null, failedLast24h: 0, inconclusiveLast24h: 0 },
+    }),
   listArtifacts: () =>
     Promise.resolve({ counts: { VERIFIED: 0, UNOBSERVED: 1, FAILED: 0 }, total: 1, items: [
       {

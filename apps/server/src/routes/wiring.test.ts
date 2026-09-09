@@ -200,7 +200,7 @@ describe("createJobsService list bounds", () => {
     const call = (model: string, operation: string, args: Record<string, unknown>) => {
       const run = (final: Record<string, unknown>) => {
         calls.push({ model, operation, args: final });
-        return Promise.resolve(operation === "count" ? 0 : []);
+        return Promise.resolve(operation === "count" ? 0 : operation === "findFirst" ? null : []);
       };
       return wrap === null ? run(args) : wrap({ model, operation, args, query: run });
     };
@@ -208,6 +208,7 @@ describe("createJobsService list bounds", () => {
       findMany: (args: Record<string, unknown>) => call(name, "findMany", args),
       count: (args: Record<string, unknown> = {}) => call(name, "count", args),
       groupBy: (args: Record<string, unknown>) => call(name, "groupBy", args),
+      findFirst: (args: Record<string, unknown>) => call(name, "findFirst", args),
     });
     const base = {
       backupJob: model("BackupJob"),
@@ -253,6 +254,40 @@ describe("createJobsService list bounds", () => {
     const call = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
+  });
+
+  it("asks the database, not the page, for the job counts and the header stats", async () => {
+    const spy = spyPrisma();
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs("org-1");
+
+    // One groupBy per axis, both scoped to the organization.
+    const groups = spy.calls.filter((c) => c.model === "BackupJob" && c.operation === "groupBy");
+    expect(groups.map((c) => (c.args as { by: string[] }).by)).toEqual([["state"], ["kind"]]);
+    for (const group of groups) {
+      expect((group.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
+    }
+    // Every enum member present at zero: a chip per state and per kind, none missing.
+    expect(result.counts.byState).toEqual({
+      PENDING: 0,
+      RUNNING: 0,
+      SUCCEEDED: 0,
+      FAILED: 0,
+      INCONCLUSIVE: 0,
+      CANCELLED: 0,
+    });
+    expect(result.counts.byKind).toEqual({ BACKUP: 0, RESTORE: 0, VERIFY: 0, RETENTION: 0 });
+    // The 24h windows are counted with a finishedAt bound, per state, over the whole table.
+    // The plain total also carries a where (the organization scope), so the windows are told apart
+    // by the state they count, not by the presence of a filter.
+    const states = spy.calls
+      .filter((c) => c.model === "BackupJob" && c.operation === "count")
+      .map((c) => (c.args as { where?: { state?: string } }).where?.state)
+      .filter((state) => state !== undefined);
+    expect(states).toEqual(["FAILED", "INCONCLUSIVE"]);
+    // The oldest pending job is the head of an ascending scheduledAt query, never a page scan.
+    const oldest = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findFirst");
+    expect((oldest?.args as { orderBy?: unknown }).orderBy).toEqual({ scheduledAt: "asc" });
+    expect(result.stats).toEqual({ oldestPendingScheduledAt: null, failedLast24h: 0, inconclusiveLast24h: 0 });
   });
 });
 
@@ -360,7 +395,11 @@ describe("a job says which database it is about", () => {
       ...scalars,
       kind: "VERIFY",
       policy: null,
-      verifyArtifact: { job: { policy: { name: "nightly", target: { name: "orders" } } } },
+      verifyArtifact: {
+        id: "a1",
+        state: "UNOBSERVED",
+        job: { policy: { name: "nightly", target: { name: "orders" } } },
+      },
     });
 
     expect(out.targetName).toBe("orders");
@@ -374,6 +413,46 @@ describe("a job says which database it is about", () => {
 
     expect(out.policyName).toBeNull();
     expect(out.targetName).toBeNull();
+  });
+
+  it("points at the artifact a VERIFY acts on, with the state it is in", () => {
+    // The ledger row says what a run touched and whether anyone has looked at it yet; the state
+    // rides with the id so the row needs no second request to colour it.
+    const out = toJobRecord({
+      ...scalars,
+      kind: "VERIFY",
+      policy: null,
+      verifyArtifact: { id: "a1", state: "UNOBSERVED", job: { policy: null } },
+    });
+
+    expect(out.artifact).toEqual({ id: "a1", state: "UNOBSERVED" });
+  });
+
+  it("points at the artifact a BACKUP produced, and at nothing while it has not", () => {
+    const written = toJobRecord({
+      ...scalars,
+      policy: null,
+      artifact: { id: "a2", state: "VERIFIED" },
+    });
+    const running = toJobRecord({ ...scalars, policy: null, artifact: null });
+
+    expect(written.artifact).toEqual({ id: "a2", state: "VERIFIED" });
+    expect(running.artifact).toBeNull();
+  });
+
+  it("exposes a RESTORE's scope and nothing else from its params, null when they do not parse", () => {
+    const scoped = toJobRecord({
+      ...scalars,
+      kind: "RESTORE",
+      policy: null,
+      restoreParams: { target: "DATABASE", confirmExistingDatabase: true, triggeredByUserId: "u1" },
+    });
+    const garbage = toJobRecord({ ...scalars, kind: "RESTORE", policy: null, restoreParams: "nope" });
+
+    expect(scoped.restoreTarget).toBe("DATABASE");
+    expect(garbage.restoreTarget).toBeNull();
+    // A BACKUP has no scope; the field is null, not absent, so the shape is one shape.
+    expect(toJobRecord({ ...scalars, policy: null }).restoreTarget).toBeNull();
   });
 
   it("carries the job's own fields through and drops the relations", () => {
