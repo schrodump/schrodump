@@ -85,11 +85,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       />
     );
-    if (!blocked) return button;
+    // A button that takes part in the reason protocol keeps the wrapper even while the reason is
+    // null: if the wrapper appeared only when a reason did, React would swap a bare <button> for a
+    // <span><button/></span> and REMOUNT the button — a handle captured before the reason appeared
+    // (a test's, a focus ring's) would then point at a detached node.
+    if (disabledReason === undefined) return button;
     return (
-      <span className="inline-flex flex-wrap items-center gap-3">
+      // The reason reads before the button: in a right-aligned footer it sits to the left of the
+      // action it explains, and if the pair wraps the button ends the line.
+      <span className="inline-flex flex-wrap items-center justify-end gap-3">
+        {blocked ? <BlockedReason id={id} reason={disabledReason} /> : null}
         {button}
-        <BlockedReason id={id} reason={disabledReason} />
       </span>
     );
   },

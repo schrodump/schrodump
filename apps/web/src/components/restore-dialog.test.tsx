@@ -130,6 +130,26 @@ describe("RestoreDialog", () => {
     expect(submit).toBeEnabled();
   });
 
+  it("blocks a full-cluster overwrite until every database on the destination is acknowledged", async () => {
+    const user = await openDialog();
+    // FULL_CLUSTER is the default scope for postgres — there is no single database name to retype.
+    const submit = screen.getByRole("button", { name: "Start restore" });
+    expect(submit).toBeEnabled();
+    expect(screen.queryByTestId("button-blocked-reason")).toBeNull();
+
+    await user.click(screen.getByLabelText("Restore over an existing database (overwrites data)"));
+    expect(submit).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(
+      /acknowledge the overwrite to unlock/i,
+    );
+    expect(screen.queryByLabelText("Type the database name to confirm")).toBeNull();
+
+    await user.click(
+      screen.getByLabelText("I understand this overwrites every database on the destination"),
+    );
+    expect(submit).toBeEnabled();
+  });
+
   it("submits the restore and shows the enqueued confirmation", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

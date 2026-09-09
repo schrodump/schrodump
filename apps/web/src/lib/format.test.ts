@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  dayGroupOf,
   formatBytes,
   formatDateTime,
   formatDuration,
@@ -90,5 +91,25 @@ describe("formatRelative", () => {
     expect(formatRelative("2026-01-09T22:30:00.000Z", now)).toBe(rtf.format(-1, "hour"));
     // A few seconds ago stays in the second division rather than rounding up to a minute.
     expect(formatRelative("2026-01-09T23:59:55.000Z", now)).toBe(rtf.format(-5, "second"));
+  });
+});
+
+describe("dayGroupOf", () => {
+  // Built with local constructors so the expectation holds in any timezone the test runs in.
+  const now = new Date(2026, 8, 9, 15, 0, 0); // 9 Sep 2026, 15:00 local
+  const at = (y: number, m: number, d: number, h: number): string => new Date(y, m, d, h).toISOString();
+
+  it("names today and yesterday by the viewer's day boundary, not the ISO string's", () => {
+    expect(dayGroupOf(at(2026, 8, 9, 0), now)).toEqual({ key: "2026-09-09", label: "today" });
+    expect(dayGroupOf(at(2026, 8, 8, 23), now)).toEqual({ key: "2026-09-08", label: "yesterday" });
+  });
+
+  it("leaves older days to the date, with a stable key for grouping", () => {
+    expect(dayGroupOf(at(2026, 8, 6, 3), now)).toEqual({ key: "2026-09-06", label: null });
+    expect(dayGroupOf(at(2026, 8, 6, 22), now).key).toBe("2026-09-06");
+  });
+
+  it("groups an unparseable value under an empty key rather than dropping it", () => {
+    expect(dayGroupOf("not a date", now)).toEqual({ key: "", label: null });
   });
 });

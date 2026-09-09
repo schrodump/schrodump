@@ -5,6 +5,7 @@
 
 import { useT } from "@/i18n/provider";
 import { Button } from "@/components/ui/button";
+import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Loading and error states for every network operation — never an infinite spinner.
@@ -20,28 +21,28 @@ export function LoadingState() {
   );
 }
 
+// A refusal with its reason, in the error tone — and a way back, because a dead end at the top of
+// a screen is worse than the failure it reports.
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   const t = useT();
   return (
-    <div
-      role="alert"
-      className="rounded-lg border border-destructive/40 bg-[var(--color-state-failed-bg)] p-4 text-[var(--color-state-failed)]"
-    >
-      <p className="font-medium">{t("common.error")}</p>
-      <p className="mt-1 text-sm opacity-90">{t("common.errorDetail", { message })}</p>
+    <Panel role="alert" tone="error">
+      <p className="font-medium text-destructive-text">{t("common.error")}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{t("common.errorDetail", { message })}</p>
       {onRetry !== undefined ? (
-        <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+        <Button variant="quiet" size="sm" className="mt-3" onClick={onRetry}>
           {t("common.retry")}
         </Button>
       ) : null}
-    </div>
+    </Panel>
   );
 }
 
+// Says what would fill it, never just "no data".
 export function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+    <Panel tone="empty" className="p-8">
       {message}
-    </div>
+    </Panel>
   );
 }

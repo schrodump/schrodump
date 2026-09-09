@@ -80,3 +80,33 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
   }
   return rtf.format(Math.round(duration), "year");
 }
+
+// Which day a timestamp falls on, in the VIEWER'S zone — for grouping a ledger under "today",
+// "yesterday" or the date. Local date parts, never the ISO string's: the day boundary is the
+// viewer's, and a job at 02:00 UTC is still yesterday evening in São Paulo. `key` is a stable
+// local YYYY-MM-DD for grouping; `label` names the two days that get a word, and is null for the
+// rest (the caller formats the date). An unparseable value groups under "" so it is never dropped.
+export type DayGroup = { key: string; label: "today" | "yesterday" | null };
+
+function localDayKey(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function dayGroupOf(iso: string, now: Date = new Date()): DayGroup {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { key: "", label: null };
+  const key = localDayKey(date);
+  if (key === localDayKey(now)) return { key, label: "today" };
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (key === localDayKey(yesterday)) return { key, label: "yesterday" };
+  return { key, label: null };
+}
+
+// The date alone, in the viewer's locale — the day-group header for anything older than yesterday.
+export function formatDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
+}

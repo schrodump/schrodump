@@ -3,15 +3,19 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { ErrorState } from "@/components/feedback";
+import { AcknowledgeCheckbox } from "@/components/ui/acknowledge-checkbox";
 import { Button } from "@/components/ui/button";
+import { DialogShell, SubjectRow } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Panel } from "@/components/ui/panel";
+import { RetypeToConfirm } from "@/components/ui/retype-to-confirm";
 import { useTriggerRestore } from "@/hooks/use-mutations";
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
+import { cn } from "@/lib/cn";
 import {
   RESTORE_TARGETS,
   RESTORE_TARGETS_BY_ENGINE,
@@ -20,6 +24,7 @@ import {
   type RestoreTarget,
   type Role,
 } from "@/lib/domain";
+import { formatBytes } from "@/lib/format";
 import type { Artifact } from "@/lib/types";
 
 const targetLabel: Record<RestoreTarget, MessageKey> = {
@@ -29,7 +34,20 @@ const targetLabel: Record<RestoreTarget, MessageKey> = {
   TABLE: "restoreTarget.TABLE",
   COLLECTION: "restoreTarget.COLLECTION",
 };
+const targetDescription: Record<RestoreTarget, MessageKey> = {
+  FULL_CLUSTER: "restoreTarget.desc.FULL_CLUSTER",
+  DATABASE: "restoreTarget.desc.DATABASE",
+  SCHEMA: "restoreTarget.desc.SCHEMA",
+  TABLE: "restoreTarget.desc.TABLE",
+  COLLECTION: "restoreTarget.desc.COLLECTION",
+};
 
+// A restore writes real data. Scope is CHOSEN from a list, never typed; a scope the engine cannot
+// restore stays on screen, disabled, with its reason. Overwriting is off by default and says what
+// off means — a database that already holds data is refused, and the job says so — and turning it
+// on opens a gate: retype the database's name for a scoped restore, or acknowledge that every
+// database on the destination is in scope for a full-cluster one (there is no single name to
+// retype). The primary action carries the reason it is blocked; it is never merely grey.
 export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
   const t = useT();
   const restore = useTriggerRestore();
@@ -44,160 +62,188 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
   const [database, setDatabase] = useState("");
   const [overExisting, setOverExisting] = useState(false);
   const [confirmName, setConfirmName] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Move focus into the dialog on open so keyboard users land inside it and Escape reaches the
-  // handler below instead of the page behind.
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const scoped = target !== "FULL_CLUSTER";
   const nameMatches = database.length > 0 && confirmName === database;
   // Friction is the point: overwriting an existing database stays blocked until the operator has
-  // retyped its name exactly.
-  const canSubmit = scoped ? database.length > 0 && (!overExisting || nameMatches) : true;
+  // retyped its name exactly — or, for a whole cluster, acknowledged what that means.
+  const canSubmit = scoped
+    ? database.length > 0 && (!overExisting || nameMatches)
+    : !overExisting || acknowledged;
+  const blocked = canSubmit
+    ? null
+    : scoped && database.length === 0
+      ? t("restore.blocked.database")
+      : scoped
+        ? t("restore.blocked.name")
+        : t("restore.blocked.ack");
 
   // Driven by the button's onClick, not the form's submit-on-click: a click on a type="submit"
   // button does not fire this stack's form submit (only requestSubmit does), so the restore never
-  // enqueued. onSubmit is kept for Enter in the fields. (Same fix as DeleteArtifactDialog.)
+  // enqueued. onSubmit is kept for Enter in the fields.
   function confirmRestore() {
     if (!canSubmit) return;
     restore.mutate({ artifactId: artifact.id, target, confirmExistingDatabase: overExisting });
   }
 
-  // Portal to document.body: the trigger lives inside the artifact row's `<span
-  // onClick={preventDefault}>`, and an inline dialog would be a DOM descendant of it — so a click on
-  // the submit button bubbles up and preventDefault silently cancels the form submit. The portal
-  // moves the dialog out of that subtree. (Same trap DeleteArtifactDialog documents.)
-  return createPortal(
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="restore-title"
-      tabIndex={-1}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 outline-none"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
-      }}
+  const engineLine = `${t(`engine.${artifact.engine}`)} / ${t(`executionMode.${artifact.executionMode}`)}`;
+  const settled = restore.isPending || restore.isSuccess;
+
+  return (
+    <DialogShell
+      titleId="restore-title"
+      title={t("restore.title")}
+      description={t("restore.description")}
+      subject={
+        <SubjectRow
+          state={artifact.state}
+          name={artifact.targetName ?? engineLine}
+          facts={[
+            ...(artifact.targetName !== null ? [engineLine] : []),
+            formatBytes(artifact.sizeCompressedBytes),
+            artifact.id.slice(0, 8),
+          ]}
+        />
+      }
+      actions={
+        <>
+          <Button type="button" variant="quiet" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant={overExisting ? "danger" : "primary"}
+            onClick={confirmRestore}
+            disabled={settled}
+            disabledReason={settled ? null : blocked}
+          >
+            {restore.isPending ? t("common.loading") : t("restore.submit")}
+          </Button>
+        </>
+      }
+      onClose={onClose}
     >
       <form
         onSubmit={(event) => {
           event.preventDefault();
           confirmRestore();
         }}
-        className="max-h-full w-full max-w-lg space-y-4 overflow-auto rounded-lg border border-border bg-background p-6 shadow-lg"
+        className="space-y-4"
       >
-        <div>
-          <h2 id="restore-title" className="text-lg font-semibold">
-            {t("restore.title")}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("restore.description")}</p>
-        </div>
-
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">{t("restore.scope")}</legend>
+        <fieldset className="space-y-1.5">
+          <legend className="mb-1.5 font-mono text-[10px] tracking-[0.13em] uppercase text-subtle-foreground">
+            {t("restore.scope")}
+          </legend>
           {RESTORE_TARGETS.map((option) => {
             const isSupported = supported.includes(option);
             const unconfinable = !confinable && option !== "FULL_CLUSTER";
             const available = isSupported && !unconfinable;
+            const selected = target === option;
             return (
-              <div key={option} className="flex items-center gap-2">
+              <div
+                key={option}
+                className={cn(
+                  "flex items-start gap-3 rounded-control border px-3 py-2.5",
+                  selected ? "border-accent-border bg-accent-soft" : "border-border",
+                  !available && "opacity-70",
+                )}
+              >
                 <input
                   type="radio"
                   id={`target-${option}`}
                   name="restore-target"
                   value={option}
-                  checked={target === option}
+                  checked={selected}
                   disabled={!available}
                   onChange={() => setTarget(option)}
+                  className="mt-1"
                 />
-                <Label
-                  htmlFor={`target-${option}`}
-                  className={available ? "" : "text-muted-foreground"}
-                >
-                  {t(targetLabel[option])}
-                </Label>
-                {!isSupported ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("restore.unsupported", { engine: t(`engine.${artifact.engine}`) })}
-                  </span>
-                ) : unconfinable ? (
-                  <span className="text-xs text-muted-foreground">
-                    {t("restore.notConfinable")}
-                  </span>
-                ) : null}
+                <div className="min-w-0">
+                  <Label
+                    htmlFor={`target-${option}`}
+                    className={cn("block", available ? "" : "text-muted-foreground")}
+                  >
+                    {t(targetLabel[option])}
+                  </Label>
+                  {/* The reason a scope is withheld sits on its row: the engine's, or — for a dump
+                      that carries several databases — the artifact's own. */}
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {!isSupported
+                      ? t("restore.unsupported", { engine: t(`engine.${artifact.engine}`) })
+                      : unconfinable
+                        ? t("restore.notConfinable")
+                        : t(targetDescription[option])}
+                  </p>
+                </div>
               </div>
             );
           })}
         </fieldset>
 
         {scoped ? (
-          <>
-            <div className="space-y-1.5">
-              <Label htmlFor="restore-database">{t("restore.targetDatabase")}</Label>
-              <Input
-                id="restore-database"
-                value={database}
-                onChange={(event) => setDatabase(event.target.value)}
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="restore-database">{t("restore.targetDatabase")}</Label>
+            <Input
+              id="restore-database"
+              value={database}
+              className="font-mono"
+              spellCheck={false}
+              onChange={(event) => setDatabase(event.target.value)}
+            />
+          </div>
+        ) : null}
 
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="restore-over-existing"
-                checked={overExisting}
-                onChange={(event) => setOverExisting(event.target.checked)}
-              />
-              <Label htmlFor="restore-over-existing">{t("restore.overExisting")}</Label>
+        <Panel tone={overExisting ? "danger" : "info"} className="p-3.5">
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="restore-over-existing"
+              checked={overExisting}
+              onChange={(event) => setOverExisting(event.target.checked)}
+              className="mt-1"
+            />
+            <div>
+              <Label htmlFor="restore-over-existing" className="block">
+                {t("restore.overExisting")}
+              </Label>
+              <p
+                className={cn(
+                  "mt-1 text-[12.5px]",
+                  overExisting ? "text-destructive-text" : "text-muted-foreground",
+                )}
+              >
+                {overExisting ? t("restore.overOn") : t("restore.overOff")}
+              </p>
             </div>
+          </div>
+        </Panel>
 
-            {overExisting ? (
-              <div className="space-y-1.5">
-                <p className="text-sm text-[var(--color-state-failed)]">
-                  {t("restore.confirmPrompt")}
-                </p>
-                <Label htmlFor="restore-confirm">{t("restore.confirmName")}</Label>
-                <Input
-                  id="restore-confirm"
-                  value={confirmName}
-                  onChange={(event) => setConfirmName(event.target.value)}
-                />
-                {confirmName.length > 0 && !nameMatches ? (
-                  <p className="text-sm text-[var(--color-state-failed)]">
-                    {t("restore.mismatch")}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </>
+        {overExisting && scoped ? (
+          <RetypeToConfirm
+            id="restore-confirm"
+            label={t("restore.confirmName")}
+            hint={t("restore.confirmPrompt")}
+            subject={database}
+            value={confirmName}
+            onChange={setConfirmName}
+            mismatch={t("restore.mismatch")}
+          />
+        ) : null}
+        {overExisting && !scoped ? (
+          <AcknowledgeCheckbox checked={acknowledged} onChange={setAcknowledged}>
+            {t("restore.ackFullCluster")}
+          </AcknowledgeCheckbox>
         ) : null}
 
         {restore.isError ? <ErrorState message={restore.error.message} /> : null}
         {restore.isSuccess ? (
-          <p role="status" className="text-sm text-[var(--color-state-verified)]">
+          <p role="status" className="text-sm text-state-verified">
             {t("restore.enqueued")}
           </p>
         ) : null}
-
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={!canSubmit || restore.isPending || restore.isSuccess}
-            onClick={confirmRestore}
-          >
-            {restore.isPending ? t("common.loading") : t("restore.submit")}
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-        </div>
       </form>
-    </div>,
-    document.body,
+    </DialogShell>
   );
 }
 
@@ -209,7 +255,7 @@ export function RestoreButton({ artifact, role }: { artifact: Artifact; role: Ro
   if (!canRestore(role)) return null;
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
         {t("artifacts.restore")}
       </Button>
       {open ? <RestoreDialog artifact={artifact} onClose={() => setOpen(false)} /> : null}

@@ -26,6 +26,20 @@ describe("Button — nothing is disabled without its reason", () => {
     expect(screen.queryByTestId("button-blocked-reason")).toBeNull();
   });
 
+  it("keeps the same button node when a reason appears, so a held reference stays live", () => {
+    const { rerender } = wrap(<Button disabledReason={null}>Start restore</Button>);
+    const before = screen.getByRole("button", { name: "Start restore" });
+    expect(before).toBeEnabled();
+    rerender(
+      <I18nProvider>
+        <Button disabledReason="retype the name to unlock">Start restore</Button>
+      </I18nProvider>,
+    );
+    const after = screen.getByRole("button", { name: "Start restore" });
+    expect(after).toBe(before);
+    expect(before).toBeDisabled();
+  });
+
   it("still honours a bare `disabled` for the screens that predate the reason", () => {
     wrap(<Button disabled>Save</Button>);
     expect(screen.getByRole("button")).toBeDisabled();

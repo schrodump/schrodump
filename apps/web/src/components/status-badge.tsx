@@ -38,12 +38,18 @@ const STYLES: Record<ArtifactState, { key: MessageKey; marker: Marker; className
   },
 };
 
-function Glyph({ marker }: { marker: Marker }) {
+// Exported for the places that need the shape without the word — a state filter chip carries the
+// marker so the row's census reads in the same language as the rows.
+export function StateGlyph({ state, size = 11 }: { state: ArtifactState; size?: number }) {
+  return <Glyph marker={STYLES[state].marker} size={size} />;
+}
+
+function Glyph({ marker, size = 11 }: { marker: Marker; size?: number }) {
   return (
     <svg
       viewBox="0 0 12 12"
-      width={11}
-      height={11}
+      width={size}
+      height={size}
       aria-hidden="true"
       data-marker={marker}
       className="shrink-0"
