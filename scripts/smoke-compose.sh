@@ -37,9 +37,10 @@ fail() {
   printf '\nsmoke: %s\n' "$1" >&2
 
   # A verify that ends INCONCLUSIVE is the runner failing to LOOK at an artifact, not a verdict on
-  # it — the server leaves the artifact untouched and says so. That distinction never reached this
-  # output: every step here aborts on `"state":"FAILED"` and prints the tail, and the tail is the
-  # last forty lines of a container that has kept working since.
+  # it — the server leaves the artifact untouched and says so, and the job carries its own state
+  # for it. That distinction used to stop at the job row: every step here aborts on a terminal job
+  # state and prints the tail, and the tail is the last forty lines of a container that has kept
+  # working since.
   #
   # It cannot be tolerated either, and this is the reason to go looking for it rather than to
   # ignore it. classifyVerifyError returns FAILED only for a closed set of restore codes and
@@ -174,6 +175,11 @@ for attempt in $(seq 1 60); do
     *'"state":"FAILED"'*)
       printf '\n--- jobs ---\n%s\n' "$jobs" >&2
       fail "a job failed"
+      ;;
+    # Its own state now, so it would otherwise fall through this case and wait out the clock.
+    *'"state":"INCONCLUSIVE"'*)
+      printf '\n--- jobs ---\n%s\n' "$jobs" >&2
+      fail "a verify could not run"
       ;;
   esac
 done
@@ -333,6 +339,10 @@ for attempt in $(seq 1 72); do
     *'"state":"FAILED"'*)
       printf '\n--- jobs ---\n%s\n' "$jobs" >&2
       fail "a job failed during the STAGED mysql backup"
+      ;;
+    *'"state":"INCONCLUSIVE"'*)
+      printf '\n--- jobs ---\n%s\n' "$jobs" >&2
+      fail "a verify could not run during the STAGED mysql backup"
       ;;
   esac
   if [ "$attempt" -eq 72 ]; then

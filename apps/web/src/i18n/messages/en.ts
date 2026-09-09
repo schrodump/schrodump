@@ -62,6 +62,7 @@ export const en = {
   "job.state.RUNNING": "Running",
   "job.state.SUCCEEDED": "Succeeded",
   "job.state.FAILED": "Failed",
+  "job.state.INCONCLUSIVE": "Could not run",
   "job.state.CANCELLED": "Cancelled",
 
   "auth.login.title": "Sign in",
@@ -275,7 +276,7 @@ export const en = {
 
   "guided.title": "Get to your first verified backup",
   "guided.description":
-    "Five steps. Only the last one turns a backup from a question into an answer.",
+    "Six steps. Only the last one turns a backup from a question into an answer.",
   "guided.step.destination": "Create a storage destination",
   "guided.step.canary": "Run the canary on that destination",
   "guided.step.target": "Create a database target",

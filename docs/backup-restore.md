@@ -111,6 +111,13 @@ Schrodump-independent approach `scripts/rehearse-recovery.sh` takes for the meta
 (there with `pg_restore`) — and on the day it matters, a rehearsal that leaned on Schrodump would be
 leaning on the thing that is gone.
 
+A verify can also end without a verdict. When Schrodump's own sandbox or runner fails to run the
+check — the Docker daemon blinked, no scratch volume is configured, the executor could not start —
+the job finishes as **`INCONCLUSIVE`** and the artefact is left exactly as it was: `UNOBSERVED`.
+That is a different outcome from `FAILED`. `FAILED` means the check ran and the backup is no good;
+`INCONCLUSIVE` means nothing was claimed either way, and the thing to fix is the deployment, not the
+backup. The jobs list shows it as its own state so the two are never read as the same thing.
+
 ## Restoring
 
 Restore is deliberately harder to trigger than backup.

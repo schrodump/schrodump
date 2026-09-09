@@ -49,6 +49,13 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   `runRetention` applies it before any I/O. Silence is not an instruction. The same rule covers an
   incomplete view: an unreadable or orphaned manifest aborts the whole cycle rather than pruning
   against a picture already known to be partial.
+- **A verify that could not run is `INCONCLUSIVE`, not `FAILED`.** `FAILED` is a process that ran
+  and broke; `INCONCLUSIVE` is `runVerifyJob` reporting that our own sandbox or runner never got to
+  look — the artifact stays `UNOBSERVED`, which was always true. It became its own `JobState`
+  because the UI had to separate "the backup is bad" from "the check could not run" on the jobs
+  list, and while both were `FAILED` the only handle it had was grepping the reason string. Only
+  VERIFY jobs use it; the smoke aborts on it by name, since a case block that only knew `FAILED`
+  would let it wait out the clock.
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 

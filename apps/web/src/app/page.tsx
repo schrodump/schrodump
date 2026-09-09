@@ -9,6 +9,7 @@ import { GuidedSetup } from "@/components/guided-setup";
 import { StateCounters } from "@/components/state-counters";
 import { useArtifacts, useJobs } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
+import { formatTime } from "@/lib/format";
 import type { Job } from "@/lib/types";
 
 // Exported so the row can be asserted directly, like ArtifactRow.
@@ -50,8 +51,11 @@ export function RecentJobs({ jobs }: { jobs: Job[] }) {
             <span className="min-w-0 text-sm text-[var(--color-foreground-soft)]">
               {job.reason}
             </span>
+            {/* The viewer's zone, never a slice of the ISO string: `.slice(11, 16)` printed UTC, so
+                a São Paulo operator read a 02:00 job as 05:00 — the quiet mismatch that makes a
+                person distrust the whole screen. Same rule as every other timestamp in the app. */}
             <span className="hidden font-mono text-xs text-muted-foreground sm:block">
-              {(job.finishedAt ?? job.createdAt).slice(11, 16)}
+              {formatTime(job.finishedAt ?? job.createdAt)}
             </span>
           </div>
         );
