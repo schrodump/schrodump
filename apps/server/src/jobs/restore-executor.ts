@@ -64,6 +64,15 @@ export function restoreParamsOf(raw: unknown): RestoreParams {
   return RestoreParamsSchema.parse(raw);
 }
 
+// The list mapper's reading of the same params: only the scope, and null for anything that does
+// not parse. A ledger row for a RESTORE says what it was aimed at; it must not throw over a row an
+// older release wrote, and it must not leak the rest of the params (who triggered it) into a
+// field that exists to name a scope.
+export function restoreTargetOf(raw: unknown): RestoreTarget | null {
+  const parsed = RestoreParamsSchema.pick({ target: true }).safeParse(raw);
+  return parsed.success ? parsed.data.target : null;
+}
+
 // SECURITY: a RESTORE job may only ever touch an artifact in its OWN organization. The worker runs
 // on raw prisma (system process), so this ownership check is explicit and happens BEFORE any
 // decrypt — a job referencing another org's artifact must fail, never proceed.

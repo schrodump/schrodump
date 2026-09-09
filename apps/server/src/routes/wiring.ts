@@ -5,7 +5,7 @@
 // need S3 / a reachable target). Every store is built from scopedPrisma, so every query is
 // automatically filtered by organizationId.
 
-import type { PrismaClient } from "@prisma/client";
+import type { ArtifactState, JobKind, JobState, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
 import type { Auth } from "../auth/auth.js";
@@ -27,7 +27,8 @@ import type { EncryptionKeyRoutesDeps } from "./encryption-keys.js";
 import { LIST_PAGE_SIZE } from "./jobs.js";
 import type { ArtifactRecord, JobsService } from "./jobs.js";
 import { driverForDestination } from "../jobs/destination-driver.js";
-import { globalsObjectKey } from "../jobs/restore-executor.js";
+import { globalsObjectKey, restoreTargetOf } from "../jobs/restore-executor.js";
+import type { RestoreTarget } from "../jobs/restore.js";
 
 export function prismaDestinationStore(
   prisma: PrismaClient,
@@ -321,9 +322,15 @@ export const JOB_SUBJECT_INCLUDE = {
   policy: { select: { name: true, target: { select: { name: true } } } },
   verifyArtifact: {
     select: {
+      id: true,
+      state: true,
       job: { select: { policy: { select: { name: true, target: { select: { name: true } } } } } },
     },
   },
+  // The artifact a BACKUP wrote — null until it has, and for every other kind. With the state
+  // riding along, a ledger row can point at what the run left behind and say whether anyone has
+  // looked at it yet, without a second request per row.
+  artifact: { select: { id: true, state: true } },
 } as const;
 
 // An artifact's subject, reached through the job that wrote it: the policy names the run, the
@@ -338,24 +345,43 @@ export const ARTIFACT_SUBJECT_INCLUDE = {
 // in the API would make the UI unable to tell "nobody scheduled this" from "the row is gone".
 type JobSubjectRelations = {
   policy?: { name: string; target: { name: string } } | null;
-  verifyArtifact?: { job: { policy: { name: string; target: { name: string } } | null } } | null;
+  verifyArtifact?: {
+    id: string;
+    state: ArtifactState;
+    job: { policy: { name: string; target: { name: string } } | null };
+  } | null;
+  artifact?: { id: string; state: ArtifactState } | null;
+  restoreParams?: unknown;
 };
+
+// The artifact a job is ABOUT: the one a VERIFY or RESTORE acts on, or the one a BACKUP produced.
+// One field, because the ledger asks one question of every row — "what did this run touch, and in
+// what state did it leave it" — and the answer does not depend on which relation held it.
+export interface JobArtifactRef {
+  id: string;
+  state: ArtifactState;
+}
 
 export function toJobRecord<T extends JobSubjectRelations>(
   row: T,
-): Omit<T, "policy" | "verifyArtifact"> & {
+): Omit<T, "policy" | "verifyArtifact" | "artifact"> & {
   policyName: string | null;
   targetName: string | null;
+  artifact: JobArtifactRef | null;
+  restoreTarget: RestoreTarget | null;
 } {
   // The relations come OUT. They were loaded to answer two questions, and returning the nested
   // shape would put a second, differently-spelled copy of the policy on every row for any client
   // that later reads it — the response says what the job is about, not how that was looked up.
-  const { policy, verifyArtifact, ...job } = row;
+  const { policy, verifyArtifact, artifact, ...job } = row;
   const resolved = policy ?? verifyArtifact?.job.policy ?? null;
+  const touched = verifyArtifact ?? artifact ?? null;
   return {
     ...job,
     policyName: resolved?.name ?? null,
     targetName: resolved?.target.name ?? null,
+    artifact: touched === null ? null : { id: touched.id, state: touched.state },
+    restoreTarget: restoreTargetOf(row.restoreParams),
   };
 }
 
@@ -396,15 +422,48 @@ export function createJobsService(
     // nothing about how many hops that took.
     listJobs: async (organizationId) => {
       const db = scopedPrisma(prisma, organizationId);
-      const [rows, total] = await Promise.all([
-        db.backupJob.findMany({
-          orderBy: { createdAt: "desc" },
-          take: LIST_PAGE_SIZE,
-          include: JOB_SUBJECT_INCLUDE,
-        }),
-        db.backupJob.count(),
-      ]);
-      return { items: rows.map(toJobRecord), total };
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const [rows, total, byStateRows, byKindRows, failedLast24h, inconclusiveLast24h, oldestPending] =
+        await Promise.all([
+          db.backupJob.findMany({
+            orderBy: { createdAt: "desc" },
+            take: LIST_PAGE_SIZE,
+            include: JOB_SUBJECT_INCLUDE,
+          }),
+          db.backupJob.count(),
+          db.backupJob.groupBy({ by: ["state"], _count: { _all: true } }),
+          db.backupJob.groupBy({ by: ["kind"], _count: { _all: true } }),
+          db.backupJob.count({ where: { state: "FAILED", finishedAt: { gte: since } } }),
+          db.backupJob.count({ where: { state: "INCONCLUSIVE", finishedAt: { gte: since } } }),
+          db.backupJob.findFirst({
+            where: { state: "PENDING", scheduledAt: { not: null } },
+            orderBy: { scheduledAt: "asc" },
+            select: { scheduledAt: true },
+          }),
+        ]);
+      // Every member of the enum is present, at zero when absent: the client renders a chip per
+      // state and per kind, and a missing key would read as a state the server does not know.
+      const byState: Record<JobState, number> = {
+        PENDING: 0,
+        RUNNING: 0,
+        SUCCEEDED: 0,
+        FAILED: 0,
+        INCONCLUSIVE: 0,
+        CANCELLED: 0,
+      };
+      for (const group of byStateRows) byState[group.state] = group._count._all;
+      const byKind: Record<JobKind, number> = { BACKUP: 0, RESTORE: 0, VERIFY: 0, RETENTION: 0 };
+      for (const group of byKindRows) byKind[group.kind] = group._count._all;
+      return {
+        items: rows.map(toJobRecord),
+        total,
+        counts: { byState, byKind },
+        stats: {
+          oldestPendingScheduledAt: oldestPending?.scheduledAt ?? null,
+          failedLast24h,
+          inconclusiveLast24h,
+        },
+      };
     },
     // The counts come from a groupBy over the WHOLE table, never from `items`. A dashboard that
     // counted the returned page would report "3 unobserved backups" on a deployment with four

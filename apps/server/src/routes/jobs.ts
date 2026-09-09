@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import type { JobKind, JobState } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
@@ -80,6 +81,20 @@ export const LIST_PAGE_SIZE = 200;
 export interface JobListDTO {
   items: unknown[];
   total: number;
+  // Over the WHOLE table, like the artifact counts. The ledger's header says how many runs are in
+  // flight, how many are waiting, and how many broke or could not run today; a capped page can only
+  // say what happened to the newest two hundred rows, and a filter chip that counted the page would
+  // shrink the moment the list got trimmed.
+  counts: { byState: Record<JobState, number>; byKind: Record<JobKind, number> };
+  stats: {
+    // The scheduled time of the PENDING job that has waited longest. With "now" it is how far
+    // behind the workers are — the first signal a deployment gives when it is falling behind.
+    oldestPendingScheduledAt: Date | null;
+    // Finished in the last 24 hours. FAILED is a broken process; INCONCLUSIVE is a verify that
+    // never got to look, whose artifact is unchanged and still UNOBSERVED.
+    failedLast24h: number;
+    inconclusiveLast24h: number;
+  };
 }
 
 export interface ArtifactListDTO {
