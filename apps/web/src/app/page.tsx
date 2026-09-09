@@ -80,7 +80,7 @@ export default function DashboardPage() {
           <ErrorState message={artifacts.error.message} onRetry={() => void artifacts.refetch()} />
         ) : (
           // Straight from the server: computed over the whole table, not the returned page.
-          <StateCounters counts={artifacts.data.counts} total={artifacts.data.total} />
+          <StateCounters counts={artifacts.data.counts} total={artifacts.data.total} verifiedByLevel={artifacts.data.verifiedByLevel} />
         )}
       </section>
 

@@ -284,7 +284,7 @@ export default function ArtifactsPage() {
       <h1 className="text-2xl font-semibold">{t("artifacts.title")}</h1>
 
       {data !== undefined ? (
-        <div className="mt-5 space-y-3">
+        <div className="mt-5 space-y-3 [&>*:first-child]:mb-6">
           {/* The catalog leads with the same figure the dashboard does, in the catalog's own words,
               and names the oldest open question under it — the artifact that has waited longest
               for anyone to look. All of it from the server's counts over the whole table. */}
