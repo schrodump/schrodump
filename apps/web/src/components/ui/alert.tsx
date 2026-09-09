@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { cva, type VariantProps } from "class-variance-authority";
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
+import { Panel, type PanelTone } from "@/components/ui/panel";
 
-const alertVariants = cva("relative w-full rounded-lg border p-4 text-sm", {
-  variants: {
-    variant: {
-      default: "bg-card text-card-foreground",
-      warning:
-        "border-[var(--color-state-unobserved)]/40 bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
-      destructive:
-        "border-destructive/40 bg-[var(--color-state-failed-bg)] text-[var(--color-state-failed)]",
-    },
-  },
-  defaultVariants: { variant: "default" },
-});
+// A Panel with role="alert". The three legacy variants map onto the design system's tones so the
+// screens that still say <Alert variant="warning"> restyle without a rename; new code uses Panel.
+type AlertVariant = "default" | "warning" | "destructive";
+const TONE: Record<AlertVariant, PanelTone> = {
+  default: "section",
+  warning: "warning",
+  destructive: "danger",
+};
 
-export type AlertProps = HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>;
+export type AlertProps = HTMLAttributes<HTMLDivElement> & { variant?: AlertVariant | null };
 
 export function Alert({ className, variant, ...props }: AlertProps) {
-  return <div role="alert" className={cn(alertVariants({ variant }), className)} {...props} />;
+  return (
+    <Panel role="alert" tone={TONE[variant ?? "default"]} className={cn("w-full", className)} {...props} />
+  );
 }
 
 export function AlertTitle({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
@@ -29,5 +27,5 @@ export function AlertTitle({ className, ...props }: HTMLAttributes<HTMLParagraph
 }
 
 export function AlertDescription({ className, ...props }: HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn("text-sm opacity-90", className)} {...props} />;
+  return <p className={cn("text-sm text-muted-foreground", className)} {...props} />;
 }

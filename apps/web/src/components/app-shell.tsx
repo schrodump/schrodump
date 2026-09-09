@@ -89,8 +89,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 href={item.href}
                 aria-current={pathname === item.href ? "page" : undefined}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-sm transition-colors hover:bg-accent",
-                  pathname === item.href ? "bg-accent font-medium" : "text-muted-foreground",
+                  "rounded-md px-3 py-1.5 text-sm transition-colors hover:bg-muted",
+                  pathname === item.href ? "bg-muted font-medium" : "text-muted-foreground",
                 )}
               >
                 {t(item.key)}

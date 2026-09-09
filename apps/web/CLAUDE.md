@@ -100,6 +100,56 @@ and the canary and probe ones tick only when the server recorded a pass (`lastCa
 because a bucket nobody proved writable is the same open question the product refuses to paint green
 anywhere else. The card stays until all six are done — it cannot be dismissed.
 
+## Design system (the Foundations contract)
+
+`src/app/globals.css` is the token contract, extracted from the redesigned screens. Read it before
+touching a colour; the comments carry the measurements.
+
+- **Every colour is authored for both themes on one line, with `light-dark()`.** The browser
+  resolves it from `color-scheme`, so the app follows the operating system with no media query, and
+  the two themes cannot drift apart because neither is written without the other. `[data-theme]`
+  (or `.light`/`.dark`) forces one side. Every text-on-surface pair was measured against WCAG AA in
+  both themes; the lowest is 4.51:1. Change a value, re-measure, update the comment.
+- **The amber rule.** One hue does three jobs — the accent (`--color-primary`, the focus ring), the
+  `UNOBSERVED` state, and caution — and they stay apart by FORM: the state is always a diamond
+  marker with a mono uppercase word, the accent is always a filled button or a ring, caution is
+  always tinted text or a tinted panel. `accent` is the amber here, not shadcn's grey hover surface;
+  hover surfaces use `muted`.
+- **The domain tokens keep their names.** `--color-state-*` (the data verdict), `--color-job-*`
+  (the process outcome, a quiet palette that never borrows the state colours), `--color-caution*`,
+  `--color-destructive*` (a separate red from `state-failed`: a delete button and a condemned
+  backup must not read as the same thing). Collapse them into generic success/warning/error and
+  the product loses the distinction it exists to make — that goes for a design-system sync too.
+- **The aliases in `@theme` are transitional.** `--color-foreground-soft`, `--color-state-*-bg`,
+  `--color-border-strong`, `--color-secondary*` exist so the screens that predate the redesign
+  restyle without a rename. Each screen drops them as it is ported; delete an alias with its last
+  use, and the block with the last alias. New code never uses them.
+- **Fonts are vendored (`src/fonts/`), not fetched.** `next/font/google` downloads at build time,
+  and a `docker build` on a host without internet must not fail on a typeface. Instrument Sans for
+  anything a person wrote; JetBrains Mono for anything a machine produced — ids, sizes, checksums,
+  hosts, states, log lines. Both SIL OFL 1.1, licences alongside the files.
+- **Radii are four steps** — chip 6, control 9, panel 14, dialog 16 — and the Tailwind
+  `rounded-sm/md/lg/xl` map onto them, so `rounded-md` on an input lands on the scale.
+
+The semantic components, each carrying one law and a test that proves it by mutation:
+
+- **`StatusBadge` / `StateMarker`** — colour AND shape: a sealed ring for `VERIFIED` (never a
+  checkmark), a rotated square for `UNOBSERVED`, a triangle for `FAILED`, in `data-marker`. There is
+  no fourth state.
+- **`VerifyLevelChip`** — how deep the check went, never whether it passed. Four appearances: full
+  restore and a requested checksum are neutral; a checksum **downgraded** from a requested full
+  restore takes the caution tint; a null level on an `UNOBSERVED` artifact says "no verdict yet",
+  and a null level on a `VERIFIED`/`FAILED` one (it predates the field) renders nothing — "checksum"
+  there would be a false claim, "no verdict" a false one too.
+- **`JobStateChip`** — the process outcome: quiet ink and a square, no shape or colour borrowed
+  from the state markers, only `FAILED` coloured; `exit N` only when non-zero.
+- **`Button`** — six variants (primary, secondary, quiet, ghost, accent, danger; the three legacy
+  names map onto them) and **`disabledReason`**, the design system's only way to disable: the
+  reason is rendered beside the control as "Blocked — …" and announced through `aria-describedby`.
+  There are no bare greyed-out controls in this product.
+- **`Panel`** — seven tones; tone carries the meaning. A `lock` is deliberately not red: a
+  constraint is not a failure. `Alert` is a `Panel` with `role="alert"` and the legacy variant names.
+
 ## How it talks to the server
 
 There is no CORS: `next.config.ts` rewrites `/api/auth/*` and `/backend/*` to `SCHRODUMP_API_URL`.

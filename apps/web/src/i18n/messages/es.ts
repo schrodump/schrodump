@@ -34,6 +34,7 @@ export const es: Record<MessageKey, string> = {
   "common.delete": "Eliminar",
   "common.retry": "Reintentar",
   "common.loading": "Cargando…",
+  "common.blocked": "Bloqueado",
   "common.error": "Algo salió mal",
   "common.errorDetail": "La solicitud falló: {message}",
   "common.configured": "Configurado",
@@ -237,6 +238,7 @@ export const es: Record<MessageKey, string> = {
   "artifacts.detail.dependsOn": "Depende de",
   "artifacts.detail.verifiedVia": "Verificado por",
   "artifacts.checksumOnly": "solo checksum",
+  "artifacts.noVerdict": "sin veredicto aún",
   "artifacts.downgradedReason":
     "La restauración completa no es posible para este artefacto; solo se verificó su checksum.",
   "artifacts.detail.raw": "Tamaño original",

@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
+import { JobStateChip } from "@/components/job-state-chip";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useJobs } from "@/hooks/use-resources";
@@ -26,15 +27,12 @@ export function JobRow({ job }: { job: Job }) {
     job.scheduledAt !== null && job.startedAt !== null
       ? new Date(job.startedAt).getTime() - new Date(job.scheduledAt).getTime()
       : null;
-  // Exit 0 is the quiet normal and stays off the row; a non-zero code is the forensic the reason
-  // line often summarises but does not give.
-  const showExit = job.exitCode !== null && job.exitCode !== 0;
   return (
     <div className="space-y-3 border-b border-border px-2 py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="font-medium">{t(`job.kind.${job.kind}`)}</span>
           {job.targetName ? <span className="font-medium">{job.targetName}</span> : null}
-          <span className="text-sm text-muted-foreground">{t(`job.state.${job.state}`)}</span>
+          <JobStateChip state={job.state} exitCode={job.exitCode} />
           {/* Only when it adds something. A policy is very often named after the database it backs
               up, and repeating the same word twice on one row reads as a rendering bug. */}
           {job.policyName && job.policyName !== job.targetName ? (
@@ -52,11 +50,6 @@ export function JobRow({ job }: { job: Job }) {
           ) : null}
           {queueWaitMs !== null && queueWaitMs >= 1000 ? (
             <span>{t("jobs.queued", { duration: formatDuration(queueWaitMs) })}</span>
-          ) : null}
-          {showExit ? (
-            <span className="text-[var(--color-state-failed)]">
-              {t("jobs.exit", { code: String(job.exitCode) })}
-            </span>
           ) : null}
           {job.artifactId !== null ? (
             <span>{t("jobs.artifact", { id: job.artifactId.slice(0, 8) })}</span>
