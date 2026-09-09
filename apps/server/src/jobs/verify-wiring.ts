@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { StorageDriver } from "@schrodump/storage/driver";
-import type { VerifyPorts, VerifyProof } from "./verify.js";
+import type { FullRestoreResult, VerifyPorts, VerifyProof } from "./verify.js";
 
 export interface VerifyWiringDeps {
   driver: StorageDriver;
@@ -23,7 +23,7 @@ export interface VerifyWiringDeps {
   // assertions (row/collection counts vs. dump time, constraint presence, migration version), then
   // destroys the container. Three-way: VERIFIED/FAILED are claims about the artifact; INCONCLUSIVE
   // means the sandbox itself failed to run the attempt.
-  runFullRestore(): Promise<VerifyProof>;
+  runFullRestore(): Promise<FullRestoreResult>;
   setJobState(
     state: "RUNNING" | "SUCCEEDED" | "FAILED" | "INCONCLUSIVE",
     reason?: string,

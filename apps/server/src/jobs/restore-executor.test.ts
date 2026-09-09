@@ -7,12 +7,14 @@ import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { createGzip } from "node:zlib";
 import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { RunMount, RunOptions, RunResult, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   artifactBelongsToOrg,
+  describeToolFailure,
   globalsKeyFor,
   planRestoreSteps,
   restoreParamsOf,
@@ -406,6 +408,67 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
     expect(capture[0]?.mounts).toHaveLength(1);
   });
 
+  // The runner captures and redacts the restore tool's stderr; the exit-code throw used to drop it.
+  // A verify classifies RESTORE_EXECUTOR_FAILED as FAILED and the operator then read "the artifact
+  // restored but produced no usable schema" — for a restore that never completed — with
+  // pg_restore's actual complaint discarded on the way. The message is the job's reason.
+  it("names the restore tool's complaint when the restore step exits non-zero", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const stderr =
+      'pg_restore: error: could not execute query: ERROR:  extension "postgis" is not available\n';
+    const failingRunner: Runner = {
+      run: () => Promise.resolve({ exitCode: 1, stderr, durationMs: 1 }),
+      withEphemeralService: () => Promise.reject(new Error("not used in this test")),
+    };
+
+    const thrown: unknown = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: failingRunner,
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    }).catch((err: unknown) => err);
+
+    expect(thrown).toBeInstanceOf(SchrodumpError);
+    expect((thrown as SchrodumpError).code).toBe("RESTORE_EXECUTOR_FAILED");
+    expect((thrown as SchrodumpError).message).toBe(
+      "restore execution failed (exit code 1): " +
+        'pg_restore: error: could not execute query: ERROR:  extension "postgis" is not available',
+    );
+  });
+
+  it("keeps the exit code alone when the tool said nothing", async () => {
+    const identity = await generateX25519Identity();
+    const recipient = await identityToRecipient(identity);
+    const silentRunner: Runner = {
+      run: () => Promise.resolve({ exitCode: 2, stderr: "  \n", durationMs: 1 }),
+      withEphemeralService: () => Promise.reject(new Error("not used in this test")),
+    };
+
+    const thrown: unknown = await runRestorePipeline({
+      driver: fakeDriver(() => encryptedGzip("hello", recipient)),
+      runner: silentRunner,
+      bucketKey: "artifact.bin",
+      globalsKey: null,
+      ageIdentity: identity,
+      network: "schrodump_targets",
+      timeoutMs: 1000,
+      correlationId: "job-1",
+      buildRestoreDescriptor: restoreDescriptor,
+      buildGlobalsRestoreDescriptor: () => null,
+      reserveStaging,
+    }).catch((err: unknown) => err);
+
+    expect((thrown as SchrodumpError).message).toBe("restore execution failed (exit code 2)");
+  });
+
   // Locks Finding 1: a throw from provideExtraMounts (ENOSPC/EIO writing mongo's `--config` file)
   // must still release the staging reservation — before the fix, the await sat OUTSIDE the try whose
   // finally does staging.cleanup(), so the throw skipped cleanup entirely and leaked the scratch
@@ -464,5 +527,25 @@ describe("runRestorePipeline — extra-mount threading and reservation lifecycle
 
     expect(ok).toBe(true);
     expect(capture[0]?.signal).toBe(controller.signal);
+  });
+});
+
+describe("describeToolFailure", () => {
+  it("appends the tool's trimmed stderr to the summary", () => {
+    expect(describeToolFailure("step failed (exit code 1)", "\nERROR: boom\n")).toBe(
+      "step failed (exit code 1): ERROR: boom",
+    );
+  });
+
+  it("is the summary alone when stderr is blank", () => {
+    expect(describeToolFailure("step failed (exit code 1)", "   ")).toBe("step failed (exit code 1)");
+  });
+
+  it("keeps the TAIL of a long stderr — the last lines are where the tool says what broke", () => {
+    const stderr = "x".repeat(500) + "y".repeat(3000);
+    const message = describeToolFailure("step failed", stderr);
+    expect(message.startsWith("step failed: …")).toBe(true);
+    expect(message.endsWith("y".repeat(2000))).toBe(true);
+    expect(message).not.toContain("x");
   });
 });

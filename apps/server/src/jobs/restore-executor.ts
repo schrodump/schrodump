@@ -258,6 +258,21 @@ export interface RestorePipelineDeps {
 // executor connected to the origin target. Returns true iff every restore executor exits 0; throws on
 // a non-zero exit or a source error so a truncated/failed restore never reports ok. Every decrypted
 // dump is always removed in finally; cleanup releases the reserved scratch dir.
+// How much of a tool's stderr a failure message keeps. The runner already caps capture at 8 KiB and
+// redacts credentials; the LAST lines are where pg_restore, the mysql client and mongorestore say
+// what broke, and this message becomes a job's `reason` — read in a ledger row, not a log viewer.
+const STDERR_DETAIL_LIMIT = 2000;
+
+// `summary` names the step and its exit code; the tool's own stderr, trimmed and tail-bounded,
+// follows it. Nothing but the summary when the tool said nothing.
+export function describeToolFailure(summary: string, stderr: string): string {
+  const detail = stderr.trim();
+  if (detail === "") return summary;
+  const tail =
+    detail.length > STDERR_DETAIL_LIMIT ? `…${detail.slice(-STDERR_DETAIL_LIMIT)}` : detail;
+  return `${summary}: ${tail}`;
+}
+
 export async function runRestorePipeline(deps: RestorePipelineDeps): Promise<boolean> {
   const staging = await deps.reserveStaging();
   // extra is materialized INSIDE the try (not between reserveStaging and the try) so a throw from
@@ -436,11 +451,8 @@ async function restoreOne(
         // and this failure surfaces as an INCONCLUSIVE verify, so the artifact stays UNOBSERVED
         // with no diagnosable cause. RunResult.stderr is already captured, truncated and sanitized
         // by the runner (env values are redacted there); dropping it was pure loss.
-        const detail = extract.stderr.trim();
         throw new SchrodumpError(
-          detail === ""
-            ? `restore extract failed (exit code ${extract.exitCode})`
-            : `restore extract failed (exit code ${extract.exitCode}): ${detail}`,
+          describeToolFailure(`restore extract failed (exit code ${extract.exitCode})`, extract.stderr),
           {
             code: "RESTORE_EXTRACT_FAILED",
             correlationId: deps.correlationId,
@@ -459,10 +471,23 @@ async function restoreOne(
       ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     if (restoreResult.exitCode !== 0) {
-      throw new SchrodumpError(`restore execution failed (exit code ${restoreResult.exitCode})`, {
-        code: "RESTORE_EXECUTOR_FAILED",
-        correlationId: deps.correlationId,
-      });
+      // The same loss the extract branch above already repaired, one step later: the runner had
+      // captured and redacted the restore tool's stderr, and this threw the exit code alone. A
+      // verify classifies this code as FAILED, so the operator read "the artifact restored but
+      // produced no usable schema" — for a restore that had not completed at all — while
+      // pg_restore's actual complaint (an extension the sandbox image lacks, a DEFINER the sandbox
+      // has no user for) was discarded on the way. A manual restore lost the same words in its own
+      // job reason.
+      throw new SchrodumpError(
+        describeToolFailure(
+          `restore execution failed (exit code ${restoreResult.exitCode})`,
+          restoreResult.stderr,
+        ),
+        {
+          code: "RESTORE_EXECUTOR_FAILED",
+          correlationId: deps.correlationId,
+        },
+      );
     }
   } finally {
     // Release the S3 read stream. On success it has already ended (fully consumed by the decrypt);

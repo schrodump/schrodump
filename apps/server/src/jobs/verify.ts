@@ -8,6 +8,19 @@ export type VerifyLevel = "NONE" | "CHECKSUM" | "FULL_RESTORE";
 // never FAIL it. Only VERIFIED/FAILED are genuine claims about the artifact's content.
 export type VerifyProof = "VERIFIED" | "FAILED" | "INCONCLUSIVE";
 
+// The proof plus the words the attempt itself produced. A FAILED proof covers two different
+// findings: a restore that completed and then counted nothing, and a restore that never completed
+// (pg_restore refusing an extension the sandbox image lacks, a mysql client aborting on a DEFINER
+// the sandbox has no user for). Both condemn the artifact — the operator's next step is not the
+// same, and until `cause` existed the job reason was one fixed sentence for both, "the artifact
+// restored but produced no usable schema", written also when nothing had restored.
+export interface FullRestoreResult {
+  proof: VerifyProof;
+  // Built from the runner's redacted stderr (never driver prose), so it is safe to persist as the
+  // job reason. Null when there is nothing to add; runVerifyJob then keeps the generic sentence.
+  cause: string | null;
+}
+
 export interface VerifyContext {
   jobId: string;
   artifactId: string;
@@ -30,7 +43,7 @@ export interface VerifyPorts {
   // Downloads the stored object, recomputes its checksum, compares against the manifest.
   checksumMatches(): Promise<boolean>;
   // Ephemeral container of the correct major, restore, assertions, then destroy — isolated network.
-  fullRestore(): Promise<VerifyProof>;
+  fullRestore(): Promise<FullRestoreResult>;
 }
 
 export interface VerifyOutcome {
@@ -75,7 +88,7 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
 
   try {
     if (level === "FULL_RESTORE") {
-      const proof = await ports.fullRestore();
+      const { proof, cause } = await ports.fullRestore();
       if (proof === "INCONCLUSIVE") {
         // Our own infra failed to run the restore — say nothing about the artifact. It stays
         // UNOBSERVED, exactly as if verify had never run. The job says the same: INCONCLUSIVE, not
@@ -94,7 +107,10 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
       await ports.setJobState(
         ok ? "SUCCEEDED" : "FAILED",
-        verdict(ok, "verify failed: the artifact restored but produced no usable schema"),
+        verdict(
+          ok,
+          `verify failed: ${cause ?? "the artifact restored but produced no usable schema"}`,
+        ),
       );
       return {
         finalState: ok ? "VERIFIED" : "FAILED",

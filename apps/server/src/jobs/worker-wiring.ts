@@ -49,6 +49,7 @@ import {
   globalsKeyFor,
   restoreParamsOf,
   restoreScopeOf,
+  describeToolFailure,
   runRestorePipeline,
 } from "./restore-executor.js";
 import { createRetentionPorts } from "./retention-wiring.js";
@@ -59,7 +60,12 @@ import { producerVersion } from "../version.js";
 import { SchrodumpError } from "@schrodump/core/errors";
 import { driverCodeOf } from "../probe/test-connection.js";
 import { classifyVerifyError, createVerifyPorts } from "./verify-wiring.js";
-import { runVerifyJob, type VerifyLevel, type VerifyOutcome, type VerifyProof } from "./verify.js";
+import {
+  runVerifyJob,
+  type FullRestoreResult,
+  type VerifyLevel,
+  type VerifyOutcome,
+} from "./verify.js";
 import type { BackupResult, ClaimedJob, JobExecutor, WorkerStore } from "./worker.js";
 
 // The pipeline always gzips the dump before encryption (see backup-wiring.ts), regardless of the
@@ -871,7 +877,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       // classifyVerifyError to FAILED (the artifact is bad) or INCONCLUSIVE (our infra failed) — a raw
       // throw must NEVER escape to runVerifyJob's catch, which would mark a possibly-good artifact
       // FAILED and violate the leave-it-UNOBSERVED-on-infra-failure thesis.
-      runFullRestore: async (): Promise<VerifyProof> => {
+      runFullRestore: async (): Promise<FullRestoreResult> => {
         // ONE outer try makes the catch total: every throw — buildVerifySandbox on an out-of-range
         // major, a prisma/decrypt error while loading the identity, a runner/S3/executor error inside
         // withEphemeralService — is funnelled to classifyVerifyError. The three-way result is the ONLY
@@ -889,7 +895,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         // — scripts/smoke-compose.sh does — sees all five paths rather than the one. And
         // deliberately no error object: these are state checks, not throws, so there is nothing
         // here that could carry a connection string the way a driver message would.
-        const inconclusive = (guard: string): VerifyProof => {
+        const inconclusive = (guard: string): FullRestoreResult => {
           deps.log.warn(
             {
               jobId: job.id,
@@ -900,7 +906,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             },
             VERIFY_INCONCLUSIVE_LOG,
           );
-          return "INCONCLUSIVE";
+          return { proof: "INCONCLUSIVE", cause: guard };
         };
 
         try {
@@ -978,7 +984,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               readinessTimeoutMs: SANDBOX_READY_TIMEOUT_MS,
               correlationId: job.id,
             },
-            async ({ host }): Promise<VerifyProof> => {
+            async ({ host }): Promise<FullRestoreResult> => {
               const conn: TargetConnection = {
                 host,
                 port: sandbox.port,
@@ -1077,9 +1083,30 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               const count = Number.parseInt(Buffer.concat(chunks).toString("utf8").trim(), 10);
               // VERIFIED iff the assertion exited clean AND found at least one user table; anything
               // else is a restore that produced no usable schema → FAILED (a claim about the artifact).
-              return assertRun.exitCode === 0 && Number.isFinite(count) && count >= 1
-                ? "VERIFIED"
-                : "FAILED";
+              // The cause says WHICH anything else: the check itself breaking is a different finding
+              // from the check counting nothing, and the row has to carry the difference.
+              if (assertRun.exitCode !== 0) {
+                return {
+                  proof: "FAILED",
+                  cause: describeToolFailure(
+                    `the restore completed but the schema check failed (exit code ${assertRun.exitCode})`,
+                    assertRun.stderr,
+                  ),
+                };
+              }
+              if (!Number.isFinite(count)) {
+                return {
+                  proof: "FAILED",
+                  cause: "the restore completed but the schema check printed no count",
+                };
+              }
+              return count >= 1
+                ? { proof: "VERIFIED", cause: null }
+                : {
+                    proof: "FAILED",
+                    cause:
+                      "the artifact restored but produced no usable schema (the schema check counted 0)",
+                  };
             },
             deps.signal !== undefined ? { signal: deps.signal } : undefined,
           );
@@ -1112,7 +1139,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               VERIFY_INCONCLUSIVE_LOG,
             );
           }
-          return proof;
+          // FAILED carries the restore's own words into the job reason. A SchrodumpError message is
+          // built from the runner's redacted stderr (runRestorePipeline), never from driver prose —
+          // the same rule that lets the INCONCLUSIVE log above keep `detail`. Before this, every
+          // FAILED reached the operator as "restored but produced no usable schema", also when
+          // nothing had restored.
+          return { proof, cause: err instanceof SchrodumpError ? err.message : null };
         }
       },
       // Surface the downgrade: verify.ts marks a passing CHECKSUM as ("SUCCEEDED", undefined); when

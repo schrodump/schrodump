@@ -56,6 +56,17 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   list, and while both were `FAILED` the only handle it had was grepping the reason string. Only
   VERIFY jobs use it; the smoke aborts on it by name, since a case block that only knew `FAILED`
   would let it wait out the clock.
+- **A `FAILED` verify says what the restore said.** `fullRestore()` returns a `FullRestoreResult` —
+  the proof plus a `cause` — because one FAILED proof covers two findings an operator acts on
+  differently: a restore that completed and then counted nothing, and a restore that never
+  completed (pg_restore refusing an extension the sandbox image lacks, a mysql client aborting on
+  a DEFINER the sandbox has no user for). Both used to reach the job as the one sentence "the
+  artifact restored but produced no usable schema", written also when nothing had restored, and
+  `RESTORE_EXECUTOR_FAILED` carried the exit code alone while the runner had already captured and
+  redacted the tool's stderr. `describeToolFailure` (restore-executor.ts) keeps the tail of that
+  stderr in the typed message; the same rule that lets the INCONCLUSIVE log keep `detail` — a
+  `SchrodumpError` message is built from redacted stderr, never driver prose — lets the verify
+  persist it as the job reason.
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 
