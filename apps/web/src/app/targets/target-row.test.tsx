@@ -6,10 +6,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
-import type { Target } from "@/lib/types";
+import type { Policy, Target } from "@/lib/types";
 import { TargetRow } from "./page";
 
 const base: Target = {
@@ -73,3 +74,58 @@ describe("TargetRow", () => {
     expect(screen.queryByText("The server refused those credentials.")).toBeNull();
   });
 });
+
+const policy: Policy = {
+  id: "p1",
+  name: "nightly",
+  targetId: "t1",
+  destinationId: "d1",
+  cron: "0 2 * * *",
+  keepLast: 7,
+  keepDaily: 7,
+  keepWeekly: 4,
+  keepMonthly: 12,
+  keepYearly: 1,
+  minAgeBeforeDeleteMs: 0,
+  verifyLevel: "CHECKSUM",
+  executionMode: "STREAM",
+  parallelism: 1,
+  compression: "zstd",
+  enabled: true,
+} as Policy;
+
+// The actions are the second lock — the server refuses a viewer's write regardless — and the
+// delete says up front what the server will say, instead of after the 409.
+describe("TargetRow actions", () => {
+  it("shows no action to a viewer", () => {
+    wrap(<TargetRow target={base} role="viewer" />);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("offers test, edit and delete to an operator", () => {
+    wrap(<TargetRow target={base} role="operator" onEdit={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("names the policies that use the target, and blocks the delete with that reason", async () => {
+    const user = userEvent.setup();
+    wrap(<TargetRow target={base} role="operator" policies={[policy]} />);
+    expect(screen.getByText("used by nightly")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/1 policy still uses this target/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete target" })).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/still in use/i);
+  });
+
+  it("says what a delete does when nothing depends on the target", async () => {
+    const user = userEvent.setup();
+    wrap(<TargetRow target={base} role="operator" policies={[]} />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/No policy uses this target/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete target" })).toBeEnabled();
+  });
+});
+

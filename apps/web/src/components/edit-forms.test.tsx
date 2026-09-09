@@ -101,7 +101,8 @@ function renderWith(ui: ReactNode) {
   return userEvent.setup();
 }
 
-const save = () => screen.getByRole("button", { name: "Save" });
+// "Save" on the destination and policy forms, "Save changes" on the target form.
+const save = () => screen.getByRole("button", { name: /^Save/ });
 
 afterEach(() => {
   vi.unstubAllGlobals();

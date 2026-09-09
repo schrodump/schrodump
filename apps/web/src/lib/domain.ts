@@ -126,3 +126,9 @@ export function canRestore(role: Role): boolean {
 export function canDeleteArtifact(role: Role): boolean {
   return RANK[role] >= RANK.operator;
 }
+
+// Targets, destinations and policies are configuration: operator+ writes them, a viewer reads
+// them. The server enforces the same line on every write route.
+export function canManageTargets(role: Role): boolean {
+  return RANK[role] >= RANK.operator;
+}
