@@ -35,7 +35,7 @@ function makeHarness(over: Partial<VerifyPorts> = {}): Harness {
     },
     fullRestore: () => {
       calls.push("fullRestore");
-      return Promise.resolve("VERIFIED");
+      return Promise.resolve({ proof: "VERIFIED", cause: null });
     },
     ...over,
   };
@@ -99,7 +99,7 @@ describe("runVerifyJob", () => {
   });
 
   it("marks the artifact FAILED when fullRestore proves it FAILED", async () => {
-    const h = makeHarness({ fullRestore: () => Promise.resolve("FAILED") });
+    const h = makeHarness({ fullRestore: () => Promise.resolve({ proof: "FAILED", cause: null }) });
     const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
     expect(outcome.finalState).toBe("FAILED");
     expect(h.artifactStates).toEqual(["FAILED"]);
@@ -111,7 +111,10 @@ describe("runVerifyJob", () => {
   // "could not run" and "the backup is bad" read identically on a jobs list that only had FAILED,
   // and the only way to separate them was to grep the reason string.
   it("leaves the artifact UNOBSERVED and marks the job INCONCLUSIVE when fullRestore is INCONCLUSIVE", async () => {
-    const h = makeHarness({ fullRestore: () => Promise.resolve("INCONCLUSIVE") });
+    const h = makeHarness({
+      fullRestore: () =>
+        Promise.resolve({ proof: "INCONCLUSIVE", cause: "no scratch directory configured" }),
+    });
     const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
     expect(outcome.finalState).toBe("UNOBSERVED");
     expect(h.artifactStates).toEqual([]); // infra failure never touches the artifact's state
@@ -127,13 +130,42 @@ describe("runVerifyJob", () => {
 // the artifacts really were empty — and there was no way to learn how it had been reached.
 describe("a verify that condemns an artifact says why", () => {
   it("records why a full restore condemned it", async () => {
-    const h = makeHarness({ fullRestore: () => Promise.resolve("FAILED") });
+    const h = makeHarness({ fullRestore: () => Promise.resolve({ proof: "FAILED", cause: null }) });
 
     const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
 
     expect(outcome.finalState).toBe("FAILED");
     expect(h.artifactStates).toEqual(["FAILED"]);
     expect(h.jobReasons.at(-1)).toMatch(/restored but produced no usable schema/);
+  });
+
+  // A FAILED proof is issued for two different findings — a restore that completed and counted
+  // nothing, and a restore that never completed — and the sentence above was written for both.
+  // Observed on a real deployment: a verify FAILED with "restored but produced no usable schema"
+  // and no way to tell whether pg_restore had refused the dump or the dump held no tables.
+  it("carries the restore's own words when the restore did not complete", async () => {
+    const complaint =
+      'restore execution failed (exit code 1): pg_restore: error: extension "postgis" is not available';
+    const h = makeHarness({
+      fullRestore: () => Promise.resolve({ proof: "FAILED", cause: complaint }),
+    });
+
+    await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
+
+    expect(h.jobStates.at(-1)).toBe("FAILED");
+    expect(h.jobReasons.at(-1)).toBe(`verify failed: ${complaint}`);
+    expect(h.jobReasons.at(-1)).not.toMatch(/produced no usable schema/);
+  });
+
+  it("keeps the downgrade beside the restore's words, because they are different claims", async () => {
+    const h = makeHarness({
+      fullRestore: () => Promise.resolve({ proof: "FAILED", cause: "restore decrypt failed" }),
+    });
+
+    await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
+
+    // Not sealed, so no downgrade: the reason is exactly the cause, nothing appended.
+    expect(h.jobReasons.at(-1)).toBe("verify failed: restore decrypt failed");
   });
 
   it("records why a checksum condemned it", async () => {
