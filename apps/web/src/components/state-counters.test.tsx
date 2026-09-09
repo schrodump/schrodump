@@ -48,3 +48,30 @@ describe("StateCounters", () => {
     expect(screen.getByText(/no verify|questions to answer/i)).toBeInTheDocument();
   });
 });
+
+describe("StateCounters — failed is grey until there is something to be red about", () => {
+  it("says nothing to answer for at zero, and checked-unusable otherwise", () => {
+    const { rerender } = render(
+      <I18nProvider>
+        <StateCounters counts={{ UNOBSERVED: 2, VERIFIED: 12, FAILED: 0 }} />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("count-FAILED")).toHaveTextContent(/nothing to answer for/);
+    rerender(
+      <I18nProvider>
+        <StateCounters counts={{ UNOBSERVED: 2, VERIFIED: 12, FAILED: 3 }} />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("count-FAILED")).toHaveTextContent(/checked, unusable/);
+  });
+
+  it("says no backups have been written yet when the table is empty", () => {
+    render(
+      <I18nProvider>
+        <StateCounters counts={{ UNOBSERVED: 0, VERIFIED: 0, FAILED: 0 }} total={0} />
+      </I18nProvider>,
+    );
+    expect(screen.getByText("no backups have been written yet")).toBeInTheDocument();
+  });
+});
+

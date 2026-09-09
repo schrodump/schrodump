@@ -226,6 +226,15 @@ screens that follow:
   SUCCEEDED wears the UNOBSERVED ink: nobody restored it, and green is for what a restore opened.
   The guided card counts its steps, and a check the server recorded as refused says so on its row
   instead of looking like one nobody has tried.
+- **Dashboard and audit.** The counters keep one shape whether the fleet is clean or on fire:
+  UNOBSERVED leads at display size with its diamond, VERIFIED and FAILED stay subordinate, and
+  FAILED is grey with "nothing to answer for" until there is something to be red about. Under
+  them, one line says the numbers were counted server-side over the whole table. Recent jobs
+  spend the row on the reason, never the correlation id; the state cell is the `JobStateChip`.
+  The audit trail is admin-only on the server; the page shows the lock sentence for other roles
+  instead of an empty list, groups entries by the viewer's day, filters the PAGE by action or
+  actor ("system" is a job's own credential read), and the footer says what a filter narrowed
+  and what the table holds.
 
 ## How it talks to the server
 
