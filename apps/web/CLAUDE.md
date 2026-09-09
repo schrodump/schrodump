@@ -50,6 +50,11 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   the catalog: the object, its manifest and the postgres globals sidecar go too. See
   `DeleteArtifactDialog` and `docs/backup-restore.md`.
 - **Verify disabled on a policy is a persistent warning**, not a toast.
+- **An `INCONCLUSIVE` job is quiet, never the failed red.** It is a verify whose sandbox or runner
+  never got to look; it says nothing about the artifact, which stays `UNOBSERVED`. Painting it like
+  `FAILED` is the blur the server refuses to make on the artifact, applied one row over.
+  `RecentJobs` and `JobRow` colour only `FAILED`. The server exposes it as its own `JobState`
+  precisely so the UI never has to grep the reason string for it.
 - **A notification channel shows its last delivery failure.** A notifier that stopped delivering is
   identical to a healthy one unless the interface says otherwise — recording the failure was the
   whole point. Disabling comes before deleting: deleting a channel that is logging failures throws
@@ -89,8 +94,11 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
 
 `guided-setup.tsx` puts encryption keys first because until an active escrow key exists every
 backup fails inside `resolveRecipients` — a checklist starting at "destination" walked the operator
-through four steps and then a failed job citing a key nobody had told them to create. The canary
-and probe steps are prompts rather than checkmarks: the server records no state for them.
+through four steps and then a failed job citing a key nobody had told them to create. Six steps,
+and the canary and probe ones tick only when the server recorded a pass (`lastCanaryOk` /
+`lastProbeOk` `=== true`): `null` (never run) and `false` (ran and was refused) both stay open,
+because a bucket nobody proved writable is the same open question the product refuses to paint green
+anywhere else. The card stays until all six are done — it cannot be dismissed.
 
 ## How it talks to the server
 

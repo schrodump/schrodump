@@ -66,6 +66,10 @@ enum JobState {
   RUNNING
   SUCCEEDED
   FAILED
+  // A VERIFY whose sandbox or runner never got to look: no verdict, artifact untouched. Not FAILED
+  // — that is a process that ran and broke — and its own value so a list can filter it without
+  // reading the reason string. Only VERIFY jobs end here.
+  INCONCLUSIVE
   CANCELLED
 }
 

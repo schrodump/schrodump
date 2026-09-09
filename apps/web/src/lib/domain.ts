@@ -17,7 +17,16 @@ export type VerifyLevel = (typeof VERIFY_LEVELS)[number];
 export const JOB_KINDS = ["BACKUP", "RESTORE", "VERIFY", "RETENTION"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
-export const JOB_STATES = ["PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const;
+// INCONCLUSIVE: a VERIFY whose sandbox or runner never got to look. No verdict, artifact
+// untouched — its own state so the list can filter it, and quiet in the UI, never the failed red.
+export const JOB_STATES = [
+  "PENDING",
+  "RUNNING",
+  "SUCCEEDED",
+  "FAILED",
+  "INCONCLUSIVE",
+  "CANCELLED",
+] as const;
 export type JobState = (typeof JOB_STATES)[number];
 
 export const EXECUTION_MODES = ["STREAM", "STAGED"] as const;

@@ -24,7 +24,10 @@ export interface VerifyWiringDeps {
   // destroys the container. Three-way: VERIFIED/FAILED are claims about the artifact; INCONCLUSIVE
   // means the sandbox itself failed to run the attempt.
   runFullRestore(): Promise<VerifyProof>;
-  setJobState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
+  setJobState(
+    state: "RUNNING" | "SUCCEEDED" | "FAILED" | "INCONCLUSIVE",
+    reason?: string,
+  ): Promise<void>;
   setArtifactState(state: "VERIFIED" | "FAILED"): Promise<void>;
 }
 

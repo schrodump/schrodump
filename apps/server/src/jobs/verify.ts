@@ -17,7 +17,14 @@ export interface VerifyContext {
 }
 
 export interface VerifyPorts {
-  setJobState(state: "RUNNING" | "SUCCEEDED" | "FAILED", reason?: string): Promise<void>;
+  // INCONCLUSIVE is a job state of its own, not a FAILED with a particular reason: FAILED is a
+  // process that ran and broke, INCONCLUSIVE never got to look. The jobs list has to tell "the
+  // backup is bad" from "the check could not run", and grepping the reason string was the only
+  // handle it had while both were FAILED.
+  setJobState(
+    state: "RUNNING" | "SUCCEEDED" | "FAILED" | "INCONCLUSIVE",
+    reason?: string,
+  ): Promise<void>;
   // The ONLY place an artifact reaches VERIFIED. The literal type forbids any other final state.
   setArtifactState(state: "VERIFIED" | "FAILED"): Promise<void>;
   // Downloads the stored object, recomputes its checksum, compares against the manifest.
@@ -71,9 +78,10 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       const proof = await ports.fullRestore();
       if (proof === "INCONCLUSIVE") {
         // Our own infra failed to run the restore — say nothing about the artifact. It stays
-        // UNOBSERVED, exactly as if verify had never run.
+        // UNOBSERVED, exactly as if verify had never run. The job says the same: INCONCLUSIVE, not
+        // FAILED, because nothing broke that the artifact is to blame for.
         await ports.setJobState(
-          "FAILED",
+          "INCONCLUSIVE",
           "verify inconclusive: the sandbox could not run — artifact unchanged",
         );
         return {

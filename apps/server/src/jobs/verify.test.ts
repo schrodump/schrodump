@@ -106,12 +106,18 @@ describe("runVerifyJob", () => {
     expect(h.jobStates).toEqual(["RUNNING", "FAILED"]);
   });
 
-  it("leaves the artifact UNOBSERVED and fails the job when fullRestore is INCONCLUSIVE", async () => {
+  // The job is INCONCLUSIVE, not FAILED: a FAILED job is a process that ran and broke, and this
+  // one never got to look. The two were the same row state until the UI had to tell them apart —
+  // "could not run" and "the backup is bad" read identically on a jobs list that only had FAILED,
+  // and the only way to separate them was to grep the reason string.
+  it("leaves the artifact UNOBSERVED and marks the job INCONCLUSIVE when fullRestore is INCONCLUSIVE", async () => {
     const h = makeHarness({ fullRestore: () => Promise.resolve("INCONCLUSIVE") });
     const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
     expect(outcome.finalState).toBe("UNOBSERVED");
     expect(h.artifactStates).toEqual([]); // infra failure never touches the artifact's state
-    expect(h.jobStates).toEqual(["RUNNING", "FAILED"]);
+    expect(h.jobStates).toEqual(["RUNNING", "INCONCLUSIVE"]);
+    // The reason still says what happened; the state is what a list can filter on.
+    expect(h.jobReasons[1]).toMatch(/could not run/);
   });
 });
 

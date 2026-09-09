@@ -7,10 +7,18 @@
 // mariadb artifact cannot be confined…", and neither of them reached the screen.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
 import type { Job } from "@/lib/types";
 import { RecentJobs } from "./page";
+
+// A sentinel, not a real rendering: the assertion is that the row goes THROUGH formatTime (the
+// viewer's zone) rather than slicing the ISO string, which printed UTC. A real value would pass in
+// a CI running in UTC whether or not the slice was still there.
+vi.mock("@/lib/format", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/format")>();
+  return { ...actual, formatTime: () => "LOCAL-TIME" };
+});
 
 const base: Job = {
   id: "j1",
@@ -74,5 +82,27 @@ describe("RecentJobs", () => {
   it("renders a job with no reason without inventing one", () => {
     renderJobs([{ ...base, id: "j3", reason: null }]);
     expect(screen.getByTestId("job-state-j3")).toBeInTheDocument();
+  });
+
+  it("renders the time in the viewer's zone, not sliced from the ISO string", () => {
+    // `.slice(11, 16)` on "…T15:14:20.000Z" showed 15:14 to everyone, UTC or not.
+    renderJobs([base]);
+    expect(screen.getByText("LOCAL-TIME")).toBeInTheDocument();
+    expect(screen.queryByText("15:14")).toBeNull();
+  });
+
+  it("keeps an INCONCLUSIVE verify quiet — it could not run, it did not fail", () => {
+    // The sandbox never got to look, so nothing was claimed about the artifact. Painting it like
+    // FAILED is the exact blur the server refuses to make on the artifact itself.
+    renderJobs([
+      {
+        ...base,
+        id: "j4",
+        state: "INCONCLUSIVE",
+        reason: "verify inconclusive: the sandbox could not run — artifact unchanged",
+      },
+    ]);
+    expect(screen.getByTestId("job-state-j4")).toHaveTextContent(/could not run/i);
+    expect(screen.getByTestId("job-state-j4")).toHaveAttribute("data-failed", "false");
   });
 });

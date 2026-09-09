@@ -64,6 +64,7 @@ export const es: Record<MessageKey, string> = {
   "job.state.RUNNING": "Ejecutando",
   "job.state.SUCCEEDED": "Completado",
   "job.state.FAILED": "Falló",
+  "job.state.INCONCLUSIVE": "No pudo ejecutarse",
   "job.state.CANCELLED": "Cancelado",
 
   "auth.login.title": "Iniciar sesión",
@@ -275,7 +276,7 @@ export const es: Record<MessageKey, string> = {
   "restoreTarget.COLLECTION": "Colección",
 
   "guided.title": "Llega a tu primer backup verificado",
-  "guided.description": "Cinco pasos. Solo el último convierte un backup de pregunta en respuesta.",
+  "guided.description": "Seis pasos. Solo el último convierte un backup de pregunta en respuesta.",
   "guided.step.destination": "Crear un destino de almacenamiento",
   "guided.step.canary": "Ejecutar el canary en ese destino",
   "guided.step.target": "Crear una base de datos objetivo",

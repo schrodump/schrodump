@@ -64,6 +64,7 @@ export const ptBR: Record<MessageKey, string> = {
   "job.state.RUNNING": "Executando",
   "job.state.SUCCEEDED": "Concluído",
   "job.state.FAILED": "Falhou",
+  "job.state.INCONCLUSIVE": "Não pôde rodar",
   "job.state.CANCELLED": "Cancelado",
 
   "auth.login.title": "Entrar",
@@ -273,7 +274,7 @@ export const ptBR: Record<MessageKey, string> = {
   "restoreTarget.COLLECTION": "Coleção",
 
   "guided.title": "Chegue ao seu primeiro backup verificado",
-  "guided.description": "Cinco passos. Só o último transforma um backup de pergunta em resposta.",
+  "guided.description": "Seis passos. Só o último transforma um backup de pergunta em resposta.",
   "guided.step.destination": "Criar um destino de armazenamento",
   "guided.step.canary": "Rodar o canary nesse destino",
   "guided.step.target": "Criar um banco alvo",

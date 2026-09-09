@@ -505,7 +505,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
   const setJobState = async (
     jobId: string,
-    state: "RUNNING" | "SUCCEEDED" | "FAILED",
+    state: "RUNNING" | "SUCCEEDED" | "FAILED" | "INCONCLUSIVE",
     reason?: string,
   ): Promise<void> => {
     await prisma.backupJob.update({
