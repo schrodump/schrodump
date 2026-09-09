@@ -31,7 +31,12 @@ export function CredentialField({
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label
+        htmlFor={id}
+        className="block font-mono text-[10px] tracking-[0.13em] uppercase text-subtle-foreground"
+      >
+        {label}
+      </Label>
       {configured && !replacing ? (
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">{t("common.configured")}</span>

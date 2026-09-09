@@ -50,7 +50,7 @@ function renderForm() {
 const urlField = () => screen.getByLabelText("Connection URL");
 const fillButton = () => screen.getByRole("button", { name: "Fill the fields" });
 const discoverButton = () => screen.getByRole("button", { name: "Discover databases" });
-const createButton = () => screen.getByRole("button", { name: "Create" });
+const createButton = () => screen.getByRole("button", { name: "Create target" });
 
 async function fillConnection(user: ReturnType<typeof userEvent.setup>, engine = "postgres") {
   await user.selectOptions(screen.getByLabelText("Engine"), engine);
@@ -218,3 +218,45 @@ describe("TargetForm chooses the scope from what the server holds", () => {
     expect(createButton()).toBeDisabled();
   });
 });
+
+// The list a discovery returns belongs to the connection it ran against. Editing the host after
+// a pick would otherwise save a database name against a server nobody asked.
+describe("TargetForm keeps a discovery honest about where it came from", () => {
+  it("marks the list stale when the connection changes, clears the pick, and blocks Save until discover runs again", async () => {
+    const user = renderForm();
+    await fillConnection(user);
+    await user.click(discoverButton());
+    await user.click(await screen.findByLabelText(/ipog_finance/));
+    expect(createButton()).toBeEnabled();
+
+    await user.type(screen.getByLabelText("Host"), "-replica");
+
+    expect(screen.getByText("The connection changed since discover ran.")).toBeInTheDocument();
+    expect(screen.getByText(/The list came from postgres ipog_database:5432 as ipog/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/ipog_finance/)).toBeNull();
+    expect(createButton()).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/run discover and pick a scope/i);
+  });
+
+  it("says why Save is blocked, in the order the operator would fix things", async () => {
+    const user = renderForm();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/name the target before saving/i);
+    await user.type(screen.getByLabelText("Name"), "IPOG 1");
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a host is required/i);
+    await user.type(screen.getByLabelText("Host"), "db");
+    await user.type(screen.getByLabelText("Username"), "ipog");
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a password is required/i);
+  });
+
+  it("follows the engine's default port only while the port is still a default", async () => {
+    const user = renderForm();
+    expect(screen.getByLabelText("Port")).toHaveValue(5432);
+    await user.selectOptions(screen.getByLabelText("Engine"), "mongodb");
+    expect(screen.getByLabelText("Port")).toHaveValue(27017);
+    await user.clear(screen.getByLabelText("Port"));
+    await user.type(screen.getByLabelText("Port"), "27018");
+    await user.selectOptions(screen.getByLabelText("Engine"), "mysql");
+    expect(screen.getByLabelText("Port")).toHaveValue(27018);
+  });
+});
+

@@ -192,6 +192,17 @@ screens that follow:
   in one place, waiting for a structured flag. A filter narrows the PAGE; the footer then says how
   many of the page's rows match and how many jobs the table holds, rather than letting "showing 3
   of 1,284" imply the three are all there is.
+- **The target form and list** (`components/target-form.tsx`, `app/targets/page.tsx`). A
+  discovery belongs to the connection it ran against: the form keeps the `engine|host|port|user`
+  signature the list came from, and a change to any of them marks the list stale, clears the pick
+  and blocks Save until discover runs again — the quiet alternative was saving a database name
+  against a server nobody asked. Save is never merely grey: `disabledReason` names the first thing
+  to fix, in the order an operator would (name, host, user, password, then the scope). The
+  `VerdictPanel` says what a probe came back with in words parameterised by host, port and user,
+  never by a secret, and shows the raw driver code only on UNKNOWN. A delete says up front what the
+  server will say — which policies still point here — instead of after the 409; a viewer sees no
+  action at all, the server refusing the write being the first lock and the missing button the
+  second. TLS is still the boolean the API holds; the design's four-mode select is a server change.
 
 ## How it talks to the server
 
