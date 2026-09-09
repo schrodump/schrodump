@@ -15,6 +15,8 @@ const artifact: Artifact = {
   id: "artifact-1",
   jobId: "job-1",
   destinationId: "destination-1",
+  targetName: null,
+  policyName: null,
   state: "UNOBSERVED",
   verifiedLevel: null,
   verifiedDegraded: false,

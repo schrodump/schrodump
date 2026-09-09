@@ -23,6 +23,8 @@ const base: Artifact = {
   id: "art01234deadbeef",
   jobId: "job-1",
   destinationId: "destination-1",
+  targetName: null,
+  policyName: null,
   state: "FAILED",
   verifiedLevel: null,
   verifiedDegraded: false,
