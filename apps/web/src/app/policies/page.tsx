@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { CronReading } from "@/components/cron-reading";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { PolicyForm } from "@/components/policy-form";
-import { ColumnHeaders } from "@/components/ruled-list";
+import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
@@ -59,7 +59,7 @@ export function PolicyRow({
 
   return (
     <div className="border-b border-border">
-      <div className={cn("grid items-start gap-x-4 gap-y-2 px-2 py-3", ROW_GRID)}>
+      <div className={cn("grid items-start gap-x-4 gap-y-2 px-[18px] py-3", ROW_GRID)}>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-[13.5px] font-medium">{policy.name}</span>
@@ -107,7 +107,7 @@ export function PolicyRow({
       </div>
 
       {warnings.length > 0 ? (
-        <div className="space-y-2 px-2 pb-3">
+        <div className="space-y-2 px-[18px] pb-3">
           {warnings.map((warning) => (
             <Panel key={warning.title} tone="warning" className="p-3">
               <div className="text-[12.5px] font-medium text-caution">{warning.title}</div>
@@ -118,23 +118,23 @@ export function PolicyRow({
       ) : null}
 
       {trigger.isSuccess ? (
-        <p role="status" className="px-2 pb-3 font-mono text-[11px] text-state-verified">
+        <p role="status" className="px-[18px] pb-3 font-mono text-[11px] text-state-verified">
           {t("policies.triggered")}
         </p>
       ) : null}
       {trigger.isError ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <ErrorState message={trigger.error.message} />
         </div>
       ) : null}
       {update.isError ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <ErrorState message={update.error.message} />
         </div>
       ) : null}
 
       {confirming ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <Panel tone="danger" className="flex flex-wrap items-center gap-3 p-3.5">
             <span className="min-w-0 flex-1 text-[12.5px]">{t("policies.delete.confirm")}</span>
             <Button type="button" size="sm" variant="quiet" onClick={() => setConfirming(false)}>
@@ -211,11 +211,11 @@ export default function PoliciesPage() {
         ) : policies.data.length === 0 ? (
           <EmptyState message={t("policies.empty")} />
         ) : (
-          <div>
+          <RuledList>
             <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
             {policies.data.map((policy) =>
               editingId === policy.id ? (
-                <Panel key={policy.id} tone="section" className="my-3 p-5">
+                <Panel key={policy.id} tone="section" className="m-3 p-5">
                   <PolicyForm onDone={() => setEditingId(null)} scratchConfigured={scratchConfigured} policy={policy} />
                 </Panel>
               ) : (
@@ -227,7 +227,7 @@ export default function PoliciesPage() {
                 />
               ),
             )}
-          </div>
+          </RuledList>
         )}
       </div>
     </AppShell>

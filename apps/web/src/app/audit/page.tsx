@@ -6,7 +6,7 @@
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
-import { ColumnHeaders, GroupHeader, ListFooter } from "@/components/ruled-list";
+import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { Panel } from "@/components/ui/panel";
 import { Select } from "@/components/ui/select";
 import { useCurrentRole } from "@/hooks/use-current-role";
@@ -23,7 +23,7 @@ const ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.1fr)_m
 export function AuditRow({ entry }: { entry: AuditEntry }) {
   const t = useT();
   return (
-    <div className={cn("grid items-baseline gap-x-4 gap-y-1 border-b border-border px-2 py-2", ROW_GRID)}>
+    <div className={cn("grid items-baseline gap-x-4 gap-y-1 border-b border-border px-[18px] py-2", ROW_GRID)}>
       <span className="truncate font-mono text-[12.5px] font-medium">{entry.action}</span>
       {/* A null actor is a job's own credential read, attributed by correlation, not a person —
           "system", never a blank that reads as missing data. */}
@@ -119,7 +119,7 @@ export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?:
       {list.items.length === 0 ? (
         <EmptyState message={t("audit.empty")} />
       ) : (
-        <div>
+        <RuledList>
           <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
           {visible.length === 0 ? (
             <EmptyState message={t("audit.noneInFilter")} />
@@ -137,7 +137,7 @@ export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?:
             ))
           )}
           {filtered ? (
-            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-2 pt-3 font-mono text-[10.5px] tracking-[0.04em] text-subtle-foreground">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-border px-[18px] py-2.5 font-mono text-[10.5px] tracking-[0.04em] text-subtle-foreground">
               <span>
                 {t("audit.filteredFooter", { shown: String(visible.length), page: String(list.items.length), total: String(list.total) })}
               </span>
@@ -146,7 +146,7 @@ export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?:
           ) : (
             <ListFooter shown={list.items.length} total={list.total} note={t("jobs.timesIn", { zone: timeZoneNote(now) })} />
           )}
-        </div>
+        </RuledList>
       )}
     </div>
   );

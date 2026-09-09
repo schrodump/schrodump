@@ -7,7 +7,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { LastCheck } from "@/components/last-check";
-import { ColumnHeaders } from "@/components/ruled-list";
+import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { TargetForm } from "@/components/target-form";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -53,7 +53,7 @@ export function TargetRow({
 
   return (
     <div className="border-b border-border">
-      <div className={cn("grid items-start gap-x-4 gap-y-2 px-2 py-3", ROW_GRID)}>
+      <div className={cn("grid items-start gap-x-4 gap-y-2 px-[18px] py-3", ROW_GRID)}>
         <div className="min-w-0">
           <div className="truncate text-[13.5px] font-medium">{target.name}</div>
           <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
@@ -108,23 +108,23 @@ export function TargetRow({
       </div>
 
       {test.isPending ? (
-        <p className="px-2 pb-3 font-mono text-[11px] text-subtle-foreground">
+        <p className="px-[18px] pb-3 font-mono text-[11px] text-subtle-foreground">
           {t("targets.test.dialling", { host: hostPort })}
         </p>
       ) : null}
       {test.isSuccess ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <VerdictPanel result={test.data} hostPort={hostPort} user={target.username} tls={target.tls} />
         </div>
       ) : null}
       {test.isError ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <ErrorState message={test.error.message} />
         </div>
       ) : null}
 
       {confirming ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           {/* The server refuses a delete while a policy points here; the row says so before the
               click rather than after the 409, and the button carries the reason. */}
           <Panel tone="danger" className="flex flex-wrap items-center gap-3 p-3.5">
@@ -212,11 +212,11 @@ export default function TargetsPage() {
         ) : targets.data.length === 0 ? (
           <EmptyState message={t("targets.empty")} />
         ) : (
-          <div>
+          <RuledList>
             <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
             {targets.data.map((target) =>
               editingId === target.id ? (
-                <Panel key={target.id} tone="section" className="my-3 p-5">
+                <Panel key={target.id} tone="section" className="m-3 p-5">
                   <TargetForm onDone={() => setEditingId(null)} target={target} />
                 </Panel>
               ) : (
@@ -229,7 +229,7 @@ export default function TargetsPage() {
                 />
               ),
             )}
-          </div>
+          </RuledList>
         )}
       </div>
     </AppShell>

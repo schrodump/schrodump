@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { JobStateChip } from "@/components/job-state-chip";
-import { ColumnHeaders, GroupHeader, ListFooter } from "@/components/ruled-list";
+import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { StateGlyph } from "@/components/status-badge";
 import { DetailGrid, type Fact } from "@/components/ui/detail-grid";
 import { FilterChip } from "@/components/ui/filter-chip";
@@ -211,7 +211,7 @@ export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
     <details className="group border-b border-border">
       <summary
         className={cn(
-          "grid cursor-pointer list-none items-start gap-x-4 gap-y-1 px-2 py-2.5 hover:bg-muted group-open:bg-muted [&::-webkit-details-marker]:hidden",
+          "grid cursor-pointer list-none items-start gap-x-4 gap-y-1 px-[18px] py-2.5 hover:bg-muted group-open:bg-muted [&::-webkit-details-marker]:hidden",
           ROW_GRID,
         )}
       >
@@ -316,7 +316,7 @@ export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
         </div>
       </summary>
 
-      <div className="space-y-4 bg-muted px-2 pt-1 pb-4 sm:pl-[1.9rem]">
+      <div className="space-y-4 bg-muted px-[18px] pt-1 pb-4 sm:pl-[2.9rem]">
         {why !== null ? (
           <Panel tone={why.tone} className="p-3.5">
             <div className="font-mono text-[10px] tracking-[0.13em] uppercase opacity-80">{why.label}</div>
@@ -518,7 +518,7 @@ export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
       {list.items.length === 0 ? (
         <EmptyState message={t("jobs.empty")} />
       ) : (
-        <div>
+        <RuledList>
           <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
           {visible.length === 0 ? (
             <EmptyState message={t("jobs.noneInFilter")} />
@@ -533,7 +533,7 @@ export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
             ))
           )}
           {filtered ? (
-            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-2 pt-3 font-mono text-[10.5px] tracking-[0.04em] text-subtle-foreground">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-border px-[18px] py-2.5 font-mono text-[10.5px] tracking-[0.04em] text-subtle-foreground">
               <span>
                 {t("jobs.filteredFooter", {
                   shown: String(visible.length),
@@ -546,7 +546,7 @@ export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
           ) : (
             <ListFooter shown={list.items.length} total={list.total} note={t("jobs.timesIn", { zone: timeZoneNote(now) })} />
           )}
-        </div>
+        </RuledList>
       )}
     </div>
   );

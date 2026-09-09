@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { DeleteArtifactButton } from "@/components/delete-artifact-dialog";
 import { RestoreButton } from "@/components/restore-dialog";
-import { ColumnHeaders, GroupHeader, ListFooter } from "@/components/ruled-list";
+import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { StatusBadge } from "@/components/status-badge";
 import { VerifyLevelChip } from "@/components/verify-level-chip";
 import { Button } from "@/components/ui/button";
@@ -129,7 +129,7 @@ export function ArtifactRow({
     <details className="group border-b border-border">
       <summary
         className={cn(
-          "grid cursor-pointer list-none items-center gap-x-4 gap-y-1 px-2 py-2.5 hover:bg-muted [&::-webkit-details-marker]:hidden",
+          "grid cursor-pointer list-none items-center gap-x-4 gap-y-1 px-[18px] py-2.5 hover:bg-muted [&::-webkit-details-marker]:hidden",
           ROW_GRID,
         )}
       >
@@ -197,7 +197,7 @@ export function ArtifactRow({
         </span>
       </summary>
 
-      <div className="bg-muted px-2 pt-2 pb-4 sm:pl-12">
+      <div className="bg-muted px-[18px] pt-2 pb-4 sm:pl-12">
         <DetailGrid facts={facts} />
       </div>
     </details>
@@ -322,12 +322,12 @@ export default function ArtifactsPage() {
           <EmptyState message={t("artifacts.noneInFilter")} />
         ) : (
           <>
-            {/* A ruled list rather than a stack of cards: forty equally-boxed objects ask the eye
-                to separate what the content already separates. */}
-            <div className="hidden sm:block">
-              <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
-            </div>
-            <div className="border-t border-border">
+            {/* One card holding a ruled list, not a stack of cards: forty equally-boxed objects
+                ask the eye to separate what the content already separates. */}
+            <RuledList>
+              <div className="hidden sm:block">
+                <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
+              </div>
               {groups.map((group) => (
                 <section key={group.key} aria-label={groupLabel(group, t)}>
                   <GroupHeader
@@ -344,8 +344,8 @@ export default function ArtifactsPage() {
                   ))}
                 </section>
               ))}
-            </div>
-            <ListFooter shown={data.items.length} total={data.total} note={t("list.countsNote")} />
+              <ListFooter shown={data.items.length} total={data.total} note={t("list.countsNote")} />
+            </RuledList>
           </>
         )}
       </div>
