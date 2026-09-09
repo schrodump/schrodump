@@ -40,6 +40,10 @@ export const postgresAdapter: EngineAdapter = {
   buildDump(input) {
     const image = this.imageFor(input.serverVersionNum);
     const connection = input.connection;
+    // `-n` is the operator's explicit intent only. pg_dump's contract for it is that ONLY objects in
+    // those schemas are dumped: extensions are database-level and are left out, so a schema-scoped
+    // dump of a database using citext restores with `type "public.citext" does not exist`. The
+    // probe's discovered schemas must never arrive here — dumpScopeFor (apps/server) keeps them out.
     const schemaArgs = input.scope.schemas.flatMap((schema) => ["-n", schema]);
 
     if (input.executionMode === "STAGED") {

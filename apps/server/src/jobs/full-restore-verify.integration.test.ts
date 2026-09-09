@@ -117,7 +117,10 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
       "-d",
       "postgres",
       "-c",
-      "CREATE TABLE smoke_check (id int primary key); INSERT INTO smoke_check VALUES (1);",
+      // citext: an extension type. A dump that goes out under `-n` (the probe's discovered schemas
+      // used to become one) carries no EXTENSION entry and fails to restore at this column.
+      "CREATE EXTENSION citext; CREATE TABLE smoke_check (id int primary key, email citext); " +
+        "INSERT INTO smoke_check VALUES (1, 'SMOKE@X');",
     ]);
     if (seed.exitCode !== 0) {
       throw new Error(`failed to seed the origin database: ${seed.output}`);

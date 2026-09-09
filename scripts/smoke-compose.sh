@@ -117,7 +117,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 docker exec "${PROJECT}-target" psql -U app -d shop -q \
-  -c "CREATE TABLE orders(id int primary key, v text); INSERT INTO orders VALUES (1,'smoke');"
+  -c "CREATE EXTENSION citext; CREATE TABLE orders(id int primary key, v text, email citext); INSERT INTO orders VALUES (1,'smoke','SMOKE@X');"
 docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null

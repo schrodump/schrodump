@@ -67,6 +67,17 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   stderr in the typed message; the same rule that lets the INCONCLUSIVE log keep `detail` — a
   `SchrodumpError` message is built from redacted stderr, never driver prose — lets the verify
   persist it as the job reason.
+- **A postgres dump is never schema-scoped by discovery.** `dumpScopeFor` hands the postgres adapter
+  the probe's databases but the TARGET's schemas (empty unless an operator set them through the
+  API; the interface never does). The probe lists every non-system schema of the connected database
+  and the adapter turns each entry of `scope.schemas` into `-n`, under which pg_dump dumps only
+  objects in those schemas — extensions are database-level and are left out. Every postgres dump
+  went out that way since the adapter existed; the first restore-verify of a database using
+  `citext` FAILED with `type "public.citext" does not exist` under SUCCEEDED backups, once #138
+  let the reason through. The smoke and `full-restore-verify.integration.test.ts` fixtures now
+  carry a `citext` column so the gate sees an extension. Measured on postgres 18: a whole-database
+  `-Fc` dump restores clean over an empty database and over a live one that already holds the
+  extension (`--clean --if-exists` drops the dependent table before the extension).
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 

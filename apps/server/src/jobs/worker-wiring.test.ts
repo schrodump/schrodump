@@ -478,7 +478,7 @@ describe("dumpScopeFor", () => {
   const probeFound = { databases: ["admin", "config", "local", "shop"], schemas: [], collections: [] };
 
   it("gives mongodb an EMPTY scope for an unscoped target, which is what --oplog requires", () => {
-    expect(dumpScopeFor("mongodb", probeFound, [])).toEqual({
+    expect(dumpScopeFor("mongodb", probeFound, [], [])).toEqual({
       databases: [],
       schemas: [],
       collections: [],
@@ -486,18 +486,35 @@ describe("dumpScopeFor", () => {
   });
 
   it("still narrows mongodb to a scoped target", () => {
-    expect(dumpScopeFor("mongodb", probeFound, ["shop"])).toEqual({
+    expect(dumpScopeFor("mongodb", probeFound, ["shop"], [])).toEqual({
       databases: ["shop"],
       schemas: [],
       collections: [],
     });
   });
 
-  it("leaves the SQL engines reading the probe, where scope is discovery rather than intent", () => {
-    for (const engine of ["postgres", "mysql", "mariadb"] as const) {
-      expect(dumpScopeFor(engine, probeFound, [])).toBe(probeFound);
-      expect(dumpScopeFor(engine, probeFound, ["ignored"])).toBe(probeFound);
+  it("leaves mysql/mariadb reading the probe, where scope is discovery rather than intent", () => {
+    for (const engine of ["mysql", "mariadb"] as const) {
+      expect(dumpScopeFor(engine, probeFound, [], [])).toBe(probeFound);
+      expect(dumpScopeFor(engine, probeFound, ["ignored"], ["ignored"])).toBe(probeFound);
     }
+  });
+
+  // The probe lists every non-system schema of the connected database and the adapter turns each
+  // one into `-n`, under which pg_dump omits extensions. Production: every verify of a database
+  // using citext FAILED with `type "public.citext" does not exist`, under SUCCEEDED backups.
+  it("never lets the probe's discovered schemas scope a postgres dump", () => {
+    const discovered = { databases: ["app"], schemas: ["public", "audit"], collections: [] };
+    expect(dumpScopeFor("postgres", discovered, ["app"], [])).toEqual({
+      databases: ["app"],
+      schemas: [],
+      collections: [],
+    });
+  });
+
+  it("still honours a schema scope the operator set on the target — intent, not discovery", () => {
+    const discovered = { databases: ["app"], schemas: ["public", "audit"], collections: [] };
+    expect(dumpScopeFor("postgres", discovered, ["app"], ["audit"]).schemas).toEqual(["audit"]);
   });
 });
 
@@ -562,9 +579,9 @@ describe("buildDumpDescriptorFor", () => {
     tls: false,
   });
   const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
-  const probe = (databases: string[]) => ({
+  const probe = (databases: string[], schemas: string[] = []) => ({
     serverVersionNum: 170_011,
-    scope: { databases, schemas: [], collections: [] },
+    scope: { databases, schemas, collections: [] },
     estimatedBytes: 9_446_000_000,
   });
   // Records what reached the adapter, so a test can assert that nothing did.
@@ -586,6 +603,7 @@ describe("buildDumpDescriptorFor", () => {
       engine: "postgres",
       connection: connection("postgres"),
       scopedDatabases: [],
+      scopedSchemas: [],
       facts,
       stagingPathFor: () => undefined,
     });
@@ -608,6 +626,26 @@ describe("buildDumpDescriptorFor", () => {
     expect(calls).toHaveLength(0);
   });
 
+  // End to end through the wiring: a probe that discovered schemas must not hand the adapter a
+  // schema scope, or every dump goes out under `-n` and loses its extensions.
+  it("hands the postgres adapter no schema scope, whatever the probe discovered", () => {
+    const { adapter, calls } = recordingAdapter();
+    const build = buildDumpDescriptorFor({
+      adapter,
+      engine: "postgres",
+      connection: connection("ipog_finance"),
+      scopedDatabases: ["ipog_finance"],
+      scopedSchemas: [],
+      facts,
+      stagingPathFor: () => undefined,
+    });
+
+    build("STREAM", 1, probe(["ipog_finance"], ["public", "audit"]));
+
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { scope: { schemas: string[] } }).scope.schemas).toEqual([]);
+  });
+
   it("builds the descriptor for a scoped target, with the probe scope SQL engines dump under", () => {
     const { adapter, calls } = recordingAdapter();
     const build = buildDumpDescriptorFor({
@@ -615,6 +653,7 @@ describe("buildDumpDescriptorFor", () => {
       engine: "postgres",
       connection: connection("ipog_finance"),
       scopedDatabases: ["ipog_finance"],
+      scopedSchemas: [],
       facts,
       stagingPathFor: () => "/scratch/job-1",
     });
@@ -640,6 +679,7 @@ describe("buildDumpDescriptorFor", () => {
       engine: "postgres",
       connection: connection("ipog_finance"),
       scopedDatabases: ["ipog_finance"],
+      scopedSchemas: [],
       facts,
       stagingPathFor: () => "/scratch/job-1",
     });
@@ -656,6 +696,7 @@ describe("buildDumpDescriptorFor", () => {
       engine: "postgres",
       connection: connection("postgres"),
       scopedDatabases: [],
+      scopedSchemas: [],
       facts,
       stagingPathFor: () => undefined,
     });
@@ -672,6 +713,7 @@ describe("buildDumpDescriptorFor", () => {
       engine: "mysql",
       connection: connection("mysql"),
       scopedDatabases: [],
+      scopedSchemas: [],
       facts,
       stagingPathFor: () => undefined,
     });
