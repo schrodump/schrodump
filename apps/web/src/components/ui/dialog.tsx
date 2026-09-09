@@ -12,10 +12,16 @@ import type { ArtifactState } from "@/lib/domain";
 // before any choice — then the body, then a footer that keeps the gate hint beside the primary
 // action, so the reason a button is disabled sits next to the button rather than in a tooltip.
 //
-// Portaled to document.body: the triggers live inside a row's `<span onClick={preventDefault}>`
-// (which stops a click from toggling the <details> row), and an inline dialog would be a DOM
-// descendant of it — so its submit would bubble up and be cancelled, silently. Focus moves inside on
-// open so Escape reaches the handler here instead of the page behind.
+// Portaled to document.body for stacking and overflow — and an EVENT BOUNDARY, which the portal
+// alone is not. The triggers live inside a row's `<span onClick={preventDefault}>` (which stops a
+// click from toggling the <details> row). React bubbles synthetic events through a portal to its
+// React ancestors, not its DOM ancestors, so every click inside the dialog still reached that span,
+// and its preventDefault cancelled the native default action of whatever was clicked: the submit
+// button (the "submit-on-click does not fire" mystery of PR #120 — it fired; it was cancelled), the
+// acknowledge checkbox (the box stayed unticked until an unrelated re-render caught the DOM up with
+// the state), and the checkbox's label text (label activation is a default action too). Stopping
+// propagation at the root keeps a modal's clicks inside the modal. Focus moves inside on open so
+// Escape reaches the handler here instead of the page behind.
 export function DialogShell({
   titleId,
   title,
@@ -47,6 +53,7 @@ export function DialogShell({
       aria-labelledby={titleId}
       tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 outline-none"
+      onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === "Escape") onClose();
       }}

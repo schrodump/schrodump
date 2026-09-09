@@ -158,8 +158,12 @@ The semantic components, each carrying one law and a test that proves it by muta
 The composition pieces came with the artifact catalog port and are meant to be reused by the
 screens that follow:
 
-- **`DialogShell`** + **`SubjectRow`** (`ui/dialog.tsx`) — a portal to `document.body` (a dialog
-  inside a `<summary>` row would inherit its `preventDefault`), Escape closes, focus lands inside.
+- **`DialogShell`** + **`SubjectRow`** (`ui/dialog.tsx`) — a portal to `document.body` AND a click
+  boundary (`stopPropagation` at the root). The portal alone did not protect the dialog: React
+  bubbles a portal's events to its React ancestors, so the row's `<span onClick={preventDefault}>`
+  still cancelled every native default action inside — the submit button (PR #120's
+  "submit-on-click does not fire"; it fired, and was cancelled), the acknowledge checkbox, its
+  label text. Escape closes, focus lands inside.
   The subject row names WHAT the dialog acts on — state glyph, target name, engine/mode, size, short
   id — before any wording, so a wrong-row click is caught by reading, not by regret.
 - **`RetypeToConfirm`** and **`AcknowledgeCheckbox`** — the two friction gates. Retype for the
