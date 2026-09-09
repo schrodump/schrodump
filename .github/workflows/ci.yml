@@ -191,7 +191,13 @@ jobs:
       # that encrypted, which proves self-consistency and nothing about that day. The test skips
       # silently without the binary, so it has to be installed here to be worth having.
       - name: Install the age CLI
-        run: sudo apt-get update && sudo apt-get install -y age
+        # The runner image ships a Google Chrome apt source we never use, and `apt-get update`
+        # fails the whole step when that one index is broken upstream (a "Hash Sum mismatch"
+        # took this job down twice in an hour). Drop it before updating: the only package we
+        # need comes from Ubuntu's own archive.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources
+          sudo apt-get update && sudo apt-get install -y age
 
       - name: Integration tests
         env:
