@@ -4,8 +4,10 @@
 "use client";
 
 import { AppShell } from "@/components/app-shell";
-import { ErrorState, EmptyState, LoadingState } from "@/components/feedback";
-import { ChannelForm, ChannelRow } from "@/components/notification-channels";
+import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
+import { CHANNEL_ROW_GRID, ChannelForm, ChannelRow } from "@/components/notification-channels";
+import { ColumnHeaders } from "@/components/ruled-list";
+import { Panel } from "@/components/ui/panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { useNotificationChannels } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
@@ -17,27 +19,43 @@ export default function NotificationsPage() {
   // enforces operator+ independently; this is UX, not the control.
   const canEdit = useCurrentRole() !== "viewer";
 
+  const columns = [
+    { key: "kind", label: t("notifications.col.kind") },
+    { key: "where", label: t("notifications.col.where") },
+    { key: "actions", label: canEdit ? t("notifications.col.actions") : "", className: "text-right" },
+  ];
+
   return (
     <AppShell>
-      <h1 className="text-2xl font-semibold">{t("notifications.title")}</h1>
-      <p className="mb-4 text-sm text-muted-foreground">{t("notifications.subtitle")}</p>
+      <div className="max-w-2xl">
+        <h1 className="text-2xl font-semibold">{t("notifications.title")}</h1>
+        <p className="mt-2 text-sm text-muted-foreground text-pretty">{t("notifications.subtitle")}</p>
+      </div>
 
-      {channels.isPending ? <LoadingState /> : null}
-      {channels.isError ? <ErrorState message={channels.error.message} /> : null}
-      {channels.isSuccess && channels.data.length === 0 ? (
-        <EmptyState message={t("notifications.empty")} />
+      {!canEdit ? (
+        <Panel tone="lock" className="mt-4 p-3.5">
+          <p className="text-[12.5px] text-muted-foreground text-pretty">{t("config.viewerLocked")}</p>
+        </Panel>
       ) : null}
 
-      <div className="flex flex-col gap-3">
-        {(channels.data ?? []).map((channel) => (
-          <ChannelRow key={channel.id} channel={channel} canEdit={canEdit} />
-        ))}
+      <div className="mt-6">
+        {channels.isPending ? <LoadingState /> : null}
+        {channels.isError ? <ErrorState message={channels.error.message} onRetry={() => void channels.refetch()} /> : null}
+        {channels.isSuccess && channels.data.length === 0 ? <EmptyState message={t("notifications.empty")} /> : null}
+        {channels.isSuccess && channels.data.length > 0 ? (
+          <div>
+            <ColumnHeaders columns={columns} gridClassName={CHANNEL_ROW_GRID} />
+            {channels.data.map((channel) => (
+              <ChannelRow key={channel.id} channel={channel} canEdit={canEdit} />
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {canEdit ? (
-        <div className="mt-6">
+        <Panel tone="section" className="mt-6 p-5">
           <ChannelForm />
-        </div>
+        </Panel>
       ) : null}
     </AppShell>
   );

@@ -62,7 +62,35 @@ describe("ChannelRow", () => {
   });
 });
 
+describe("ChannelRow delete", () => {
+  it("offers to disable instead when the channel is recording failures", async () => {
+    const user = userEvent.setup();
+    renderWith(<ChannelRow channel={{ ...WEBHOOK, lastFailure: "webhook delivery failed with status 500" }} canEdit />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/throws away the only evidence/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable instead" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete channel" })).toBeInTheDocument();
+  });
+
+  it("asks plainly when nothing is failing", async () => {
+    const user = userEvent.setup();
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("Delete this channel? Nothing will be sent through it again.")).toBeInTheDocument();
+    expect(screen.queryByText(/throws away the only evidence/)).toBeNull();
+  });
+});
+
 describe("ChannelForm", () => {
+  it("blocks Add channel with the reason until the kind's fields are filled", async () => {
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    expect(screen.getByRole("button", { name: "Add channel" })).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a webhook URL is required/i);
+    await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example/y");
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a signing secret is required/i);
+  });
+
   it("never submits a channel that is half webhook and half email", async () => {
     // The server's schema is a strict discriminated union, so a stray field from the other kind is
     // a 400 — but the point is that such a channel should not be expressible here either.

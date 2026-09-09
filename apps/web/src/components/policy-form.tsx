@@ -5,17 +5,19 @@
 
 import { useState, type FormEvent } from "react";
 import { z } from "zod";
+import { ErrorState } from "@/components/feedback";
+import { CronReading } from "@/components/cron-reading";
+import { FieldHelp, FieldLabel, FormHeader, SaveBar, SectionLabel } from "@/components/ui/form-bits";
+import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
+import { Select } from "@/components/ui/select";
 import { useCreatePolicy, useUpdatePolicy } from "@/hooks/use-mutations";
 import { useDestinations, useTargets } from "@/hooks/use-resources";
-import { useT } from "@/i18n/provider";
-import { EXECUTION_MODES, VERIFY_LEVELS, type ExecutionMode, type VerifyLevel } from "@/lib/domain";
 import type { MessageKey } from "@/i18n/messages/en";
+import { useT } from "@/i18n/provider";
+import { parseCron } from "@/lib/cron";
+import { EXECUTION_MODES, VERIFY_LEVELS, type ExecutionMode, type VerifyLevel } from "@/lib/domain";
 import type { Policy } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { ErrorState } from "@/components/feedback";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 
 const schema = z.object({
   name: z.string().min(1),
@@ -45,9 +47,18 @@ const verifyLabel: Record<VerifyLevel, MessageKey> = {
   CHECKSUM: "verifyLevel.CHECKSUM",
   FULL_RESTORE: "verifyLevel.FULL_RESTORE",
 };
+const verifyMeaning: Record<VerifyLevel, MessageKey> = {
+  NONE: "policies.verify.meaning.NONE",
+  CHECKSUM: "policies.verify.meaning.CHECKSUM",
+  FULL_RESTORE: "policies.verify.meaning.FULL_RESTORE",
+};
 const modeLabel: Record<ExecutionMode, MessageKey> = {
   STREAM: "executionMode.STREAM",
   STAGED: "executionMode.STAGED",
+};
+const modeMeaning: Record<ExecutionMode, MessageKey> = {
+  STREAM: "policies.mode.STREAM",
+  STAGED: "policies.mode.STAGED",
 };
 
 // `policy` present switches the form to edit mode. The target and destination stay visible but
@@ -89,14 +100,28 @@ export function PolicyForm({
       : { keepLast: 7, keepDaily: 0, keepWeekly: 4, keepMonthly: 6, keepYearly: 1 },
   );
   const [verifyLevel, setVerifyLevel] = useState<VerifyLevel>(policy?.verifyLevel ?? "CHECKSUM");
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>(
-    policy?.executionMode ?? "STREAM",
-  );
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>(policy?.executionMode ?? "STREAM");
   const [parallelism, setParallelism] = useState(policy?.parallelism ?? 1);
   const [invalid, setInvalid] = useState(false);
 
+  const destination = (destinations.data ?? []).find((d) => d.id === destinationId);
+  const sealedFullRestore = verifyLevel === "FULL_RESTORE" && destination?.sealMode === "sealed";
+  const retainsNothing = Object.values(gfs).every((n) => n === 0);
+
+  const blocked: string | null =
+    name.trim().length === 0
+      ? t("policies.save.blocked.name")
+      : targetId.length === 0
+        ? t("policies.save.blocked.target")
+        : destinationId.length === 0
+          ? t("policies.save.blocked.destination")
+          : parseCron(cron) === null
+            ? t("policies.save.blocked.cron")
+            : null;
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (blocked !== null) return;
     const parsed = schema.safeParse({
       name,
       targetId,
@@ -140,130 +165,134 @@ export function PolicyForm({
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="space-y-5">
+      <FormHeader
+        mode={t(editing ? "targets.form.modeEdit" : "targets.form.modeCreate")}
+        aside={t("policies.form.perPolicy")}
+        title={t(editing ? "policies.form.editTitle" : "policies.form.createTitle")}
+      />
+
+      {editing ? (
+        <Panel tone="lock" className="p-3.5">
+          <p className="text-[12.5px] text-muted-foreground text-pretty">{t("policies.repointLocked")}</p>
+        </Panel>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="name">{t("policies.name")}</Label>
-          <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <FieldLabel htmlFor="name">{t("policies.name")}</FieldLabel>
+          <Input id="name" value={name} placeholder="nightly-eu" onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="cron">{t("policies.cron")}</Label>
-          <Input id="cron" value={cron} onChange={(e) => setCron(e.target.value)} />
+          <FieldLabel htmlFor="cron">{t("policies.cron")}</FieldLabel>
+          <Input id="cron" value={cron} className="font-mono" spellCheck={false} onChange={(e) => setCron(e.target.value)} />
+          <CronReading cron={cron} enabled className="text-[12px]" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="targetId">{t("policies.target")}</Label>
-          <Select
-            id="targetId"
-            value={targetId}
-            disabled={editing}
-            onChange={(e) => setTargetId(e.target.value)}
-          >
+          <FieldLabel htmlFor="targetId">{t("policies.target")}</FieldLabel>
+          <Select id="targetId" value={targetId} disabled={editing} onChange={(e) => setTargetId(e.target.value)}>
             <option value="" disabled />
             {(targets.data ?? []).map((target) => (
               <option key={target.id} value={target.id}>
-                {target.name}
+                {t("policies.targetOption", { name: target.name, engine: t(`engine.${target.engine}`) })}
               </option>
             ))}
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="destinationId">{t("policies.destination")}</Label>
-          <Select
-            id="destinationId"
-            value={destinationId}
-            disabled={editing}
-            onChange={(e) => setDestinationId(e.target.value)}
-          >
+          <FieldLabel htmlFor="destinationId">{t("policies.destination")}</FieldLabel>
+          <Select id="destinationId" value={destinationId} disabled={editing} onChange={(e) => setDestinationId(e.target.value)}>
             <option value="" disabled />
-            {(destinations.data ?? []).map((destination) => (
-              <option key={destination.id} value={destination.id}>
-                {destination.name}
+            {(destinations.data ?? []).map((d) => (
+              <option key={d.id} value={d.id}>
+                {t("policies.destinationOption", { name: d.name, seal: t(`sealMode.${d.sealMode}`) })}
               </option>
             ))}
           </Select>
-          {editing ? (
-            <p className="text-xs text-muted-foreground">{t("policies.repointLocked")}</p>
-          ) : null}
         </div>
       </div>
 
-      <fieldset className="grid gap-3 sm:grid-cols-5">
-        <legend className="mb-1 text-sm font-medium sm:col-span-5">
-          {t("policies.retention")}
+      <fieldset className="space-y-3">
+        <legend className="mb-1">
+          <SectionLabel>{t("policies.retention")}</SectionLabel>
         </legend>
-        {GFS_FIELDS.map((field) => (
-          <div key={field.name} className="space-y-1.5">
-            <Label htmlFor={field.name}>{t(field.key)}</Label>
-            <Input
-              id={field.name}
-              type="number"
-              min={0}
-              value={gfs[field.name]}
-              onChange={(e) =>
-                setGfs((prev) => ({ ...prev, [field.name]: Number(e.target.value) }))
-              }
-            />
-          </div>
-        ))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {GFS_FIELDS.map((field) => (
+            <div key={field.name} className="space-y-1.5">
+              <FieldLabel htmlFor={field.name}>{t(field.key)}</FieldLabel>
+              <Input
+                id={field.name}
+                type="number"
+                min={0}
+                className="font-mono"
+                value={gfs[field.name]}
+                onChange={(e) => setGfs((prev) => ({ ...prev, [field.name]: Number(e.target.value) }))}
+              />
+            </div>
+          ))}
+        </div>
+        <FieldHelp caution={retainsNothing}>{t("policies.retention.zeroNote")}</FieldHelp>
       </fieldset>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
-          <Label htmlFor="verifyLevel">{t("policies.verifyLevel")}</Label>
-          <Select
-            id="verifyLevel"
-            value={verifyLevel}
-            onChange={(e) => setVerifyLevel(e.target.value as VerifyLevel)}
-          >
+          <FieldLabel htmlFor="verifyLevel">{t("policies.verifyLevel")}</FieldLabel>
+          <Select id="verifyLevel" value={verifyLevel} onChange={(e) => setVerifyLevel(e.target.value as VerifyLevel)}>
             {VERIFY_LEVELS.map((level) => (
               <option key={level} value={level}>
                 {t(verifyLabel[level])}
               </option>
             ))}
           </Select>
+          <FieldHelp caution={verifyLevel === "NONE"}>{t(verifyMeaning[verifyLevel])}</FieldHelp>
+          {sealedFullRestore ? (
+            <Panel tone="warning" className="p-3">
+              <p className="text-[12px] text-pretty">{t("policies.verify.sealedCaution")}</p>
+            </Panel>
+          ) : null}
+          {verifyLevel === "FULL_RESTORE" && !scratchConfigured ? (
+            <Panel tone="warning" className="p-3">
+              <p className="text-[12px] text-pretty">{t("policies.verify.noScratch")}</p>
+            </Panel>
+          ) : null}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="executionMode">{t("policies.executionMode")}</Label>
-          <Select
-            id="executionMode"
-            value={executionMode}
-            onChange={(e) => setExecutionMode(e.target.value as ExecutionMode)}
-          >
+          <FieldLabel htmlFor="executionMode">{t("policies.executionMode")}</FieldLabel>
+          <Select id="executionMode" value={executionMode} onChange={(e) => setExecutionMode(e.target.value as ExecutionMode)}>
             {EXECUTION_MODES.map((mode) => (
-              <option key={mode} value={mode}>
+              <option key={mode} value={mode} disabled={mode === "STAGED" && !scratchConfigured}>
                 {t(modeLabel[mode])}
               </option>
             ))}
           </Select>
+          <FieldHelp>{t(modeMeaning[executionMode])}</FieldHelp>
+          {!scratchConfigured ? <FieldHelp caution>{t("policies.mode.stagedNoScratch")}</FieldHelp> : null}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="parallelism">{t("policies.parallelism")}</Label>
+          <FieldLabel htmlFor="parallelism">{t("policies.parallelism")}</FieldLabel>
           <Input
             id="parallelism"
             type="number"
             min={1}
+            className="font-mono"
             value={scratchConfigured ? parallelism : 1}
             disabled={!scratchConfigured}
             onChange={(e) => setParallelism(Number(e.target.value))}
           />
-          {!scratchConfigured ? (
-            <p className="text-xs text-muted-foreground">{t("policies.parallelism.disabled")}</p>
-          ) : null}
+          {!scratchConfigured ? <FieldHelp caution>{t("policies.parallelism.disabled")}</FieldHelp> : null}
         </div>
       </div>
 
-      {invalid ? (
-        <p className="text-sm text-[var(--color-state-failed)]">{t("form.invalid")}</p>
-      ) : null}
+      {invalid ? <p className="text-sm text-destructive-text">{t("form.invalid")}</p> : null}
       {failure !== null ? <ErrorState message={failure.message} /> : null}
-      <div className="flex gap-2">
-        <Button type="submit" disabled={pending}>
-          {pending ? t("common.loading") : editing ? t("common.save") : t("common.create")}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onDone}>
-          {t("common.cancel")}
-        </Button>
-      </div>
+
+      <SaveBar
+        note={t("policies.save.note")}
+        blocked={blocked}
+        pending={pending}
+        primary={t(editing ? "policies.save.edit" : "policies.save.create")}
+        onCancel={onDone}
+      />
     </form>
   );
 }
