@@ -6,7 +6,7 @@
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { CHANNEL_ROW_GRID, ChannelForm, ChannelRow } from "@/components/notification-channels";
-import { ColumnHeaders } from "@/components/ruled-list";
+import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { Panel } from "@/components/ui/panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { useNotificationChannels } from "@/hooks/use-resources";
@@ -43,12 +43,12 @@ export default function NotificationsPage() {
         {channels.isError ? <ErrorState message={channels.error.message} onRetry={() => void channels.refetch()} /> : null}
         {channels.isSuccess && channels.data.length === 0 ? <EmptyState message={t("notifications.empty")} /> : null}
         {channels.isSuccess && channels.data.length > 0 ? (
-          <div>
+          <RuledList>
             <ColumnHeaders columns={columns} gridClassName={CHANNEL_ROW_GRID} />
             {channels.data.map((channel) => (
               <ChannelRow key={channel.id} channel={channel} canEdit={canEdit} />
             ))}
-          </div>
+          </RuledList>
         ) : null}
       </div>
 

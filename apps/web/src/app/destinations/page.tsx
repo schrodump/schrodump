@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { DestinationForm } from "@/components/destination-form";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { LastCheck } from "@/components/last-check";
-import { ColumnHeaders } from "@/components/ruled-list";
+import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { useCurrentRole } from "@/hooks/use-current-role";
@@ -43,7 +43,7 @@ export function DestinationRow({
 
   return (
     <div className="border-b border-border">
-      <div className={cn("grid items-start gap-x-4 gap-y-2 px-2 py-3", ROW_GRID)}>
+      <div className={cn("grid items-start gap-x-4 gap-y-2 px-[18px] py-3", ROW_GRID)}>
         <div className="min-w-0">
           <div className="truncate text-[13.5px] font-medium">{destination.name}</div>
           <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">{locator}</div>
@@ -101,10 +101,10 @@ export function DestinationRow({
       </div>
 
       {canary.isPending ? (
-        <p className="px-2 pb-3 font-mono text-[11px] text-subtle-foreground">{t("destinations.canary.running")}</p>
+        <p className="px-[18px] pb-3 font-mono text-[11px] text-subtle-foreground">{t("destinations.canary.running")}</p>
       ) : null}
       {canary.isSuccess ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           {canary.data.ok ? (
             <Panel tone="section" className="border-state-verified-border bg-state-verified-soft p-3">
               <div className="text-[12.5px] font-medium text-state-verified">{t("destinations.canary.ok")}</div>
@@ -122,13 +122,13 @@ export function DestinationRow({
         </div>
       ) : null}
       {canary.isError ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <ErrorState message={canary.error.message} />
         </div>
       ) : null}
 
       {confirming ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           {/* A destination holding artifacts cannot be deleted: that row has the only credentials
               the system holds for the bucket. The server's 409 says how many are in the way. */}
           <Panel tone="danger" className="flex flex-wrap items-center gap-3 p-3.5">
@@ -200,11 +200,11 @@ export default function DestinationsPage() {
         ) : destinations.data.length === 0 ? (
           <EmptyState message={t("destinations.empty")} />
         ) : (
-          <div>
+          <RuledList>
             <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
             {destinations.data.map((destination) =>
               editingId === destination.id ? (
-                <Panel key={destination.id} tone="section" className="my-3 p-5">
+                <Panel key={destination.id} tone="section" className="m-3 p-5">
                   <DestinationForm onDone={() => setEditingId(null)} destination={destination} />
                 </Panel>
               ) : (
@@ -216,7 +216,7 @@ export default function DestinationsPage() {
                 />
               ),
             )}
-          </div>
+          </RuledList>
         )}
       </div>
     </AppShell>

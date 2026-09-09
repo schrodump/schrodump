@@ -32,7 +32,7 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
 
   return (
     <div className="border-b border-border">
-      <div className={cn("grid items-start gap-x-4 gap-y-2 px-2 py-3", CHANNEL_ROW_GRID)}>
+      <div className={cn("grid items-start gap-x-4 gap-y-2 px-[18px] py-3", CHANNEL_ROW_GRID)}>
         <div className="min-w-0">
           <div className="text-[13.5px] font-medium">
             {channel.kind === "WEBHOOK" ? t("notifications.kind.webhook") : t("notifications.kind.smtp")}
@@ -63,7 +63,7 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
 
       {/* Surfaced, never swallowed: a notifier nobody can tell is broken is worse than none. */}
       {failing ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <Panel tone="error" className="p-3">
             <p className="text-[12.5px]">{t("notifications.lastFailure", { reason: channel.lastFailure ?? "" })}</p>
             {channel.lastFailureAt !== null ? (
@@ -73,13 +73,13 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
         </div>
       ) : null}
       {setEnabled.isError ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           <ErrorState message={setEnabled.error.message} />
         </div>
       ) : null}
 
       {confirming ? (
-        <div className="px-2 pb-3">
+        <div className="px-[18px] pb-3">
           {/* Deleting a channel that is recording failures throws away the only evidence it was
               failing, so the reversible operation is offered right there. */}
           <Panel tone={failing ? "warning" : "danger"} className="flex flex-wrap items-center gap-3 p-3.5">
