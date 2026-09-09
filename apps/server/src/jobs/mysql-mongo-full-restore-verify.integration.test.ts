@@ -398,7 +398,7 @@ describe.skipIf(!enabled)("mysql FULL_RESTORE verify (integration smoke)", () =>
     expect(artifact.state).toBe("UNOBSERVED");
 
     const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-    expect(job.state).toBe("FAILED");
+    expect(job.state).toBe("INCONCLUSIVE");
     expect(job.reason).toMatch(/inconclusive/i);
   }, 180_000);
 });
@@ -714,7 +714,7 @@ describe.skipIf(!enabled)("mongodb FULL_RESTORE verify (integration smoke)", () 
     expect(artifact.state).toBe("UNOBSERVED");
 
     const job = await prisma.backupJob.findUniqueOrThrow({ where: { id: verifyJobId } });
-    expect(job.state).toBe("FAILED");
+    expect(job.state).toBe("INCONCLUSIVE");
     expect(job.reason).toMatch(/inconclusive/i);
   }, 180_000);
 });
