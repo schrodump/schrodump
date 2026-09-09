@@ -16,7 +16,10 @@ export default function SettingsPage() {
   const role = useCurrentRole();
   return (
     <AppShell>
-      <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
+      <div className="max-w-2xl">
+        <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
+        <p className="mt-2 text-sm text-muted-foreground text-pretty">{t("settings.intro")}</p>
+      </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <EncryptionKeysPanel canEdit={role === "admin"} />
         <SelfBackupPanel />

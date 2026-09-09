@@ -3,11 +3,11 @@
 
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdminOnly, LoadingLine, SettingsPanel } from "@/components/settings-panel";
 import { useSelfBackups } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatRelative } from "@/lib/format";
 import type { SelfBackup } from "@/lib/types";
 
 // A self-backup that SUCCEEDED is amber, not green, and that is not a styling slip.
@@ -16,11 +16,22 @@ import type { SelfBackup } from "@/lib/types";
 // without complaining. Nobody restored this dump. Painting it green would be the one place in the
 // UI that claims a backup is good because a job said so — which is the exact claim the whole
 // product exists to refuse. Green is reserved for what a restore has actually opened.
-const STATE_CLASS: Record<SelfBackup["state"], string> = {
-  RUNNING: "bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
-  SUCCEEDED: "bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
-  FAILED: "bg-[var(--color-state-failed-bg)] text-[var(--color-state-failed)]",
+const PILL: Record<SelfBackup["state"], string> = {
+  RUNNING: "border-state-unobserved-border bg-state-unobserved-soft text-state-unobserved",
+  SUCCEEDED: "border-state-unobserved-border bg-state-unobserved-soft text-state-unobserved",
+  FAILED: "border-state-failed-border bg-state-failed-soft text-state-failed",
 };
+
+function Pill({ className, children, state }: { className: string; children: string; state?: SelfBackup["state"] }) {
+  return (
+    <span
+      data-state={state}
+      className={cn("inline-flex items-center rounded-sm border px-2 py-0.5 font-mono text-[10.5px] tracking-[0.08em] uppercase", className)}
+    >
+      {children}
+    </span>
+  );
+}
 
 export function SelfBackupPanel() {
   const t = useT();
@@ -29,70 +40,49 @@ export function SelfBackupPanel() {
   const body = (): React.ReactNode => {
     // 403 for a non-admin. Says so, rather than rendering an empty panel that reads as "nothing
     // has ever happened here".
-    if (query.isError)
-      return <p className="text-sm text-muted-foreground">{t("selfBackup.forbidden")}</p>;
-    if (query.data === undefined)
-      return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
+    if (query.isError) return <AdminOnly>{t("selfBackup.forbidden")}</AdminOnly>;
+    if (query.data === undefined) return <LoadingLine />;
 
     if (!query.data.configured)
       return (
-        <div>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-              "bg-[var(--color-state-unobserved-bg)] text-[var(--color-state-unobserved)]",
-            )}
-          >
-            {t("selfBackup.notConfigured")}
-          </span>
-          <p className="mt-2 text-sm text-muted-foreground">{t("selfBackup.notConfigured.hint")}</p>
+        <div className="space-y-2">
+          <Pill className={PILL.SUCCEEDED}>{t("selfBackup.notConfigured")}</Pill>
+          <p className="text-[12.5px] text-muted-foreground text-pretty">{t("selfBackup.notConfigured.hint")}</p>
         </div>
       );
 
     const latest = query.data.items[0];
-    if (latest === undefined)
-      return <p className="text-sm text-muted-foreground">{t("selfBackup.never")}</p>;
+    if (latest === undefined) return <p className="text-[12.5px] text-muted-foreground">{t("selfBackup.never")}</p>;
 
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            data-state={latest.state}
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-              STATE_CLASS[latest.state],
-            )}
-          >
+        <div className="flex flex-wrap items-center gap-3">
+          <Pill className={PILL[latest.state]} state={latest.state}>
             {t(`selfBackup.state.${latest.state}`)}
+          </Pill>
+          <span className="font-mono text-[11.5px] text-muted-foreground">
+            {t("selfBackup.lastRun", { when: formatRelative(latest.finishedAt ?? latest.startedAt) })}
           </span>
-          <span className="text-sm text-muted-foreground">
-            {t("selfBackup.lastRun", {
-              when: new Date(latest.finishedAt ?? latest.startedAt).toLocaleString(),
-            })}
-          </span>
+          {latest.sizeBytes !== null ? (
+            <span className="font-mono text-[11.5px] text-muted-foreground">
+              {t("selfBackup.size", { size: formatBytes(latest.sizeBytes) })}
+            </span>
+          ) : null}
         </div>
-        {latest.sizeBytes !== null ? (
-          <p className="text-sm text-muted-foreground">
-            {t("selfBackup.size", { size: formatBytes(latest.sizeBytes) })}
-          </p>
+        {latest.state === "SUCCEEDED" ? (
+          <p className="text-[12.5px] text-muted-foreground text-pretty">{t("selfBackup.writtenNote")}</p>
         ) : null}
         {latest.reason !== null ? (
-          <p className="text-sm text-[var(--color-state-failed)]">
-            {t("selfBackup.reason", { reason: latest.reason })}
-          </p>
+          <p className="text-[12.5px] text-destructive-text">{t("selfBackup.reason", { reason: latest.reason })}</p>
         ) : null}
-        <p className="text-xs text-muted-foreground">{t("selfBackup.escrow")}</p>
+        <p className="text-[12px] text-subtle-foreground text-pretty">{t("selfBackup.escrow")}</p>
       </div>
     );
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("selfBackup.title")}</CardTitle>
-        <CardDescription>{t("selfBackup.description")}</CardDescription>
-      </CardHeader>
-      <CardContent>{body()}</CardContent>
-    </Card>
+    <SettingsPanel title={t("selfBackup.title")} description={t("selfBackup.description")}>
+      {body()}
+    </SettingsPanel>
   );
 }

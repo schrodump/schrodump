@@ -99,5 +99,12 @@ describe("MembersPanel", () => {
 
     expect(await screen.findByText("generated-secret-value")).toBeInTheDocument();
     expect(await screen.findByText(/once|not be shown again/i)).toBeInTheDocument();
+    // Dismissing is irreversible — the password is not stored — so it waits for the acknowledgement.
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+    expect(dismiss).toBeDisabled();
+    await user.click(screen.getByLabelText("I have copied it"));
+    expect(dismiss).toBeEnabled();
+    await user.click(dismiss);
+    expect(screen.queryByText("generated-secret-value")).toBeNull();
   });
 });

@@ -5,8 +5,11 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { AuthFrame } from "@/components/auth-frame";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { FieldLabel } from "@/components/ui/form-bits";
+import { Input } from "@/components/ui/input";
+import { Panel } from "@/components/ui/panel";
 import { useT } from "@/i18n/provider";
 
 // Shown INSTEAD of the app, not above it, while the bootstrap password stands. The server refuses
@@ -14,9 +17,9 @@ import { useT } from "@/i18n/provider";
 // controls that all fail — the operator would read it as the product being broken rather than as
 // one thing being asked of them.
 //
-// A minimum of 12 characters is asked for here and nowhere else in the flow, which is a real
-// limitation and not a claim: this is UI validation, the server's own floor is Better-Auth's
-// default of 8, and a determined operator can still choose a weak password.
+// Twelve characters is the server's own floor (auth.ts minPasswordLength); asking for it here
+// only saves a round trip that would end in the same refusal. It is a floor, not a strength
+// check — a determined operator can still choose a weak password.
 const MIN_LENGTH = 12;
 
 export function PasswordRotation() {
@@ -42,11 +45,7 @@ export function PasswordRotation() {
         // revokeOtherSessions: the bootstrap password may have been used elsewhere while it was
         // sitting in `docker inspect`. Rotating it without cutting those sessions would leave
         // whoever read it still signed in.
-        body: JSON.stringify({
-          currentPassword: current,
-          newPassword: next,
-          revokeOtherSessions: true,
-        }),
+        body: JSON.stringify({ currentPassword: current, newPassword: next, revokeOtherSessions: true }),
       });
       if (!response.ok) {
         setError(t("rotate.failed"));
@@ -61,67 +60,38 @@ export function PasswordRotation() {
   };
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-16">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("rotate.title")}</CardTitle>
-          <CardDescription>{t("rotate.why")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-1">
-              <label htmlFor="current" className="text-sm font-medium">
-                {t("rotate.current")}
-              </label>
-              <input
-                id="current"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={current}
-                onChange={(event) => setCurrent(event.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="next" className="text-sm font-medium">
-                {t("rotate.new")}
-              </label>
-              <input
-                id="next"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={next}
-                onChange={(event) => setNext(event.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="confirm" className="text-sm font-medium">
-                {t("rotate.confirm")}
-              </label>
-              <input
-                id="confirm"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={confirm}
-                onChange={(event) => setConfirm(event.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              />
-            </div>
-            {error !== null ? (
-              <p role="alert" className="text-sm text-[var(--color-state-failed)]">
-                {error}
-              </p>
-            ) : null}
-            <Button type="submit" disabled={busy}>
-              {t("rotate.submit")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthFrame
+      title={t("rotate.title")}
+      width="max-w-md"
+      intro={
+        <Panel tone="warning" className="p-3">
+          <p className="text-[12.5px] text-pretty">{t("rotate.why")}</p>
+        </Panel>
+      }
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <div className="space-y-1.5">
+          <FieldLabel htmlFor="current">{t("rotate.current")}</FieldLabel>
+          <Input id="current" type="password" autoComplete="current-password" required value={current} onChange={(event) => setCurrent(event.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <FieldLabel htmlFor="next">{t("rotate.new")}</FieldLabel>
+          <Input id="next" type="password" autoComplete="new-password" required value={next} onChange={(event) => setNext(event.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <FieldLabel htmlFor="confirm">{t("rotate.confirm")}</FieldLabel>
+          <Input id="confirm" type="password" autoComplete="new-password" required value={confirm} onChange={(event) => setConfirm(event.target.value)} />
+        </div>
+        {error !== null ? (
+          <Panel tone="error" role="alert" className="p-3">
+            <p className="text-[12.5px] text-destructive-text">{error}</p>
+          </Panel>
+        ) : null}
+        <Button type="submit" variant="primary" className="w-full" disabled={busy}>
+          {busy ? t("common.loading") : t("rotate.submit")}
+        </Button>
+        <p className="text-[12px] text-muted-foreground text-pretty">{t("rotate.revokes")}</p>
+      </form>
+    </AuthFrame>
   );
 }
