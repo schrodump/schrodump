@@ -127,6 +127,44 @@ describe("DeleteArtifactDialog escapes a preventDefault wrapper via a portal", (
   });
 });
 
+// The portal was never enough: React bubbles a portal's synthetic events to its React ancestors, so
+// the row's `<span onClick={preventDefault}>` still cancelled every native default action inside the
+// dialog. Seen in production on a VERIFIED artifact: the acknowledge box did not tick when clicked
+// (the DOM caught up with the state only when typing the id re-rendered the dialog), and a click on
+// its text did nothing at all. jsdom reproduces both — a checkbox whose click is preventDefault-ed
+// is reverted, and a cancelled label click never reaches the box — so this is mutation-provable:
+// drop the stopPropagation at the dialog root and both assertions go red.
+describe("DeleteArtifactDialog keeps its clicks inside the dialog", () => {
+  const verified: Artifact = { ...base, state: "VERIFIED", verifiedLevel: "FULL_RESTORE" };
+
+  function renderUnderPreventDefault(): HTMLInputElement {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <I18nProvider>
+          <div onClick={(event) => event.preventDefault()}>
+            <DeleteArtifactDialog artifact={verified} onClose={() => undefined} />
+          </div>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    return screen.getByRole("checkbox") as HTMLInputElement;
+  }
+
+  it("ticks the acknowledge box on a click, under a preventDefault ancestor", () => {
+    const box = renderUnderPreventDefault();
+    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+  });
+
+  it("ticks it from a click on its text too — the label reaches the box", () => {
+    const box = renderUnderPreventDefault();
+    const text = box.closest("label")?.querySelector("span > span");
+    if (!(text instanceof HTMLElement)) throw new Error("the acknowledge text is not in a label");
+    fireEvent.click(text);
+    expect(box.checked).toBe(true);
+  });
+});
+
 // The production bug: clicking the confirm button did nothing — no request, no error — because a
 // click on a type="submit" button did not fire the form's submit in the real stack (only
 // requestSubmit did). The fix drives the delete from the button's onClick, like the Verify button.
