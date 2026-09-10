@@ -20,7 +20,12 @@ import {
   type TestConnectionResult,
 } from "../probe/test-connection.js";
 import type { DestinationStore } from "./destinations.js";
-import type { ChannelStore } from "./notifications.js";
+import type { ChannelStore, TestDeliveryResult } from "./notifications.js";
+import {
+  deliverToChannel,
+  TEST_NOTIFICATION,
+  type ChannelDeliveryDeps,
+} from "../notifications/deliver.js";
 import type { PolicyRecord, PolicyStore } from "./policies.js";
 import { generateAgeKeyPair, recipientFingerprint } from "../crypto/artifact.js";
 import type { EncryptionKeyRoutesDeps } from "./encryption-keys.js";
@@ -868,4 +873,49 @@ export function prismaMemberStore(
       return row === null ? null : (row.role as Role);
     },
   };
+}
+
+
+// Answers "does this channel actually deliver?" the only way that means anything: by delivering.
+//
+// It goes through deliverToChannel — the SAME function the scheduled loop calls — on purpose. A
+// test button with a path of its own could report a healthy channel while every real notification
+// failed, which is precisely the shape of the bug this feature exists to catch (see
+// notifications/secret-envelope.test.ts).
+//
+// The outcome is recorded on the row, and a success does NOT clear the failure: the two timestamps
+// are kept side by side and the later one decides whether the channel reads VERIFIED or FAILED. A
+// channel that recovered should still show that it once broke.
+export async function testChannelDelivery(
+  prisma: PrismaClient,
+  deps: ChannelDeliveryDeps,
+  now: () => Date,
+  organizationId: string,
+  id: string,
+): Promise<TestDeliveryResult | null> {
+  const channel = await prisma.notificationChannel.findFirst({ where: { id, organizationId } });
+  if (channel === null) return null;
+
+  const at = now();
+  try {
+    await deliverToChannel(deps, channel, TEST_NOTIFICATION);
+    return {
+      ok: true,
+      channel: await prisma.notificationChannel.update({
+        where: { id: channel.id },
+        data: { lastSuccessAt: at },
+      }),
+    };
+  } catch (err) {
+    // Recorded rather than thrown: a channel that cannot deliver is an answer, not a server error,
+    // and it is the answer the operator pressed the button for.
+    const reason = err instanceof Error ? err.message : "test delivery failed";
+    return {
+      ok: false,
+      channel: await prisma.notificationChannel.update({
+        where: { id: channel.id },
+        data: { lastFailureAt: at, lastFailure: reason },
+      }),
+    };
+  }
 }

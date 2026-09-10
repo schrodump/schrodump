@@ -22,6 +22,7 @@ const WEBHOOK: NotificationChannel = {
   enabled: true,
   lastFailureAt: null,
   lastFailure: null,
+  lastSuccessAt: null,
 };
 
 function renderWith(ui: ReactNode) {
@@ -201,5 +202,83 @@ describe("ChannelForm — the rules the server enforces are the rules the form s
 
     expect(await screen.findByText(/url/)).toBeInTheDocument();
     expect(screen.getByText(/Invalid URL/)).toBeInTheDocument();
+  });
+});
+
+
+// The thesis, applied to the thing that is supposed to tell you the thesis is holding. A channel
+// that has been configured and never carried a message is amber, never neutral: it may be perfect
+// or it may be silently broken, and the interface must not pick the flattering reading. This
+// repository has already shipped exactly that failure — see notifications/secret-envelope.test.ts.
+describe("ChannelRow — a channel nobody has watched deliver is an open question", () => {
+  it("reads UNOBSERVED before anything has ever gone through it", () => {
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit />);
+    expect(screen.getByText("Unobserved")).toBeInTheDocument();
+    // The shape, not only the word: colour alone fails in greyscale, and this badge is the one
+    // place where mistaking a question for an answer has a cost.
+    expect(document.querySelector('[data-marker="diamond"]')).not.toBeNull();
+  });
+
+  it("reads VERIFIED once a delivery has actually arrived", () => {
+    renderWith(<ChannelRow channel={{ ...WEBHOOK, lastSuccessAt: "2026-09-10T12:00:00.000Z" }} canEdit />);
+    expect(screen.getByText("Verified")).toBeInTheDocument();
+  });
+
+  it("reads FAILED when the last thing it did was fail, even after an earlier success", () => {
+    renderWith(
+      <ChannelRow
+        channel={{
+          ...WEBHOOK,
+          lastSuccessAt: "2026-09-10T12:00:00.000Z",
+          lastFailureAt: "2026-09-10T12:05:00.000Z",
+          lastFailure: "535 authentication failed",
+        }}
+        canEdit
+      />,
+    );
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+});
+
+describe("ChannelRow — the button that answers the question", () => {
+  it("delivers a real test through the channel", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true, channel: { ...WEBHOOK, lastSuccessAt: "2026-09-10T12:00:00.000Z" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit />);
+    await user.click(screen.getByRole("button", { name: "Send test" }));
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/backend/notification-channels/c1/test");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+  });
+
+  it("says what went wrong when the test does not arrive", async () => {
+    // A test that cannot report failure proves nothing. The reason has to reach the operator who
+    // pressed the button, not only the row's stored lastFailure.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({
+        ok: false,
+        channel: { ...WEBHOOK, lastFailureAt: "2026-09-10T12:00:00.000Z", lastFailure: "535 authentication failed" },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit />);
+    await user.click(screen.getByRole("button", { name: "Send test" }));
+
+    expect(await screen.findByText(/535 authentication failed/)).toBeInTheDocument();
+  });
+
+  it("is not offered to a viewer, who cannot spend the organization's credentials", () => {
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit={false} />);
+    expect(screen.queryByRole("button", { name: "Send test" })).toBeNull();
   });
 });

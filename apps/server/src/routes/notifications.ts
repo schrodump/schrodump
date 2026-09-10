@@ -65,6 +65,10 @@ export interface ChannelRecord {
   enabled: boolean;
   lastFailureAt: Date | null;
   lastFailure: string | null;
+  // NULL alongside a NULL lastFailureAt is UNOBSERVED: configured, and nobody has watched it carry
+  // anything. Kept next to the failure rather than clearing it, so a channel that recovered still
+  // shows that it once broke.
+  lastSuccessAt: Date | null;
 }
 
 export interface ChannelStore {
@@ -74,10 +78,19 @@ export interface ChannelStore {
   remove(id: string): Promise<boolean>;
 }
 
+export interface TestDeliveryResult {
+  readonly ok: boolean;
+  readonly channel: ChannelRecord;
+}
+
 export interface NotificationRoutesDeps {
   resolver: SessionResolver;
   store(organizationId: string): ChannelStore;
   kek: Buffer;
+  // Delivers through the SAME path a scheduled notification takes and records the outcome on the
+  // row. Injected so the route stays testable without Prisma or a real relay, exactly as the
+  // target probe is — and null when the channel is not this organization's.
+  testDelivery(organizationId: string, id: string): Promise<TestDeliveryResult | null>;
 }
 
 // Everything except the secrets. Explicit field list rather than a spread-minus-N: a field added to
@@ -95,6 +108,7 @@ function toPublic(channel: ChannelRecord) {
     enabled: channel.enabled,
     lastFailureAt: channel.lastFailureAt,
     lastFailure: channel.lastFailure,
+    lastSuccessAt: channel.lastSuccessAt,
   };
 }
 
@@ -126,6 +140,22 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
                 toAddresses: input.toAddresses,
               };
         return reply.status(201).send(toPublic(await store.create(data)));
+      },
+    );
+
+    // A channel nobody has watched deliver is an open question, not a working channel — the same
+    // law the artifacts obey. This is how the question gets answered, and it answers it the only
+    // way that means anything: by actually delivering. A 200 here reports what happened, including
+    // that it failed; a test that cannot fail proves nothing.
+    app.post(
+      "/notification-channels/:id/test",
+      { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
+      async (request, reply) => {
+        const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
+        const result = await deps.testDelivery(contextOf(request).organizationId, params.data.id);
+        if (result === null) return reply.status(404).send({ error: "channel not found" });
+        return reply.send({ ok: result.ok, channel: toPublic(result.channel) });
       },
     );
 

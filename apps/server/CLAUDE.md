@@ -228,6 +228,28 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   that fails must never fail a backup. The last delivery failure is stored and shown in the UI: a
   notifier that stopped delivering is indistinguishable from a healthy one unless the interface
   says so.
+- **`deliver.ts` is the one path to the wire, and both callers take it.** The scheduled loop and
+  the operator's "send a test" button call `deliverToChannel`. This is not tidiness: a test button
+  with a dispatch of its own could report a healthy channel while every real notification failed,
+  which is the exact shape of the bug in `secret-envelope.test.ts`. If you add a third caller, it
+  goes through this function too.
+- **A channel obeys the artifact's ternary.** `lastSuccessAt` next to `lastFailureAt`, both NULL is
+  **UNOBSERVED**, and the later of the two decides VERIFIED or FAILED (a tie reads FAILED). A
+  success does **not** clear the failure — a channel that recovered still carries the evidence that
+  it broke, and the delete flow leans on that evidence. Derived in the UI (`channelState` in the
+  web's `lib/domain.ts`) rather than stored, so no third column can drift out of agreement with the
+  two timestamps.
+- **`POST /notification-channels/:id/test` delivers for real, and reports failure with a 200.** The
+  question "does this channel work?" is only answerable by answering it; a test that cannot fail
+  proves nothing, so the body carries `ok` and the caller reads it rather than the status. The
+  payload carries `trigger: "TEST"` and an SMTP subject that says Test, never Alert — proving the
+  channel works must not page whoever is on call with something that never happened. `"TEST"`
+  widens the *wire* vocabulary only; `evaluate.ts` keeps its exhaustive three, because nothing
+  about a fleet produces it.
+- **Both delivery paths are bounded (15 s).** Node's `fetch` has no default timeout at all, and
+  nodemailer's stages need `connectionTimeout`/`greetingTimeout`/`socketTimeout` separately. This
+  was survivable while delivery only ran inside the scheduler tick; it now also runs inside an
+  operator's HTTP request, where a black-holed host would hold that request open forever.
 - **With no channel configured, nothing is evaluated at all** — no snapshot row, no state row, no
   work. Correct (there is nowhere to deliver), and worth knowing before debugging: an operator
   looking for evidence that notifications run will find an empty `NotificationSnapshot` table and

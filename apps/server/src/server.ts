@@ -37,6 +37,7 @@ import {
   prismaDestinationStore,
   prismaMemberStore,
   prismaNotificationChannelStore,
+  testChannelDelivery,
   prismaPolicyStore,
 } from "./routes/wiring.js";
 
@@ -146,6 +147,14 @@ export async function main(): Promise<void> {
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
     notificationChannelStore: (organizationId) =>
       prismaNotificationChannelStore(prisma, organizationId),
+    notificationTestDelivery: (organizationId, id) =>
+      testChannelDelivery(
+        prisma,
+        { kek, audit: credentialAudit, fetch, smtp: defaultSmtpDeps },
+        () => new Date(),
+        organizationId,
+        id,
+      ),
     jobsService: createJobsService(prisma, kek, credentialAudit),
     catalogRebuild: (organizationId, destinationId) =>
       runRebuild(prisma, kek, credentialAudit, organizationId, destinationId),

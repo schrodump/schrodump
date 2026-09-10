@@ -8,25 +8,10 @@
 
 import { cronEvaluator } from "../scheduler/wiring.js";
 import type { PrismaClient } from "../db.js";
-import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
+import type { CredentialAuditSink } from "../crypto/credential-access.js";
+import { deliverToChannel } from "./deliver.js";
 import { evaluateNotifications, type DeliveredState, type FleetSnapshot } from "./evaluate.js";
-import { deliverEmail, type SmtpDeps } from "./smtp.js";
-import { deliverWebhook } from "./webhook.js";
-
-// NotificationChannel stores its two credentials in String columns, not Json like every other
-// encrypted credential in the schema, and the store writes them with JSON.stringify. The read path
-// handed that string straight to readCredential -> parseEncryptedCredential, which validates an
-// OBJECT, so every delivery failed with "Invalid input: expected object, received string".
-//
-// Permanently, and for both kinds: webhook and SMTP notifications had never delivered anything.
-// The channel row recorded the failure in lastFailure exactly as designed — which is how it was
-// finally seen, on a running deployment — but nothing read that row until someone looked.
-//
-// Parsed here rather than migrated to Json: the column shape is the store's business, and a
-// migration would have to rewrite existing rows to fix a bug that is one JSON.parse wide.
-function envelopeFrom(stored: string): unknown {
-  return JSON.parse(stored) as unknown;
-}
+import type { SmtpDeps } from "./smtp.js";
 
 export interface NotificationDeps {
   prisma: PrismaClient;
@@ -123,62 +108,10 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
     for (const notification of notifications) {
       for (const channel of channels) {
         try {
-          // Dispatch on the discriminator, and read only the half that belongs to it. The columns
-          // are nullable because one row is one kind; a channel missing the fields its own kind
-          // needs is a broken row, and saying so beats sending nothing and calling it delivered.
-          if (channel.kind === "SMTP") {
-            const { smtpHost, smtpPort, smtpUsername, encryptedSmtpPassword, fromAddress } =
-              channel;
-            if (
-              smtpHost === null ||
-              smtpPort === null ||
-              smtpUsername === null ||
-              encryptedSmtpPassword === null ||
-              fromAddress === null ||
-              channel.toAddresses.length === 0
-            ) {
-              throw new Error(
-                "SMTP channel is missing host, port, credentials, sender or recipients",
-              );
-            }
-            await deliverEmail(
-              deps.smtp,
-              {
-                host: smtpHost,
-                port: smtpPort,
-                username: smtpUsername,
-                password: readCredential(deps, envelopeFrom(encryptedSmtpPassword), {
-                  organizationId: channel.organizationId,
-                  resource: "notificationChannel",
-                  resourceId: channel.id,
-                  purpose: "notification: authenticate to the SMTP relay",
-                  correlationId: `notify:${channel.id}`,
-                }),
-                from: fromAddress,
-                to: channel.toAddresses,
-              },
-              notification,
-            );
-          } else {
-            const { url, encryptedSecret } = channel;
-            if (url === null || encryptedSecret === null) {
-              throw new Error("webhook channel is missing its url or signing secret");
-            }
-            await deliverWebhook(
-              { fetch: deps.fetch },
-              {
-                url,
-                secret: readCredential(deps, envelopeFrom(encryptedSecret), {
-                  organizationId: channel.organizationId,
-                  resource: "notificationChannel",
-                  resourceId: channel.id,
-                  purpose: "notification: sign the outgoing webhook",
-                  correlationId: `notify:${channel.id}`,
-                }),
-              },
-              notification,
-            );
-          }
+          // The same call the operator's "send a test" button makes. Two dispatches would mean the
+          // button could report a healthy channel while every real notification failed — see
+          // deliver.ts, and secret-envelope.test.ts for the time that actually happened.
+          await deliverToChannel(deps, channel, notification);
           delivered += 1;
         } catch (err) {
           // Recorded, never thrown onward: one unreachable channel must not stop the others, and

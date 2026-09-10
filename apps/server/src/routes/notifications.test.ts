@@ -10,6 +10,8 @@ import {
   type ChannelRecord,
   type ChannelStore,
   type CreateChannelData,
+  type NotificationRoutesDeps,
+  type TestDeliveryResult,
 } from "./notifications.js";
 
 const RECORD: ChannelRecord = {
@@ -24,6 +26,7 @@ const RECORD: ChannelRecord = {
   enabled: true,
   lastFailureAt: null,
   lastFailure: null,
+  lastSuccessAt: null,
 };
 
 const STORE: ChannelStore = {
@@ -33,7 +36,16 @@ const STORE: ChannelStore = {
   remove: () => Promise.resolve(true),
 };
 
-async function appWith(role: Role | null, over: Partial<ChannelStore> = {}) {
+const DELIVERED: TestDeliveryResult = {
+  ok: true,
+  channel: { ...RECORD, lastSuccessAt: new Date("2026-09-10T12:00:00.000Z") },
+};
+
+async function appWith(
+  role: Role | null,
+  over: Partial<ChannelStore> = {},
+  testDelivery: NotificationRoutesDeps["testDelivery"] = () => Promise.resolve(DELIVERED),
+) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
   await app.register((instance) => {
@@ -41,6 +53,7 @@ async function appWith(role: Role | null, over: Partial<ChannelStore> = {}) {
       resolver: () => Promise.resolve(ctx),
       kek: randomBytes(32),
       store: () => ({ ...STORE, ...over }),
+      testDelivery,
     })(instance);
     return Promise.resolve();
   });
@@ -235,6 +248,70 @@ describe("notification channels — a refusal names the field it refused", () =>
     });
     expect(res.statusCode).toBe(400);
     expect(res.body).not.toContain("s3cret-password");
+    await app.close();
+  });
+});
+
+
+// A channel that has been configured and never carried a single message is not "ready" — it is an
+// open question, exactly like an artifact nobody has restored. This is the button that answers it,
+// and it has to answer honestly in both directions.
+describe("notification channels — proving one actually delivers", () => {
+  it("reports a delivery that arrived, and when", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({ method: "POST", url: "/notification-channels/c1/test" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; channel: { lastSuccessAt: string | null } };
+    expect(body.ok).toBe(true);
+    expect(body.channel.lastSuccessAt).not.toBeNull();
+    await app.close();
+  });
+
+  it("reports a delivery that did not arrive, instead of a cheerful 200", async () => {
+    // The whole point of the button. A test that cannot fail proves nothing at all.
+    const app = await appWith("operator", {}, () =>
+      Promise.resolve({
+        ok: false,
+        channel: {
+          ...RECORD,
+          lastFailureAt: new Date("2026-09-10T12:00:00.000Z"),
+          lastFailure: "535 authentication failed",
+        },
+      }),
+    );
+    const res = await app.inject({ method: "POST", url: "/notification-channels/c1/test" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; channel: { lastFailure: string | null } };
+    expect(body.ok).toBe(false);
+    expect(body.channel.lastFailure).toContain("535");
+    await app.close();
+  });
+
+  it("404s for a channel that is not there, rather than reporting a delivery to nowhere", async () => {
+    const app = await appWith("operator", {}, () => Promise.resolve(null));
+    const res = await app.inject({ method: "POST", url: "/notification-channels/nope/test" });
+    expect(res.statusCode).toBe(404);
+    // Named, not just a 404: Fastify answers an ABSENT ROUTE with 404 too, so a bare status
+    // assertion here would pass with no route at all.
+    expect((res.json() as { error: string }).error).toBe("channel not found");
+    await app.close();
+  });
+
+  it("is not something a viewer can trigger", async () => {
+    // It opens a real connection and sends a real message with the organization's credentials.
+    const app = await appWith("viewer");
+    const res = await app.inject({ method: "POST", url: "/notification-channels/c1/test" });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("never returns the credential it just used", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({ method: "POST", url: "/notification-channels/c1/test" });
+    // Asserted first, or the two `not.toContain` below would hold happily against a 404's body.
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain("encryptedSecret");
+    expect(res.body).not.toContain("encryptedSmtpPassword");
     await app.close();
   });
 });

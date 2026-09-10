@@ -11,6 +11,33 @@ export type EngineKind = (typeof ENGINE_KINDS)[number];
 export const ARTIFACT_STATES = ["VERIFIED", "UNOBSERVED", "FAILED"] as const;
 export type ArtifactState = (typeof ARTIFACT_STATES)[number];
 
+// A notification channel obeys the artifact's law, and for the same reason. A channel that has
+// been configured and never delivered anything is not "ready" — it is an open question, and it is
+// indistinguishable from a working one until something goes through it. That is not hypothetical
+// here: a JSON.parse bug in the delivery path meant webhook and SMTP notifications had never
+// delivered anything, permanently and for both kinds, while the list showed them as configured.
+//
+// Derived from the two timestamps rather than stored, so there is no third column that can drift
+// out of agreement with them.
+export function channelState(channel: {
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+}): ArtifactState {
+  if (channel.lastFailureAt === null) {
+    return channel.lastSuccessAt === null ? "UNOBSERVED" : "VERIFIED";
+  }
+  if (channel.lastSuccessAt === null) return "FAILED";
+  // Compared as instants, never as strings: "." sorts before "Z", so a success half a second after
+  // a failure spelled without milliseconds would read as the older of the two.
+  //
+  // A tie reads FAILED: the pessimistic reading is the safe one for a channel whose two events
+  // cannot be ordered, and calling it VERIFIED would be the product asserting something it does
+  // not know.
+  return Date.parse(channel.lastSuccessAt) > Date.parse(channel.lastFailureAt)
+    ? "VERIFIED"
+    : "FAILED";
+}
+
 export const VERIFY_LEVELS = ["NONE", "CHECKSUM", "FULL_RESTORE"] as const;
 export type VerifyLevel = (typeof VERIFY_LEVELS)[number];
 

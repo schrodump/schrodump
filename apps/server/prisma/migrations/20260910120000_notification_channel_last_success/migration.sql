@@ -1,0 +1,12 @@
+-- When a delivery last ARRIVED, next to the column that already records when one last failed.
+--
+-- Without it a channel that has been configured and never carried a single message is
+-- indistinguishable from one that works: lastFailure is NULL for both. That is not an edge case
+-- here — a JSON.parse bug in the delivery seam meant webhook and SMTP notifications had never
+-- delivered anything, permanently, and the interface showed those channels as ready.
+--
+-- Kept ALONGSIDE lastFailureAt rather than clearing it on success, so a channel that recovered
+-- still carries the evidence that it was once broken; the two are compared by instant to decide
+-- which of VERIFIED / UNOBSERVED / FAILED the channel is in. NULL backfills every existing row to
+-- UNOBSERVED, which is the honest reading: nobody has watched them deliver.
+ALTER TABLE "NotificationChannel" ADD COLUMN "lastSuccessAt" TIMESTAMP(3);

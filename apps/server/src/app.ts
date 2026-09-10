@@ -13,7 +13,11 @@ import { catalogRoutes, type CatalogRebuildResultDTO } from "./routes/catalog.js
 import { destinationRoutes, type DestinationStore } from "./routes/destinations.js";
 import { encryptionKeyRoutes, type EncryptionKeyRoutesDeps } from "./routes/encryption-keys.js";
 import { jobsRoutes, type JobsService } from "./routes/jobs.js";
-import { notificationRoutes, type ChannelStore } from "./routes/notifications.js";
+import {
+  notificationRoutes,
+  type ChannelStore,
+  type TestDeliveryResult,
+} from "./routes/notifications.js";
 import { policyRoutes, type PolicyStore } from "./routes/policies.js";
 import { instanceRoutes, type InstanceConfig } from "./routes/instance.js";
 import { memberRoutes, type MemberStore } from "./routes/members.js";
@@ -38,6 +42,9 @@ export interface AppDeps {
   ): Promise<{ ok: boolean; failedOperation: string | null }>;
   policyStore(organizationId: string): PolicyStore;
   notificationChannelStore(organizationId: string): ChannelStore;
+  // Opens the real connection and delivers, through the same path a scheduled notification takes.
+  // Null when the channel is not this organization's.
+  notificationTestDelivery(organizationId: string, id: string): Promise<TestDeliveryResult | null>;
   jobsService: JobsService;
   catalogRebuild(organizationId: string, destinationId: string): Promise<CatalogRebuildResultDTO>;
   prisma: PrismaClient;
@@ -126,6 +133,7 @@ export function buildApp(deps: AppDeps) {
       resolver: deps.resolver,
       kek: deps.kek,
       store: deps.notificationChannelStore,
+      testDelivery: deps.notificationTestDelivery,
     })(instance);
     return Promise.resolve();
   });
