@@ -246,6 +246,26 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   channel works must not page whoever is on call with something that never happened. `"TEST"`
   widens the *wire* vocabulary only; `evaluate.ts` keeps its exhaustive three, because nothing
   about a fleet produces it.
+- **A real delivery records `lastSuccessAt` too, not only the test button.** The loop counted its
+  successes and told the row nothing, so a channel quietly carrying every alert for a month still
+  read UNOBSERVED — a lie in the opposite direction from the one this feature exists to prevent. A
+  notification that arrived is stronger evidence than a rehearsal.
+- **`notifications/wiring.test.ts` covers the seam, which had none.** `evaluate.ts` is pure and
+  thoroughly tested, the delivery functions are tested, and the loop that joins them to the
+  database was the one part with no test at all — which is exactly where the JSON.parse bug lived
+  for the whole life of the feature. Keep it covered.
+- **Email is always TLS with strict verification, and `SCHRODUMP_SMTP_CA_FILE` only ADDS trust.**
+  A public relay needs nothing. An internal relay behind a private CA could not be used at all —
+  the handshake failed and no configuration existed to fix it — which is an ordinary shape for a
+  self-hosted deployment to have. The variable takes a PEM path read once at boot; there is
+  deliberately no path to `rejectUnauthorized: false`, and `smtp.test.ts` asserts that. Empty
+  counts as absent, because compose writes `""` for an unset variable and a literal `""` would
+  fail the boot of every deployment that never asked for it.
+- **The compose smoke delivers a real email (step 19).** It stands up an SMTP sink
+  (`scripts/smoke-smtp-sink.mjs`) with a certificate signed by nothing the image trusts, so one
+  step proves three things: the email arrives, the CA variable survives the compose plumbing, and
+  the subject says Test rather than Alert. The smoke covered webhook delivery end to end and never
+  once delivered an email, while the bug that motivated the coverage broke both kinds identically.
 - **Both delivery paths are bounded (15 s).** Node's `fetch` has no default timeout at all, and
   nodemailer's stages need `connectionTimeout`/`greetingTimeout`/`socketTimeout` separately. This
   was survivable while delivery only ran inside the scheduler tick; it now also runs inside an

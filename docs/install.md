@@ -181,12 +181,47 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 | `SCHRODUMP_SELF_BACKUP_INTERVAL_MS` | no      | How often to self-backup (default 24h), measured from the last successful run                                                    |
 | `SELF_BACKUP_NETWORK`              | no       | Network the self-backup executor joins (default `schrodump_internal`) — not the executor network                                 |
 | `SCHRODUMP_TRUSTED_PROXIES`        | no       | CIDRs of the hops in front of this server. Read the TLS section — unset behind a proxy locks out every user                      |
+| `SCHRODUMP_SMTP_CA_FILE`           | no       | PEM of a CA to trust for an email notification relay whose certificate the system store does not carry. See below                |
 
 > **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** It has no default, and that is deliberate rather
 > than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the
 > scratch volume sized for it and it writes the dump to disk in clear before uploading. Setting a
 > threshold opts every database above that size into it silently; `parallelism > 1` on a policy is
 > the explicit, per-policy way in, and the one to reach for first.
+
+### Email notifications to an internal relay
+
+Email is always sent over TLS, with strict certificate verification, and there is no switch to turn
+that off. Against a public relay — SES, SendGrid, Fastmail, Gmail — nothing needs configuring: the
+certificate chains to a CA the image already trusts.
+
+An **internal relay signed by your own CA** is the case that needs a line. Without it the delivery
+fails at the TLS handshake, the channel records the failure, and no email arrives.
+
+Mount the CA bundle and point the server at it:
+
+```yaml
+services:
+  schrodump:
+    volumes:
+      - ./internal-ca.pem:/etc/schrodump/smtp-ca.pem:ro
+```
+
+```
+SCHRODUMP_SMTP_CA_FILE=/etc/schrodump/smtp-ca.pem
+```
+
+It **adds** a CA to the trust set; it never removes one, and it is not a way to skip verification.
+A relay whose certificate does not verify against the system store *or* this file is still refused
+— sending the fleet's state in the clear to whoever answers on that port is not a tradeoff the
+product offers.
+
+The file is read once, at boot: a deployment that changes it has to restart to pick it up.
+
+> **Prove it before you rely on it.** A channel that has been configured and never carried a
+> message reads **UNOBSERVED** — amber, not green — because it may be perfect or it may be silently
+> broken, and nothing yet distinguishes the two. **Send test** on the channel delivers for real and
+> reports what happened. Do that once after configuring, and again after changing the relay.
 
 ### Upgrading
 

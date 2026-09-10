@@ -30,11 +30,21 @@ export interface SmtpTransport {
 
 export interface SmtpDeps {
   createTransport(options: Record<string, unknown>): SmtpTransport;
+  // PEM of an additional CA to trust, or null for the system store alone. Deployment configuration
+  // rather than per-channel: whose certificates this process trusts is a property of where it runs,
+  // not of who is being emailed.
+  readonly ca: string | null;
 }
 
-export const defaultSmtpDeps: SmtpDeps = {
-  createTransport: (options) => nodemailer.createTransport(options) as unknown as SmtpTransport,
-};
+// `ca` ADDS trust; it never removes any. There is deliberately no way to reach
+// `rejectUnauthorized: false` from configuration — an operator who cannot produce their CA must
+// not be one keystroke away from sending the fleet's state to whoever answers on port 587.
+export function smtpDeps(ca: string | null): SmtpDeps {
+  return {
+    ca,
+    createTransport: (options) => nodemailer.createTransport(options) as unknown as SmtpTransport,
+  };
+}
 
 // The subject is what an operator actually reads while scanning an inbox. A resolution that looks
 // identical to an alert is how a mailbox rule ends up filtering both.
@@ -72,6 +82,9 @@ export async function deliverEmail(
     connectionTimeout: DELIVERY_TIMEOUT_MS,
     greetingTimeout: DELIVERY_TIMEOUT_MS,
     socketTimeout: DELIVERY_TIMEOUT_MS,
+    // Omitted entirely when there is no extra CA, so the default path keeps Node's system store
+    // rather than being handed a `tls` object that quietly narrows it.
+    ...(deps.ca !== null ? { tls: { ca: deps.ca } } : {}),
   });
 
   await transport.sendMail({

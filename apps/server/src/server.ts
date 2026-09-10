@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { access as fsAccess, constants as fsConstants } from "node:fs/promises";
 import { setMaxListeners } from "node:events";
 import { buildApp } from "./app.js";
@@ -13,7 +14,7 @@ import { startLoop, installShutdown } from "./jobs/loop.js";
 import { runScheduledSelfBackup } from "./jobs/self-backup-scheduler.js";
 import { assertScratchWritable } from "./jobs/scratch-preflight.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
-import { defaultSmtpDeps } from "./notifications/smtp.js";
+import { smtpDeps } from "./notifications/smtp.js";
 import { runNotifications } from "./notifications/wiring.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
@@ -95,6 +96,12 @@ export async function main(): Promise<void> {
   // Every credential decryption in this process is recorded through this sink. It is threaded
   // rather than reached for globally so that a call site cannot decrypt without one.
   const credentialAudit = createCredentialAuditSink(prisma, logger);
+  // Read once at boot, and loudly: a deployment that named a CA file and got a silent fallback to
+  // the system store would fail every email later, from a line nowhere near this one.
+  // Empty is absent, not a path: compose writes "" for an unset variable, and taking that
+  // literally would fail the boot of every deployment that never asked for an extra CA.
+  const smtpCaFile = env.SCHRODUMP_SMTP_CA_FILE ?? "";
+  const smtp = smtpDeps(smtpCaFile === "" ? null : readFileSync(smtpCaFile, "utf8"));
 
   // Scratch before the KEK: both are boot-time refusals, and this one is cheap and local.
   if (env.SCHRODUMP_SCRATCH_PATH !== undefined) {
@@ -150,7 +157,7 @@ export async function main(): Promise<void> {
     notificationTestDelivery: (organizationId, id) =>
       testChannelDelivery(
         prisma,
-        { kek, audit: credentialAudit, fetch, smtp: defaultSmtpDeps },
+        { kek, audit: credentialAudit, fetch, smtp },
         () => new Date(),
         organizationId,
         id,
@@ -256,7 +263,7 @@ export async function main(): Promise<void> {
           audit: credentialAudit,
           now: () => new Date(),
           fetch,
-          smtp: defaultSmtpDeps,
+          smtp,
           log: logger,
           minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
         }).catch((err) => {

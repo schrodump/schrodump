@@ -112,6 +112,14 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
           // button could report a healthy channel while every real notification failed — see
           // deliver.ts, and secret-envelope.test.ts for the time that actually happened.
           await deliverToChannel(deps, channel, notification);
+          // A real notification arriving is the strongest evidence a channel works — stronger than
+          // the test button, which is only ever a rehearsal. Recording it here is what keeps a
+          // channel that has quietly carried every alert for a month from still reading UNOBSERVED
+          // because nobody happened to press the button.
+          await deps.prisma.notificationChannel.update({
+            where: { id: channel.id },
+            data: { lastSuccessAt: now },
+          });
           delivered += 1;
         } catch (err) {
           // Recorded, never thrown onward: one unreachable channel must not stop the others, and

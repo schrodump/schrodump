@@ -50,6 +50,18 @@ services:
       # either in .env got the server default and no indication the value had been ignored.
       SCHRODUMP_STAGED_THRESHOLD_BYTES:
       SCHRODUMP_NOTIFY_MIN_GAP_MS:
+      # An SMTP relay whose certificate is signed by a CA this image's system store does not carry
+      # — an internal Postfix, typically. Email is ALWAYS sent over TLS with strict verification;
+      # this ADDS a CA to the trust set and there is deliberately no way to switch verification
+      # off. Unset -> the system store alone, which is what a public relay (SES, Fastmail) needs.
+      #
+      # Set it to a path INSIDE the container and mount the PEM there yourself — the file is
+      # site-specific, so it is not mounted by default. Add to `volumes:` below:
+      #
+      #   - ./internal-ca.pem:/etc/schrodump/smtp-ca.pem:ro
+      #
+      # and put SCHRODUMP_SMTP_CA_FILE=/etc/schrodump/smtp-ca.pem in .env. See docs/install.md.
+      SCHRODUMP_SMTP_CA_FILE:
       # Self-backup of Schrodump's own metadata database. Unset -> disabled, and the server logs a
       # warning saying so at boot.
       SCHRODUMP_SELF_BACKUP_DESTINATION_ID:
