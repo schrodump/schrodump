@@ -36,6 +36,14 @@ const EnvSchema = z.object({
   // healthy backup is briefly UNOBSERVED between finishing and its chained verify, so comparing two
   // evaluations seconds apart would alert on success. Default 15 minutes.
   SCHRODUMP_NOTIFY_MIN_GAP_MS: z.coerce.number().int().positive().default(900000),
+  // PEM bundle for an SMTP relay whose certificate is signed by a CA the system store does not
+  // carry — the ordinary case for an internal Postfix. Read once at boot and ADDED to the trust
+  // set; email is still refused if the certificate does not verify against it.
+  //
+  // Empty counts as absent — see where it is read in server.ts. `environment: KEY: ${VAR}` in
+  // compose sets the variable to the EMPTY STRING when VAR is unset, and a "" taken literally
+  // would reach readFileSync and take the boot down for every deployment that never asked for it.
+  SCHRODUMP_SMTP_CA_FILE: z.string().optional(),
   SCHRODUMP_EXECUTOR_NETWORK: z.string().default("schrodump_targets"),
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.

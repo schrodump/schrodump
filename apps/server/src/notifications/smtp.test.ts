@@ -28,6 +28,7 @@ function fakeMailer() {
     sent,
     created,
     deps: {
+      ca: null as string | null,
       createTransport: (opts: Record<string, unknown>) => {
         created.push(opts);
         return {
@@ -76,6 +77,7 @@ describe("deliverEmail", () => {
 
   it("propagates a send failure so the caller can record the channel as failing", async () => {
     const deps = {
+      ca: null,
       createTransport: () => ({
         sendMail: async () => {
           throw new Error("connection refused");
@@ -98,5 +100,35 @@ describe("a relay that never answers", () => {
     expect(options.connectionTimeout).toBeTypeOf("number");
     expect(options.greetingTimeout).toBeTypeOf("number");
     expect(options.socketTimeout).toBeTypeOf("number");
+  });
+});
+
+// A Docker-first, self-hosted product meets internal relays. `requireTLS: true` with no `tls`
+// options means Node's default trust store and strict verification — correct against SES or
+// Fastmail, and a dead end against the Postfix behind a company's own CA, which is a very ordinary
+// thing to own. There was no way to say "also trust this one", and nothing in the docs said so
+// either: the delivery simply failed and the operator got a TLS error with no lead.
+describe("an internal relay behind a private CA", () => {
+  it("trusts an additional CA when the deployment supplies one", async () => {
+    const m = fakeMailer();
+    await deliverEmail({ ...m.deps, ca: "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----" }, TARGET, FAILED);
+    expect((m.created[0]?.tls as { ca?: string } | undefined)?.ca).toContain("BEGIN CERTIFICATE");
+  });
+
+  it("adds trust and never removes it", async () => {
+    // The one thing this must not become is a switch for skipping verification. An operator who
+    // cannot produce their CA is not one keystroke away from sending the fleet's state to whoever
+    // answers on port 587.
+    const m = fakeMailer();
+    await deliverEmail({ ...m.deps, ca: "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----" }, TARGET, FAILED);
+    const tls = (m.created[0]?.tls ?? {}) as Record<string, unknown>;
+    expect(tls.rejectUnauthorized).not.toBe(false);
+    expect(m.created[0]?.requireTLS).toBe(true);
+  });
+
+  it("passes no tls options at all when there is no extra CA, keeping the system store", async () => {
+    const m = fakeMailer();
+    await deliverEmail({ ...m.deps, ca: null }, TARGET, FAILED);
+    expect(m.created[0]?.tls).toBeUndefined();
   });
 });
