@@ -334,6 +334,7 @@ model BackupJob {
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   policy         BackupPolicy? @relation(fields: [policyId], references: [id])
   artifact       Artifact?     @relation("ProducedBy")
+  events         JobEvent[]
   verifyArtifact Artifact?     @relation("VerifyTarget", fields: [artifactId], references: [id])
 
   @@unique([policyId, scheduledAt])
@@ -411,9 +412,11 @@ model JobEvent {
   deliveredAt    DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  job          BackupJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([deliveredAt, at])
   @@index([organizationId])
+  @@index([jobId])
 }
 
 model NotificationState {

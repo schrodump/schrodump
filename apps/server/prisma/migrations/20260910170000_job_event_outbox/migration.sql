@@ -32,6 +32,13 @@ CREATE INDEX "JobEvent_organizationId_idx" ON "JobEvent"("organizationId");
 ALTER TABLE "JobEvent" ADD CONSTRAINT "JobEvent_organizationId_fkey"
     FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Cascade from the job as well as the organization: an outbox row that outlived the job it
+-- describes would be undeliverable prose about a row nobody can look up.
+ALTER TABLE "JobEvent" ADD CONSTRAINT "JobEvent_jobId_fkey"
+    FOREIGN KEY ("jobId") REFERENCES "BackupJob"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+CREATE INDEX "JobEvent_jobId_idx" ON "JobEvent"("jobId");
+
 CREATE FUNCTION record_job_event() RETURNS TRIGGER AS $$
 BEGIN
     -- `UPDATE OF state` fires when the column is WRITTEN, including with the value it already
