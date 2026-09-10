@@ -832,8 +832,8 @@ docker run -d --name "${PROJECT}-smtp" --network "${PROJECT}_internal" \
   -v "${WORK}/smtp-key.pem:/certs/key.pem:ro" \
   -v "${WORK}/smtp-ca.pem:/certs/cert.pem:ro" \
   -v "${PWD}/scripts/smoke-smtp-sink.mjs:/sink.mjs:ro" \
-  -e KEY_FILE=/certs/key.pem -e CERT_FILE=/certs/cert.pem -e PORT=2525 \
-  --entrypoint node "${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}" /sink.mjs >/dev/null
+  -e KEY_FILE=/certs/key.pem -e CERT_FILE=/certs/cert.pem -e SINK_PORT=2525 \
+  --no-healthcheck --entrypoint node "${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}" /sink.mjs >/dev/null
 for _ in $(seq 1 30); do
   case "$(docker logs "${PROJECT}-smtp" 2>&1)" in *SINK-LISTENING*) break ;; esac
   sleep 1
@@ -917,8 +917,8 @@ esac
 # single job produces, nor surface the body that tells JOB_STATE from a fleet trigger.
 log "20/20  every job state change reaching a channel that asked for them"
 docker run -d --name "${PROJECT}-jobhook" --network "${PROJECT}_internal" \
-  -v "${PWD}/scripts/smoke-webhook-sink.mjs:/sink.mjs:ro" -e PORT=9998 \
-  --entrypoint node "${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}" /sink.mjs >/dev/null
+  -v "${PWD}/scripts/smoke-webhook-sink.mjs:/sink.mjs:ro" -e SINK_PORT=9998 \
+  --no-healthcheck --entrypoint node "${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}" /sink.mjs >/dev/null
 for _ in $(seq 1 30); do
   case "$(docker logs "${PROJECT}-jobhook" 2>&1)" in *SINK-LISTENING*) break ;; esac
   sleep 1
@@ -967,7 +967,8 @@ esac
 # Every one of them signed. An unsigned job event is something anyone on the network can forge.
 case "$(printf '%s\n' "$received" | grep -c "SINK-DELIVERY unsigned" || true)" in
   0) printf '   every job event was signed\n' ;;
-  *) fail "a job event arrived without a signature" ;;
+  *) printf '\n--- job sink ---\n%s\n' "$(printf '%s\n' "$received" | tail -30)" >&2
+     fail "a job event arrived without a signature" ;;
 esac
 
 # And the channel from step 17, which never asked for job events, must not have received the

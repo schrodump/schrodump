@@ -13,6 +13,9 @@
 // path `requireTLS: true` drives for the ports operators actually configure. It accepts ANY
 // credentials — it is not a security boundary, it is an assertion target on a private network
 // whose certificate is generated for that one run.
+// SINK_PORT, never PORT: this runs inside the schrodump image, whose HEALTHCHECK probes
+// http://127.0.0.1:${PORT}/health. Reusing PORT aims that probe at this socket every thirty
+// seconds. The smoke also passes --no-healthcheck — these containers are not the application.
 import { createServer } from "node:net";
 import { TLSSocket } from "node:tls";
 import { readFileSync } from "node:fs";
@@ -57,4 +60,4 @@ function speak(socket) {
 createServer((socket) => {
   socket.write("220 smoke-sink ESMTP\r\n");
   speak(socket);
-}).listen(Number(process.env.PORT), () => process.stdout.write("SINK-LISTENING\n"));
+}).listen(Number(process.env.SINK_PORT), () => process.stdout.write("SINK-LISTENING\n"));

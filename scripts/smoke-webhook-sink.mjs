@@ -11,6 +11,10 @@
 // delivery from a fleet trigger, and concurrency, because one job produces three deliveries in a
 // few seconds.
 
+// SINK_PORT, never PORT: this runs inside the schrodump image, whose HEALTHCHECK is
+// `wget --spider http://127.0.0.1:${PORT}/health`. Reusing PORT points that probe straight at this
+// server, which then logs an unsigned, unkeyed "delivery" every thirty seconds. The smoke also
+// runs these containers with --no-healthcheck, because they are not the application.
 import { createServer } from "node:http";
 
 createServer((request, response) => {
@@ -26,4 +30,4 @@ createServer((request, response) => {
     response.writeHead(200, { "Content-Length": "0" });
     response.end();
   });
-}).listen(Number(process.env.PORT), () => process.stdout.write("SINK-LISTENING\n"));
+}).listen(Number(process.env.SINK_PORT), () => process.stdout.write("SINK-LISTENING\n"));
