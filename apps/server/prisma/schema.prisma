@@ -372,6 +372,11 @@ model NotificationChannel {
   // silently useless — which would be worse than having no notifications at all.
   lastFailureAt         DateTime?
   lastFailure           String?
+  // Set when a delivery ARRIVES. Kept alongside the failure rather than clearing it, so a channel
+  // that recovered still carries the evidence that it broke; the later of the two decides whether
+  // the channel reads VERIFIED or FAILED, and both NULL is UNOBSERVED — a channel nobody has
+  // watched deliver is an open question, not a working one.
+  lastSuccessAt         DateTime?
   createdAt             DateTime                @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

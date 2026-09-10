@@ -8,7 +8,12 @@
 // data. The signing secret authenticates the sender and is never itself transmitted.
 
 import { createHmac } from "node:crypto";
-import type { Notification } from "./evaluate.js";
+import type { DeliverableNotification } from "./deliver.js";
+
+// Node's fetch has no default timeout whatsoever: without this, a receiver that accepts the
+// connection and never responds holds the caller until the process dies. That was survivable when
+// delivery only ran inside the scheduler tick; it now also runs inside an operator's HTTP request.
+const DELIVERY_TIMEOUT_MS = 15_000;
 
 export interface WebhookTarget {
   readonly url: string;
@@ -29,7 +34,7 @@ export function signBody(secret: string, body: string): string {
 // Derived from the CONDITION, not from the moment: a receiver seeing the same condition twice (a
 // retry, a replay) must be able to recognise it as the same one. Keying on time would make every
 // delivery unique and defeat exactly that.
-function idempotencyKey(notification: Notification): string {
+function idempotencyKey(notification: DeliverableNotification): string {
   return createHmac("sha256", "schrodump-notification")
     .update(`${notification.trigger}:${notification.key}:${notification.kind}`)
     .digest("hex");
@@ -38,7 +43,7 @@ function idempotencyKey(notification: Notification): string {
 export async function deliverWebhook(
   deps: WebhookDeps,
   target: WebhookTarget,
-  notification: Notification,
+  notification: DeliverableNotification,
 ): Promise<void> {
   const body = JSON.stringify({
     trigger: notification.trigger,
@@ -55,6 +60,7 @@ export async function deliverWebhook(
       "Idempotency-Key": idempotencyKey(notification),
     },
     body,
+    signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
   });
 
   if (!response.ok) {

@@ -87,3 +87,14 @@ describe("deliverWebhook", () => {
     expect(calls[0]?.init.body as string).not.toContain("super-secret-value");
   });
 });
+
+describe("a receiver that never answers", () => {
+  it("abandons the request rather than waiting forever", async () => {
+    // Same reason as the SMTP timeouts: this now runs inside an operator's HTTP request, not only
+    // inside a scheduler tick. Node's fetch has no default timeout at all.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    await deliverWebhook({ fetch: fetchMock }, { url: "https://hooks.example/x", secret: "s" }, NOTIFICATION);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+});

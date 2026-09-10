@@ -85,3 +85,18 @@ describe("deliverEmail", () => {
     await expect(deliverEmail(deps, TARGET, FAILED)).rejects.toThrow(/refused/);
   });
 });
+
+describe("a relay that never answers", () => {
+  it("bounds every stage of the connection, so a black-holed host cannot hang the caller", async () => {
+    // Delivery used to run only inside the scheduler tick, where a hang was merely bad. It now also
+    // runs inside an operator's HTTP request — pressing "send a test" against a host that accepts
+    // the TCP connection and then says nothing would hold that request open with no timeout of its
+    // own anywhere in the path.
+    const m = fakeMailer();
+    await deliverEmail(m.deps, TARGET, FAILED);
+    const options = m.created[0] ?? {};
+    expect(options.connectionTimeout).toBeTypeOf("number");
+    expect(options.greetingTimeout).toBeTypeOf("number");
+    expect(options.socketTimeout).toBeTypeOf("number");
+  });
+});

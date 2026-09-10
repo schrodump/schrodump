@@ -164,6 +164,17 @@ export function useCreateNotificationChannel() {
   });
 }
 
+// Answers "does this channel actually deliver?" by delivering. The reply reports what happened —
+// including that it failed — so the caller reads `ok` rather than assuming a 200 means it arrived.
+export function useTestNotificationChannel() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ ok: boolean; channel: NotificationChannel }>(`/notification-channels/${id}/test`),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["notification-channels"] }),
+  });
+}
+
 // Disabling, not deleting, is the reversible operation and the one the interface leads with:
 // deleting a channel that is recording delivery failures throws away the only evidence it was
 // failing.

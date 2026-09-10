@@ -10,13 +10,16 @@ import { FieldHelp, FieldLabel, FormHeader, SaveBar } from "@/components/ui/form
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { Select } from "@/components/ui/select";
+import { StatusBadge } from "@/components/status-badge";
 import {
   useCreateNotificationChannel,
   useDeleteNotificationChannel,
   useSetNotificationChannelEnabled,
+  useTestNotificationChannel,
 } from "@/hooks/use-mutations";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
+import { channelState } from "@/lib/domain";
 import { formatRelative } from "@/lib/format";
 import type { NotificationChannel, NotificationChannelKind } from "@/lib/types";
 
@@ -37,9 +40,15 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
   const t = useT();
   const setEnabled = useSetNotificationChannelEnabled();
   const remove = useDeleteNotificationChannel();
+  const test = useTestNotificationChannel();
   const [confirming, setConfirming] = useState(false);
   const where = channel.kind === "WEBHOOK" ? channel.url : channel.toAddresses.join(", ");
   const failing = channel.lastFailure !== null;
+  // The same three words, the same badge and the same shapes as an artifact — because it is the
+  // same law. A channel that has been configured and never carried a message is amber, never
+  // neutral: it may be perfect or it may be silently broken, and the interface does not get to
+  // pick the flattering reading.
+  const state = channelState(channel);
 
   return (
     <div className="border-b border-border">
@@ -47,6 +56,9 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
         <div className="min-w-0">
           <div className="text-[13.5px] font-medium">
             {channel.kind === "WEBHOOK" ? t("notifications.kind.webhook") : t("notifications.kind.smtp")}
+          </div>
+          <div className="mt-1.5">
+            <StatusBadge state={state} />
           </div>
           {!channel.enabled ? (
             <span className="mt-1 inline-block rounded-sm border border-border-region bg-muted px-1.5 py-0.5 font-mono text-[10px] tracking-[0.13em] uppercase text-muted-foreground">
@@ -65,12 +77,51 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
             >
               {channel.enabled ? t("notifications.disable") : t("notifications.enable")}
             </Button>
+            <Button
+              size="sm"
+              variant="quiet"
+              disabled={test.isPending}
+              onClick={() => test.mutate(channel.id)}
+            >
+              {test.isPending ? t("common.loading") : t("notifications.test")}
+            </Button>
             <Button size="sm" variant="ghost" disabled={confirming} onClick={() => setConfirming(true)}>
               {t("common.delete")}
             </Button>
           </div>
         ) : null}
       </div>
+
+      {/* A channel that has never delivered is the open question this page exists to close, so the
+          row says so in words rather than leaving the badge to carry it alone. */}
+      {state === "UNOBSERVED" ? (
+        <div className="px-[18px] pb-3">
+          <Panel tone="warning" className="p-3">
+            <p className="text-[12.5px]">{t("notifications.unobserved")}</p>
+          </Panel>
+        </div>
+      ) : null}
+
+      {/* The reason has to reach whoever pressed the button, not only the row's stored failure. */}
+      {test.isSuccess && !test.data.ok ? (
+        <div className="px-[18px] pb-3">
+          <Panel tone="error" className="p-3">
+            <p className="text-[12.5px]">
+              {t("notifications.test.failed", { reason: test.data.channel.lastFailure ?? "" })}
+            </p>
+          </Panel>
+        </div>
+      ) : null}
+      {test.isSuccess && test.data.ok ? (
+        <div className="px-[18px] pb-3">
+          <p className="text-[12.5px] text-muted-foreground">{t("notifications.test.delivered")}</p>
+        </div>
+      ) : null}
+      {test.isError ? (
+        <div className="px-[18px] pb-3">
+          <ErrorState message={test.error.message} />
+        </div>
+      ) : null}
 
       {/* Surfaced, never swallowed: a notifier nobody can tell is broken is worse than none. */}
       {failing ? (
