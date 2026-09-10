@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
 import type { JobsService } from "./jobs.js";
+import { badRequest } from "./errors.js";
 
 const ParamsSchema = z.object({ id: z.string().min(1) });
 const BodySchema = z.object({
@@ -21,9 +22,9 @@ export function restoreRoutes(resolver: SessionResolver, service: JobsService) {
       { preHandler: [authenticate(resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = ParamsSchema.safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const body = BodySchema.safeParse(request.body ?? {});
-        if (!body.success) return reply.status(400).send({ error: "invalid request" });
+        if (!body.success) return badRequest(reply, "invalid request", body.error);
         const ctx = contextOf(request);
         const jobId = await service.enqueueRestore(ctx.organizationId, params.data.id, {
           target: body.data.target,

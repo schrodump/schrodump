@@ -4,6 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
+import { badRequest } from "./errors.js";
 
 // verifyLevel default is CHECKSUM — verify is ON by default; turning it off (NONE) is an explicit
 // choice the UI must warn about.
@@ -86,7 +87,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const parsed = CreatePolicySchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid policy" });
+        if (!parsed.success) return badRequest(reply, "invalid policy", parsed.error);
         const created = await deps.store(contextOf(request).organizationId).create(parsed.data);
         return reply.status(201).send(created);
       },
@@ -105,7 +106,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("viewer")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const policy = await deps.store(contextOf(request).organizationId).get(params.data.id);
         if (policy === null) return reply.status(404).send({ error: "not found" });
         return reply.send(policy);
@@ -117,9 +118,9 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const parsed = UpdatePolicySchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid policy update" });
+        if (!parsed.success) return badRequest(reply, "invalid policy update", parsed.error);
         if (Object.keys(parsed.data).length === 0) {
           return reply.status(400).send({ error: "no fields to update" });
         }
@@ -136,7 +137,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const result = await deps.store(contextOf(request).organizationId).remove(params.data.id);
         if (!result.ok) return reply.status(409).send({ error: result.reason ?? "policy in use" });
         return reply.status(204).send();

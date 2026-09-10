@@ -5,6 +5,7 @@ import type { JobKind, JobState } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
+import { badRequest } from "./errors.js";
 
 // The API shape of an artifact. Mirrors the DB row but with BigInt sizes narrowed to number, and
 // without internal columns (organizationId, updatedAt). Fastify cannot serialize BigInt, so the
@@ -197,7 +198,7 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = IdParams.safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const jobId = await deps.service.enqueueBackup(contextOf(request).organizationId, params.data.id);
         return reply.status(202).send({ jobId });
       },
@@ -208,7 +209,7 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = IdParams.safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const jobId = await deps.service.enqueueVerify(contextOf(request).organizationId, params.data.id);
         return reply.status(202).send({ jobId });
       },
@@ -220,9 +221,9 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = IdParams.safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const body = DeleteArtifactBody.safeParse(request.body ?? {});
-        if (!body.success) return reply.status(400).send({ error: "invalid request" });
+        if (!body.success) return badRequest(reply, "invalid request", body.error);
         const result = await deps.service.deleteArtifact(
           contextOf(request).organizationId,
           params.data.id,
@@ -247,7 +248,7 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = IdParams.safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const organizationId = contextOf(request).organizationId;
         const result = await deps.service.testConnection(organizationId, params.data.id);
         // Recorded on a refusal as well: "probed and refused" and "never probed" are different

@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type Role, type SessionResolver } from "../auth/rbac.js";
+import { badRequest } from "./errors.js";
 
 // Roles have been enforced since the first migration; until now there was no way to give anyone
 // one. The bootstrap creates the FIRST admin and the setup token is consumed, so a deployment was
@@ -71,7 +72,7 @@ export function memberRoutes(deps: MemberRoutesDeps) {
 
     app.post("/members", guard, async (request, reply) => {
       const parsed = CreateSchema.safeParse(request.body);
-      if (!parsed.success) return reply.status(400).send({ error: "invalid member" });
+      if (!parsed.success) return badRequest(reply, "invalid member", parsed.error);
       const password = temporaryPassword();
       const member = await deps
         .store(contextOf(request).organizationId)
@@ -85,9 +86,9 @@ export function memberRoutes(deps: MemberRoutesDeps) {
 
     app.patch("/members/:id", guard, async (request, reply) => {
       const params = IdParams.safeParse(request.params);
-      if (!params.success) return reply.status(400).send({ error: "invalid id" });
+      if (!params.success) return badRequest(reply, "invalid id", params.error);
       const body = UpdateSchema.safeParse(request.body);
-      if (!body.success) return reply.status(400).send({ error: "invalid role" });
+      if (!body.success) return badRequest(reply, "invalid role", body.error);
       const store = deps.store(contextOf(request).organizationId);
       const current = await store.roleOf(params.data.id);
       if (current === null) return reply.status(404).send({ error: "no such member" });
@@ -101,7 +102,7 @@ export function memberRoutes(deps: MemberRoutesDeps) {
 
     app.delete("/members/:id", guard, async (request, reply) => {
       const params = IdParams.safeParse(request.params);
-      if (!params.success) return reply.status(400).send({ error: "invalid id" });
+      if (!params.success) return badRequest(reply, "invalid id", params.error);
       const ctx = contextOf(request);
       // Checked before anything else: it is the only refusal here that protects the caller from
       // themselves rather than the organization from being stranded.

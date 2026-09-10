@@ -26,6 +26,7 @@ import {
   rotationConsequences,
   type RotationConsequences,
 } from "../crypto/key-rotation.js";
+import { badRequest } from "./errors.js";
 
 // .strict(): an unknown field is a 400, not silently dropped. A caller who thinks they are passing
 // an escrow recipient under the wrong key name must not get a server-generated one instead.
@@ -119,7 +120,7 @@ export function encryptionKeyRoutes(deps: EncryptionKeyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("admin")] },
       async (request, reply) => {
         const parsed = CreateSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid key request" });
+        if (!parsed.success) return badRequest(reply, "invalid key request", parsed.error);
 
         const organizationId = contextOf(request).organizationId;
         const blockers = provisioningBlockers(await deps.existing(organizationId));
@@ -154,7 +155,7 @@ export function encryptionKeyRoutes(deps: EncryptionKeyRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("admin")] },
       async (request, reply) => {
         const parsed = RotateSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid rotation request" });
+        if (!parsed.success) return badRequest(reply, "invalid rotation request", parsed.error);
 
         const organizationId = contextOf(request).organizationId;
         const blockers = rotationBlockers(await deps.existing(organizationId), parsed.data.type);

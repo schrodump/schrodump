@@ -140,3 +140,66 @@ describe("ChannelForm", () => {
     expect(Object.keys(body)).not.toContain("url");
   });
 });
+
+// The bug this file did not catch. The server has always required 16 characters and has always
+// answered a shorter one with a 400 — but the form asked for "a signing secret", accepted any
+// non-empty string, and forwarded it. What came back named no field, so the operator read the
+// refusal against the only other thing on screen: the URL they had just pasted.
+describe("ChannelForm — the rules the server enforces are the rules the form states", () => {
+  it("blocks a signing secret below the length the server will accept", async () => {
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example/y");
+    await user.type(screen.getByLabelText("Signing secret"), "short-secret");
+    expect(screen.getByRole("button", { name: "Add channel" })).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/16 characters/i);
+  });
+
+  it("says how long the secret has to be before it is typed, not after it is refused", () => {
+    renderWith(<ChannelForm />);
+    expect(screen.getByText(/16 characters/i)).toBeInTheDocument();
+  });
+
+  it("never sends a port of 0 when the port field is emptied", async () => {
+    // The field shows 587 as a PLACEHOLDER, not a value. Typing and deleting leaves "", and
+    // Number("") is 0, which the server refuses as not positive — another opaque 400 for something
+    // the operator never chose.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: () => Promise.resolve(WEBHOOK) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    await user.selectOptions(screen.getByLabelText("Kind"), "SMTP");
+    await user.type(screen.getByLabelText("SMTP host"), "smtp.example");
+    await user.type(screen.getByLabelText("Port"), "587");
+    await user.clear(screen.getByLabelText("Port"));
+    await user.type(screen.getByLabelText("Username"), "schrodump");
+    await user.type(screen.getByLabelText("Password"), "s3cret");
+    await user.type(screen.getByLabelText("From address"), "schrodump@example.com");
+    await user.type(screen.getByLabelText(/Recipients/), "ops@example.com");
+
+    expect(screen.getByRole("button", { name: "Add channel" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("names the field the server refused, for the rules the form does not know", async () => {
+    // The form guards what it can state up front. Everything else — a URL the server's parser
+    // rejects for a reason this form has no opinion about — arrives as a refusal that has to name
+    // its own field, or the operator is back to guessing.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: "invalid channel", field: "url", detail: "Invalid URL" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example/y");
+    await user.type(screen.getByLabelText("Signing secret"), "a-signing-secret-value");
+    await user.click(screen.getByRole("button", { name: "Add channel" }));
+
+    expect(await screen.findByText(/url/)).toBeInTheDocument();
+    expect(screen.getByText(/Invalid URL/)).toBeInTheDocument();
+  });
+});

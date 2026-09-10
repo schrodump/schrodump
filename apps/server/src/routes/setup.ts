@@ -4,6 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashSetupToken, isSetupTokenUsable, type SetupTokenRecord } from "../bootstrap/setup-token.js";
+import { badRequest } from "./errors.js";
 
 export interface SetupDeps {
   userExists(): Promise<boolean>;
@@ -37,9 +38,7 @@ export function setupRoutes(deps: SetupDeps) {
         return reply.status(404).send({ error: "not found" });
       }
       const parsed = BodySchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: "invalid setup payload" });
-      }
+      if (!parsed.success) return badRequest(reply, "invalid setup payload", parsed.error);
       const tokenHash = hashSetupToken(parsed.data.token);
       const record = await deps.findSetupToken(tokenHash);
       if (!isSetupTokenUsable(record, deps.now())) {

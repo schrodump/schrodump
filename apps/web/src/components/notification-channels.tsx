@@ -20,6 +20,17 @@ import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import type { NotificationChannel, NotificationChannelKind } from "@/lib/types";
 
+// Mirrors the server's schema, which refuses anything shorter. Stated here so the rule is read
+// before the secret is typed rather than discovered in a 400 afterwards — and named, so the two
+// numbers cannot drift apart silently.
+const MIN_SECRET_LENGTH = 16;
+
+// The port field shows 587 as a PLACEHOLDER, not a value: untouched it means "use the default",
+// emptied it means the operator deleted it. Number("") is 0, which the server rightly refuses as
+// not positive, so the two cases have to be told apart here rather than collapsed by a ?? that
+// only catches undefined.
+const DEFAULT_SMTP_PORT = 587;
+
 export const CHANNEL_ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[10rem_minmax(0,1fr)_auto]";
 
 export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel; canEdit: boolean }) {
@@ -124,6 +135,9 @@ export function ChannelForm() {
     setFields((previous) => ({ ...previous, [key]: event.target.value }));
   const value = (key: string) => fields[key] ?? "";
 
+  const port = fields.smtpPort === undefined ? DEFAULT_SMTP_PORT : Number(fields.smtpPort);
+  const portIsUsable = Number.isInteger(port) && port > 0;
+
   const recipients = value("toAddresses")
     .split("\n")
     .map((line) => line.trim())
@@ -135,15 +149,19 @@ export function ChannelForm() {
         ? t("notifications.save.blocked.url")
         : value("secret").length === 0
           ? t("notifications.save.blocked.secret")
-          : null
+          : value("secret").length < MIN_SECRET_LENGTH
+            ? t("notifications.save.blocked.secretShort", { min: String(MIN_SECRET_LENGTH) })
+            : null
       : value("smtpHost").trim().length === 0 ||
           value("smtpUsername").trim().length === 0 ||
           value("smtpPassword").length === 0 ||
           value("fromAddress").trim().length === 0
         ? t("notifications.save.blocked.smtp")
-        : recipients.length === 0
-          ? t("notifications.save.blocked.recipients")
-          : null;
+        : !portIsUsable
+          ? t("notifications.save.blocked.port")
+          : recipients.length === 0
+            ? t("notifications.save.blocked.recipients")
+            : null;
 
   function submit(): void {
     if (blocked !== null) return;
@@ -156,7 +174,7 @@ export function ChannelForm() {
         : {
             kind,
             smtpHost: value("smtpHost"),
-            smtpPort: Number(fields.smtpPort ?? "587"),
+            smtpPort: port,
             smtpUsername: value("smtpUsername"),
             smtpPassword: value("smtpPassword"),
             fromAddress: value("fromAddress"),
@@ -204,7 +222,7 @@ export function ChannelForm() {
           {field("url", t("notifications.url"), { placeholder: "https://hooks.company.example/schrodump" })}
           <div className="space-y-1.5">
             {field("secret", t("notifications.secret"), { type: "password" })}
-            <FieldHelp>{t("notifications.secret.hint")}</FieldHelp>
+            <FieldHelp>{t("notifications.secret.hint", { min: String(MIN_SECRET_LENGTH) })}</FieldHelp>
           </div>
         </div>
       ) : (

@@ -169,3 +169,72 @@ describe("notification channels — access", () => {
     await app.close();
   });
 });
+
+// The rule was already enforced and already tested — "refuses a signing secret too short to be
+// worth having" above asserts the 400. What no test asked was whether anyone could tell WHY, and
+// the answer was no: every issue collapsed into `{ error: "invalid channel" }`. An operator pasting
+// a webhook URL and a 14-character secret saw a refusal that named nothing, and reasonably
+// concluded the URL was the problem. The schema's messages were written for a human to read; the
+// route threw them away one line later.
+describe("notification channels — a refusal names the field it refused", () => {
+  it("names the secret, and repeats the schema's own sentence, when it is too short", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...WEBHOOK, secret: "short" },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: string; field?: string; detail?: string };
+    expect(body.field).toBe("secret");
+    expect(body.detail).toContain("16 characters");
+    await app.close();
+  });
+
+  it("names the url when the url is the problem, and does not blame it when it is not", async () => {
+    const app = await appWith("operator");
+    const bad = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...WEBHOOK, url: "services2.example.com/webhook" },
+    });
+    expect((bad.json() as { field?: string }).field).toBe("url");
+
+    const good = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...WEBHOOK, secret: "short" },
+    });
+    expect((good.json() as { field?: string }).field).not.toBe("url");
+    await app.close();
+  });
+
+  it("names the stray key when a webhook payload carries SMTP fields", async () => {
+    // zod reports unrecognized_keys with an EMPTY path — the offending name is in `keys`, so a
+    // naive path.join() would say the field is "" and leave the operator exactly where they were.
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...WEBHOOK, smtpHost: "smtp.example" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { field?: string }).field).toBe("smtpHost");
+    await app.close();
+  });
+
+  it("never lets the payload's own values back out in the detail", async () => {
+    // The whole reason these bodies were opaque. A channel body carries a signing secret and an
+    // SMTP password; a validation reply that echoed what it received would be a credential leak
+    // dressed as helpfulness. Paths and the schema's authored sentences only.
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...SMTP, smtpPort: 0, smtpPassword: "s3cret-password" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).not.toContain("s3cret-password");
+    await app.close();
+  });
+});

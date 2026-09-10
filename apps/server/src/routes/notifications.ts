@@ -11,6 +11,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
+import { badRequest } from "./errors.js";
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
 
 // A channel is one kind or the other, and the schema says so rather than accepting a bag of
@@ -104,7 +105,7 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const parsed = CreateChannelSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid channel" });
+        if (!parsed.success) return badRequest(reply, "invalid channel", parsed.error);
         const input = parsed.data;
         const store = deps.store(contextOf(request).organizationId);
 
@@ -145,8 +146,8 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
         const body = z.object({ enabled: z.boolean() }).safeParse(request.body);
-        if (!params.success || !body.success)
-          return reply.status(400).send({ error: "invalid request" });
+        if (!params.success) return badRequest(reply, "invalid request", params.error);
+        if (!body.success) return badRequest(reply, "invalid request", body.error);
         const updated = await deps
           .store(contextOf(request).organizationId)
           .setEnabled(params.data.id, body.data.enabled);
@@ -160,7 +161,7 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const removed = await deps.store(contextOf(request).organizationId).remove(params.data.id);
         if (!removed) return reply.status(404).send({ error: "channel not found" });
         return reply.status(204).send();

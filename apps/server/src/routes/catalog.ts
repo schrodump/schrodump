@@ -4,6 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
+import { badRequest } from "./errors.js";
 
 const RebuildSchema = z.object({ destinationId: z.string().min(1) });
 
@@ -26,7 +27,7 @@ export function catalogRoutes(deps: CatalogRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("admin")] },
       async (request, reply) => {
         const parsed = RebuildSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid rebuild request" });
+        if (!parsed.success) return badRequest(reply, "invalid rebuild request", parsed.error);
         const result = await deps.rebuild(contextOf(request).organizationId, parsed.data.destinationId);
         return reply.send(result);
       },

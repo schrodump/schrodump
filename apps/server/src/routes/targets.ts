@@ -9,6 +9,7 @@ import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
 import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
+import { badRequest } from "./errors.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
 const ScopeSchema = z.object({
@@ -195,7 +196,7 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const parsed = CreateTargetSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid target" });
+        if (!parsed.success) return badRequest(reply, "invalid target", parsed.error);
         const problem = scopeProblem(parsed.data.engine, parsed.data.scope);
         if (problem !== null) return reply.status(400).send({ error: problem });
         const created = await deps.store(contextOf(request).organizationId).create({
@@ -222,7 +223,7 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const parsed = DiscoverSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid connection" });
+        if (!parsed.success) return badRequest(reply, "invalid connection", parsed.error);
         const result = await deps.probe({ ...parsed.data, databases: [] });
         return reply.send(result);
       },
@@ -242,7 +243,7 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("viewer")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const target = await deps.store(contextOf(request).organizationId).get(params.data.id);
         if (target === null) return reply.status(404).send({ error: "not found" });
         return reply.send(toPublicTarget(target));
@@ -254,9 +255,9 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const parsed = UpdateTargetSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid target update" });
+        if (!parsed.success) return badRequest(reply, "invalid target update", parsed.error);
 
         const { password, ...rest } = parsed.data;
         // An empty patch is a request that says nothing. Answering 200 would report a change that
@@ -291,7 +292,7 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const result = await deps.store(contextOf(request).organizationId).remove(params.data.id);
         // 409, not 500: "a policy still points at this" is a state the operator can resolve, and
         // the reason has to say which. Letting the DB's restrict surface instead would report an
