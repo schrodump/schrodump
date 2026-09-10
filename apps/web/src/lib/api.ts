@@ -13,12 +13,24 @@ export class ApiError extends Error {
   }
 }
 
+// The server answers a refused request with its own summary plus, when a schema rejected a field,
+// which field and the schema's own sentence about it (see the server's routes/errors.ts). All three
+// are joined here rather than in each caller: a form that only rendered `error` would show "invalid
+// channel" and send the operator back to guessing which of five inputs was wrong.
+function stringAt(data: Record<string, unknown>, key: string): string | null {
+  const value = data[key];
+  return typeof value === "string" ? value : null;
+}
+
 function extractError(data: unknown): string | null {
-  if (typeof data === "object" && data !== null && "error" in data) {
-    const value = (data as Record<string, unknown>).error;
-    if (typeof value === "string") return value;
-  }
-  return null;
+  if (typeof data !== "object" || data === null) return null;
+  const record = data as Record<string, unknown>;
+  const summary = stringAt(record, "error");
+  const detail = stringAt(record, "detail");
+  if (detail === null) return summary;
+  const field = stringAt(record, "field");
+  const because = field === null ? detail : `${field}: ${detail}`;
+  return summary === null ? because : `${summary} — ${because}`;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {

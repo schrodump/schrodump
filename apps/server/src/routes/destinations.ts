@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
+import { badRequest } from "./errors.js";
 
 const CreateDestinationSchema = z.object({
   name: z.string().min(1),
@@ -126,7 +127,7 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const parsed = CreateDestinationSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid destination" });
+        if (!parsed.success) return badRequest(reply, "invalid destination", parsed.error);
         const created = await deps.store(contextOf(request).organizationId).create({
           name: parsed.data.name,
           ...(parsed.data.endpoint !== undefined ? { endpoint: parsed.data.endpoint } : {}),
@@ -156,7 +157,7 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const health = await deps.canary(contextOf(request).organizationId, params.data.id);
         // Recorded before answering, and recorded on failure too: the question the checklist asks
         // is "has this been proven", and a canary that ran and failed answers it as definitely as
@@ -171,9 +172,9 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const parsed = UpdateDestinationSchema.safeParse(request.body);
-        if (!parsed.success) return reply.status(400).send({ error: "invalid destination update" });
+        if (!parsed.success) return badRequest(reply, "invalid destination update", parsed.error);
 
         const { secretAccessKey, ...rest } = parsed.data;
         if (secretAccessKey === undefined && Object.keys(rest).length === 0) {
@@ -196,7 +197,7 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
       { preHandler: [authenticate(deps.resolver), requireRole("operator")] },
       async (request, reply) => {
         const params = z.object({ id: z.string().min(1) }).safeParse(request.params);
-        if (!params.success) return reply.status(400).send({ error: "invalid id" });
+        if (!params.success) return badRequest(reply, "invalid id", params.error);
         const result = await deps.store(contextOf(request).organizationId).remove(params.data.id);
         if (!result.ok) return reply.status(409).send({ error: result.reason ?? "destination in use" });
         return reply.status(204).send();
