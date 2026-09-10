@@ -870,7 +870,9 @@ smtp_channel="$(api -X POST -H "$JSON" \
 
 # Deliver for real, and read `ok` rather than the status: a test that cannot report failure is not
 # a test. The 200 says the attempt was made; `ok` says whether anything arrived.
-result="$(api -X POST -H "$JSON" "${BASE}/backend/notification-channels/${smtp_channel}/test")"
+# No Content-Type: the route takes no body, and announcing JSON without sending any is what
+# Fastify answers with FST_ERR_CTP_EMPTY_JSON_BODY.
+result="$(api -X POST "${BASE}/backend/notification-channels/${smtp_channel}/test")"
 case "$result" in
   *'"ok":true'*) printf '   the server reports the message was delivered\n' ;;
   *) printf '\n--- test delivery ---\n%s\n' "$result" >&2
