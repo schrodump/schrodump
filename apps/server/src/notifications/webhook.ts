@@ -36,7 +36,12 @@ export function signBody(secret: string, body: string): string {
 // delivery unique and defeat exactly that.
 function idempotencyKey(notification: DeliverableNotification): string {
   return createHmac("sha256", "schrodump-notification")
-    .update(`${notification.trigger}:${notification.key}:${notification.kind}`)
+    // The job's state joins the key. Without it every transition of one job carries the same key,
+    // and a receiver that deduplicates — which is precisely what this header asks it to do — keeps
+    // one delivery out of three. Empty for the fleet triggers, so their key is unchanged.
+    .update(
+      `${notification.trigger}:${notification.key}:${notification.kind}:${notification.job?.state ?? ""}`,
+    )
     .digest("hex");
 }
 
@@ -50,6 +55,7 @@ export async function deliverWebhook(
     key: notification.key,
     kind: notification.kind,
     summary: notification.summary,
+    ...(notification.job !== undefined ? { job: notification.job } : {}),
   });
 
   const response = await deps.fetch(target.url, {

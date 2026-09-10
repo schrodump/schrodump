@@ -132,3 +132,20 @@ describe("an internal relay behind a private CA", () => {
     expect(m.created[0]?.tls).toBeUndefined();
   });
 });
+
+describe("a job event by email", () => {
+  it("says which job and which state in the subject", async () => {
+    // Without a case of its own it fell through to the fleet wording and announced a job
+    // transition as "a policy has gone quiet".
+    const m = fakeMailer();
+    await deliverEmail({ ...m.deps, ca: null }, TARGET, {
+      trigger: "JOB_STATE",
+      key: "job-1",
+      kind: "occurred",
+      summary: "s",
+      job: { id: "job-1", kind: "BACKUP", state: "RUNNING", policyId: null },
+    });
+    expect(String(m.sent[0]?.subject)).toMatch(/BACKUP.*RUNNING/);
+    expect(String(m.sent[0]?.subject)).not.toMatch(/quiet/i);
+  });
+});

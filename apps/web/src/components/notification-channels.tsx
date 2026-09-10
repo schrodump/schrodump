@@ -60,6 +60,11 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
           <div className="mt-1.5">
             <StatusBadge state={state} />
           </div>
+          {channel.deliverJobEvents ? (
+            <span className="mt-1 mr-1.5 inline-block rounded-sm border border-border-region bg-muted px-1.5 py-0.5 font-mono text-[10px] tracking-[0.13em] uppercase text-muted-foreground">
+              {t("notifications.subscription.jobs.badge")}
+            </span>
+          ) : null}
           {!channel.enabled ? (
             <span className="mt-1 inline-block rounded-sm border border-border-region bg-muted px-1.5 py-0.5 font-mono text-[10px] tracking-[0.13em] uppercase text-muted-foreground">
               {t("notifications.disabled")}
@@ -181,6 +186,7 @@ export function ChannelForm() {
   const t = useT();
   const create = useCreateNotificationChannel();
   const [kind, setKind] = useState<NotificationChannelKind>("WEBHOOK");
+  const [jobEvents, setJobEvents] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({});
   const set = (key: string) => (event: { target: { value: string } }) =>
     setFields((previous) => ({ ...previous, [key]: event.target.value }));
@@ -221,7 +227,7 @@ export function ChannelForm() {
     // a channel that is half webhook and half email is not a thing that should be expressible.
     const body =
       kind === "WEBHOOK"
-        ? { kind, url: value("url"), secret: value("secret") }
+        ? { kind, url: value("url"), secret: value("secret"), deliverJobEvents: jobEvents }
         : {
             kind,
             smtpHost: value("smtpHost"),
@@ -230,6 +236,7 @@ export function ChannelForm() {
             smtpPassword: value("smtpPassword"),
             fromAddress: value("fromAddress"),
             toAddresses: recipients,
+            deliverJobEvents: jobEvents,
           };
     create.mutate(body, { onSuccess: () => setFields({}) });
   }
@@ -299,6 +306,24 @@ export function ChannelForm() {
           <FieldHelp>{t("notifications.tls")}</FieldHelp>
         </div>
       )}
+
+      <div className="space-y-2">
+        <FieldLabel htmlFor="channel-jobEvents">{t("notifications.subscription")}</FieldLabel>
+        <label className="flex items-start gap-2.5 text-[12.5px]" htmlFor="channel-jobEvents">
+          <input
+            id="channel-jobEvents"
+            type="checkbox"
+            checked={jobEvents}
+            onChange={(event) => setJobEvents(event.target.checked)}
+            className="mt-0.5 shrink-0"
+          />
+          <span className="text-pretty">{t("notifications.subscription.jobs")}</span>
+        </label>
+        {/* Said before it is switched on, never discovered afterwards from an inbox. This is the
+            choice ARCHITECTURE.md warns about, and an operator gets to make it with the warning in
+            hand rather than against it. */}
+        {jobEvents ? <FieldHelp>{t("notifications.subscription.jobs.warning")}</FieldHelp> : null}
+      </div>
 
       {create.isError ? <ErrorState message={create.error.message} /> : null}
 

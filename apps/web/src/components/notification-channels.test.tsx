@@ -23,6 +23,7 @@ const WEBHOOK: NotificationChannel = {
   lastFailureAt: null,
   lastFailure: null,
   lastSuccessAt: null,
+  deliverJobEvents: false,
 };
 
 function renderWith(ui: ReactNode) {
@@ -109,7 +110,9 @@ describe("ChannelForm", () => {
     await user.click(screen.getByRole("button", { name: "Add channel" }));
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(Object.keys(body)).toEqual(["kind", "url", "secret"]);
+    // The exact list, not a subset: deliverJobEvents belongs to BOTH kinds, so it joins it. Any
+    // field from the other kind appearing here is the failure this test is for.
+    expect(Object.keys(body)).toEqual(["kind", "url", "secret", "deliverJobEvents"]);
     expect(body.kind).toBe("WEBHOOK");
   });
 
@@ -280,5 +283,55 @@ describe("ChannelRow — the button that answers the question", () => {
   it("is not offered to a viewer, who cannot spend the organization's credentials", () => {
     renderWith(<ChannelRow channel={WEBHOOK} canEdit={false} />);
     expect(screen.queryByRole("button", { name: "Send test" })).toBeNull();
+  });
+});
+
+
+// The firehose is the choice the architecture warns about, so the operator makes it with the
+// warning in hand rather than discovering the volume from their inbox.
+describe("ChannelForm — the job firehose is a choice, and a loud one", () => {
+  it("sends deliverJobEvents false unless it is asked for", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: () => Promise.resolve(WEBHOOK) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example/y");
+    await user.type(screen.getByLabelText("Signing secret"), "a-signing-secret-value");
+    await user.click(screen.getByRole("button", { name: "Add channel" }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body.deliverJobEvents).toBe(false);
+  });
+
+  it("sends it when the firehose is chosen", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: () => Promise.resolve(WEBHOOK) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    await user.type(screen.getByLabelText("Webhook URL"), "https://hooks.example/y");
+    await user.type(screen.getByLabelText("Signing secret"), "a-signing-secret-value");
+    await user.click(screen.getByLabelText(/every job state change/i));
+    await user.click(screen.getByRole("button", { name: "Add channel" }));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(body.deliverJobEvents).toBe(true);
+  });
+
+  it("states the volume before the choice is made, not after", async () => {
+    const user = userEvent.setup();
+    renderWith(<ChannelForm />);
+    expect(screen.queryByText(/high volume/i)).toBeNull();
+    await user.click(screen.getByLabelText(/every job state change/i));
+    expect(screen.getByText(/high volume/i)).toBeInTheDocument();
+  });
+});
+
+describe("ChannelRow — what a channel is subscribed to is visible", () => {
+  it("marks a channel that receives every job", () => {
+    renderWith(<ChannelRow channel={{ ...WEBHOOK, deliverJobEvents: true }} canEdit />);
+    expect(screen.getByText("every job")).toBeInTheDocument();
+  });
+
+  it("says nothing extra for a fleet-only channel", () => {
+    renderWith(<ChannelRow channel={WEBHOOK} canEdit />);
+    expect(screen.queryByText("every job")).toBeNull();
   });
 });

@@ -23,6 +23,10 @@ const CreateChannelSchema = z.discriminatedUnion("kind", [
       url: z.url(),
       // Write-only: encrypted into encryptedSecret, never echoed.
       secret: z.string().min(16, "a signing secret shorter than 16 characters is not worth having"),
+      // Opt-in firehose: one delivery per job state transition, on top of the three fleet
+      // triggers. Declared on BOTH branches rather than hoisted out of the union — the union is
+      // what makes a row one kind, and lifting a field out of it would weaken exactly that.
+      deliverJobEvents: z.boolean().default(false),
     })
     // .strict() is what makes "one row is one kind" enforceable at the edge. Without it zod strips
     // unknown keys, so a webhook payload carrying SMTP fields is silently accepted as a webhook and
@@ -37,12 +41,17 @@ const CreateChannelSchema = z.discriminatedUnion("kind", [
       smtpPassword: z.string().min(1),
       fromAddress: z.email(),
       toAddresses: z.array(z.email()).min(1, "a channel with no recipients delivers nothing"),
+      // Opt-in firehose: one delivery per job state transition, on top of the three fleet
+      // triggers. Declared on BOTH branches rather than hoisted out of the union — the union is
+      // what makes a row one kind, and lifting a field out of it would weaken exactly that.
+      deliverJobEvents: z.boolean().default(false),
     })
     .strict(),
 ]);
 
 export interface CreateChannelData {
   kind: "WEBHOOK" | "SMTP";
+  deliverJobEvents: boolean;
   url?: string;
   encryptedSecret?: EncryptedCredential;
   smtpHost?: string;
@@ -65,6 +74,8 @@ export interface ChannelRecord {
   enabled: boolean;
   lastFailureAt: Date | null;
   lastFailure: string | null;
+  // True when this channel asked for the job firehose as well as the fleet's open questions.
+  deliverJobEvents: boolean;
   // NULL alongside a NULL lastFailureAt is UNOBSERVED: configured, and nobody has watched it carry
   // anything. Kept next to the failure rather than clearing it, so a channel that recovered still
   // shows that it once broke.
@@ -109,6 +120,7 @@ function toPublic(channel: ChannelRecord) {
     lastFailureAt: channel.lastFailureAt,
     lastFailure: channel.lastFailure,
     lastSuccessAt: channel.lastSuccessAt,
+    deliverJobEvents: channel.deliverJobEvents,
   };
 }
 
@@ -127,11 +139,13 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
           input.kind === "WEBHOOK"
             ? {
                 kind: "WEBHOOK",
+                deliverJobEvents: input.deliverJobEvents,
                 url: input.url,
                 encryptedSecret: encryptCredential(deps.kek, input.secret),
               }
             : {
                 kind: "SMTP",
+                deliverJobEvents: input.deliverJobEvents,
                 smtpHost: input.smtpHost,
                 smtpPort: input.smtpPort,
                 smtpUsername: input.smtpUsername,

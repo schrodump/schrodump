@@ -196,6 +196,7 @@ model Organization {
   encryptionKeys       EncryptionKey[]
   auditLogs            AuditLog[]
   notificationChannels NotificationChannel[]
+  jobEvents            JobEvent[]
   notificationStates   NotificationState[]
   notificationSnapshot NotificationSnapshot?
 }
@@ -333,6 +334,7 @@ model BackupJob {
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   policy         BackupPolicy? @relation(fields: [policyId], references: [id])
   artifact       Artifact?     @relation("ProducedBy")
+  events         JobEvent[]
   verifyArtifact Artifact?     @relation("VerifyTarget", fields: [artifactId], references: [id])
 
   @@unique([policyId, scheduledAt])
@@ -377,6 +379,11 @@ model NotificationChannel {
   // the channel reads VERIFIED or FAILED, and both NULL is UNOBSERVED — a channel nobody has
   // watched deliver is an open question, not a working one.
   lastSuccessAt         DateTime?
+  // Opt-in firehose: one delivery per BackupJob state transition, on top of the three fleet
+  // triggers. Default false — alerting is fleet-level, and a channel that fires on every job is
+  // filtered into a folder within a week, taking the three alerts that matter with it. See
+  // docs/superpowers/specs/2026-09-10-job-event-notifications-design.md.
+  deliverJobEvents      Boolean                 @default(false)
   createdAt             DateTime                @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -386,6 +393,32 @@ model NotificationChannel {
 
 // A condition currently reported as open. Notifications fire on TRANSITION, so this is what keeps a
 // condition that stays true from being re-sent every tick until someone mutes the channel.
+// The job-event outbox. Written by a database TRIGGER, never by application code: claimNextJob
+// flips PENDING -> RUNNING in raw SQL for atomicity, and no Prisma client extension can observe
+// that statement — an application-side writer would silently miss the most common transition in
+// the system. Written in the job's own transaction, so an event can neither be lost to a crash
+// between the two writes nor outlive a rolled-back state change.
+model JobEvent {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String
+  jobId          String
+  kind           JobKind
+  state          JobState
+  at             DateTime  @default(now())
+  // Set once a delivery pass has ATTEMPTED this event, whether or not every channel accepted it —
+  // the trade-off NotificationState already makes, so one dead channel cannot replay the backlog
+  // to the healthy ones forever. Set even when nothing subscribed, or the trigger would grow a
+  // table behind a feature nobody switched on. Pruned once it is a day old.
+  deliveredAt    DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  job          BackupJob    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([deliveredAt, at])
+  @@index([organizationId])
+  @@index([jobId])
+}
+
 model NotificationState {
   id             String   @id @default(cuid())
   organizationId String

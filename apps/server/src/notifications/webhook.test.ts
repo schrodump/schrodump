@@ -98,3 +98,69 @@ describe("a receiver that never answers", () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });
+
+describe("a job event on the wire", () => {
+  it("carries the job's kind and state as fields, not only as prose", async () => {
+    // A receiver that has to regex the summary to learn the state is a receiver that breaks when
+    // somebody improves the wording.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    await deliverWebhook(
+      { fetch: fetchMock },
+      { url: "https://hooks.example/x", secret: "s" },
+      {
+        trigger: "JOB_STATE",
+        key: "job-1",
+        kind: "occurred",
+        summary: 'BACKUP job for policy "shop-daily" is RUNNING',
+        job: { id: "job-1", kind: "BACKUP", state: "RUNNING", policyId: "pol-1" },
+      },
+    );
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0]?.[1] as RequestInit).body),
+    ) as Record<string, unknown>;
+    expect(body.job).toEqual({ id: "job-1", kind: "BACKUP", state: "RUNNING", policyId: "pol-1" });
+  });
+
+  it("gives each transition of one job its own idempotency key", async () => {
+    // The key derives from the CONDITION, not the moment. Without the state in it, PENDING,
+    // RUNNING and SUCCEEDED of the same job share a key, and a receiver that deduplicates — which
+    // is exactly what the header asks it to do — keeps one delivery out of three.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    for (const state of ["PENDING", "RUNNING", "SUCCEEDED"]) {
+      await deliverWebhook(
+        { fetch: fetchMock },
+        { url: "https://hooks.example/x", secret: "s" },
+        {
+          trigger: "JOB_STATE",
+          key: "job-1",
+          kind: "occurred",
+          summary: "s",
+          job: { id: "job-1", kind: "BACKUP", state, policyId: null },
+        },
+      );
+    }
+    const keys = fetchMock.mock.calls.map(
+      (call) =>
+        ((call[1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"],
+    );
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("still keys a fleet trigger by its condition alone", async () => {
+    // The three fleet triggers must keep the property the header was added for: the same condition
+    // seen twice is recognisably the same delivery.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    for (let i = 0; i < 2; i += 1) {
+      await deliverWebhook(
+        { fetch: fetchMock },
+        { url: "https://hooks.example/x", secret: "s" },
+        NOTIFICATION,
+      );
+    }
+    const keys = fetchMock.mock.calls.map(
+      (call) =>
+        ((call[1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"],
+    );
+    expect(new Set(keys).size).toBe(1);
+  });
+});

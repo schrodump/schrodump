@@ -15,6 +15,7 @@ import { runScheduledSelfBackup } from "./jobs/self-backup-scheduler.js";
 import { assertScratchWritable } from "./jobs/scratch-preflight.js";
 import { runGracefulShutdown } from "./jobs/shutdown.js";
 import { smtpDeps } from "./notifications/smtp.js";
+import { runJobEventNotifications } from "./notifications/job-events.js";
 import { runNotifications } from "./notifications/wiring.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
@@ -268,6 +269,20 @@ export async function main(): Promise<void> {
           minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
         }).catch((err) => {
           logger.error({ err }, "notification pass failed");
+        });
+        // Same tick and the same reasoning: the outbox is committed state, read after the fact and
+        // never in a job's path. Separate from the evaluator above because it is not alerting —
+        // evaluate.ts decides what the FLEET is asking; this ships what a channel subscribed to.
+        await runJobEventNotifications({
+          prisma,
+          kek,
+          audit: credentialAudit,
+          now: () => new Date(),
+          fetch,
+          smtp,
+          log: logger,
+        }).catch((err) => {
+          logger.error({ err }, "job event pass failed");
         });
       }).catch((err) => {
         logger.error({ err }, "scheduler dispatch tick failed");

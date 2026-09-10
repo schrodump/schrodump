@@ -27,6 +27,7 @@ const RECORD: ChannelRecord = {
   lastFailureAt: null,
   lastFailure: null,
   lastSuccessAt: null,
+  deliverJobEvents: false,
 };
 
 const STORE: ChannelStore = {
@@ -312,6 +313,65 @@ describe("notification channels — proving one actually delivers", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).not.toContain("encryptedSecret");
     expect(res.body).not.toContain("encryptedSmtpPassword");
+    await app.close();
+  });
+});
+
+
+// evaluate.ts stays fleet-level: the three triggers are what ALERTING is, and a channel that fires
+// on every job is filtered into a folder within a week, taking them with it. The firehose is an
+// axis added beside that decision, not a reversal of it — so it is off unless asked for.
+describe("notification channels — the job firehose is opt-in", () => {
+  it("defaults to off, because alerting is fleet-level", async () => {
+    const seen: CreateChannelData[] = [];
+    const app = await appWith("operator", {
+      create: (data) => {
+        seen.push(data);
+        return Promise.resolve(RECORD);
+      },
+    });
+    await app.inject({ method: "POST", url: "/notification-channels", payload: WEBHOOK });
+    expect(seen[0]?.deliverJobEvents).toBe(false);
+    await app.close();
+  });
+
+  it("carries the choice through to the store when it is asked for", async () => {
+    const seen: CreateChannelData[] = [];
+    const app = await appWith("operator", {
+      create: (data) => {
+        seen.push(data);
+        return Promise.resolve(RECORD);
+      },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...SMTP, deliverJobEvents: true },
+    });
+    expect(seen[0]?.deliverJobEvents).toBe(true);
+    await app.close();
+  });
+
+  it("still refuses a stray field from the other kind", async () => {
+    // .strict() is what makes "one row is one kind" enforceable at the edge. Adding an optional
+    // field to both branches must not open a hole in that.
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { ...WEBHOOK, deliverJobEvents: true, smtpHost: "smtp.example" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { field?: string }).field).toBe("smtpHost");
+    await app.close();
+  });
+
+  it("tells a reader which channels are subscribed to the firehose", async () => {
+    const app = await appWith("viewer", {
+      list: () => Promise.resolve([{ ...RECORD, deliverJobEvents: true }]),
+    });
+    const res = await app.inject({ method: "GET", url: "/notification-channels" });
+    expect(res.body).toContain('"deliverJobEvents":true');
     await app.close();
   });
 });
