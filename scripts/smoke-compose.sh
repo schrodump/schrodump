@@ -74,7 +74,7 @@ cleanup() {
     return 0
   fi
   docker compose -p "$PROJECT" --env-file "${WORK}/.env" down -v >/dev/null 2>&1 || true
-  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" "${PROJECT}-maria" "${PROJECT}-hook" "${PROJECT}-smtp" "${PROJECT}-rs" >/dev/null 2>&1 || true
+  docker rm -f "${PROJECT}-target" "${PROJECT}-minio" "${PROJECT}-mysql" "${PROJECT}-mongo" "${PROJECT}-maria" "${PROJECT}-hook" "${PROJECT}-smtp" "${PROJECT}-jobhook" "${PROJECT}-rs" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -97,7 +97,7 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
-log "1/19  docker compose up"
+log "1/20  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -106,7 +106,7 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
-log "2/19  a target database and an S3 destination on the deployment's own networks"
+log "2/20  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
@@ -122,7 +122,7 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/19  the one-time setup link"
+log "3/20  the one-time setup link"
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \
@@ -135,11 +135,11 @@ api -o /dev/null -w '   sign-in %{http_code}\n' -X POST -H "$JSON" \
 api "${BASE}/backend/me" | grep -q '"mustChangePassword":false' ||
   fail "a setup-link admin was flagged for password rotation"
 
-log "4/19  encryption keys"
+log "4/20  encryption keys"
 api -o /dev/null -w '   provision %{http_code}\n' -X POST -H "$JSON" \
   -d '{"escrow":{"mode":"generate"}}' "${BASE}/backend/encryption-keys"
 
-log "5/19  destination, target, policy"
+log "5/20  destination, target, policy"
 dest="$(api -X POST -H "$JSON" -d "{\"name\":\"minio\",\"endpoint\":\"http://${PROJECT}-minio:9000\",\"region\":\"us-east-1\",\"bucket\":\"backups\",\"prefix\":\"s\",\"accessKeyId\":\"minio\",\"secretAccessKey\":\"minio123\",\"forcePathStyle\":true,\"sealMode\":\"operational\"}" "${BASE}/backend/destinations" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$dest" ] || fail "the destination was not created"
 # PUT/GET/DELETE against the real bucket: a credential that can write but not manage is a backup
@@ -155,10 +155,10 @@ api "${BASE}/backend/targets/${target}/test-connection" -X POST | grep -q '"ok":
 policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$policy" ] || fail "the policy was not created"
 
-log "6/19  a real backup"
+log "6/20  a real backup"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
-log "7/19  waiting for the artifact to reach VERIFIED"
+log "7/20  waiting for the artifact to reach VERIFIED"
 verified=""
 for attempt in $(seq 1 60); do
   sleep 5
@@ -191,7 +191,7 @@ done
 # Verify restores into a throwaway sandbox; a real restore runs a different code path
 # (runRestoreJob) against a real database with --clean semantics. It was equally broken by the
 # scratch defect and equally invisible to every other test.
-log "8/19  restoring it over the live database"
+log "8/20  restoring it over the live database"
 artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$artifact" ] || fail "could not read the artifact id"
 # Changed AFTER the backup, so "the data came back" is an observation rather than a coincidence.
@@ -219,7 +219,7 @@ printf '   the backed-up row is back and the post-backup row is gone\n'
 # The documented floor when the metadata database is lost. It aborted on a partly-missing catalog
 # until the import was made idempotent, and a rebuilt artifact must come back UNOBSERVED — the
 # verification record lived in the database that was lost.
-log "9/19  rebuilding the catalog from the bucket alone"
+log "9/20  rebuilding the catalog from the bucket alone"
 # Let anything already in flight settle first. The scheduler dispatches the most recent past cron
 # window on top of the manual trigger, each chaining a verify, so wiping the table underneath a
 # RUNNING verify is a race of the script's own making. The server now answers that case legibly
@@ -255,7 +255,7 @@ esac
 # Rotation must leave every existing artifact readable. The retired key keeps its identity, and if
 # it ever stopped keeping it the loss would be silent — pre-rotation artifacts unopenable by the
 # server, discovered at a restore, months later. That is the worst failure this product has.
-log "10/19  rotating the operational key, and re-verifying an artifact sealed to the old one"
+log "10/20  rotating the operational key, and re-verifying an artifact sealed to the old one"
 old_artifact="$(api "${BASE}/backend/artifacts" | sed -n 's/.*"items":\[{"id":"\([^"]*\)".*/\1/p')"
 [ -n "$old_artifact" ] || fail "could not read the rebuilt artifact id"
 api -o /dev/null -w '   rotate %{http_code}\n' -X POST -H "$JSON" \
@@ -283,7 +283,7 @@ done
 # mysql carries it: `parallelism > 1` is the explicit way into STAGED (resolveExecutionMode), and
 # mydumper is an image the operator never names — the server resolves schrodump/mydumper:1 by
 # itself, at backup time.
-log "11/19  a STAGED mysql backup, through the executor image nobody types"
+log "11/20  a STAGED mysql backup, through the executor image nobody types"
 
 # Unpublished until the first release cuts a tag, so a fresh checkout builds it. ensureImage
 # inspects before pulling, so a local tag is used as-is and no registry is consulted.
@@ -378,7 +378,7 @@ done
 # only in a --config file, and that file has to sit at a path the Docker daemon can resolve as a
 # bind source. That is precisely what the scratch defect broke — and the engine it broke most
 # completely, since STREAM postgres kept working throughout. Nothing here covered it.
-log "12/19  a mongo backup, whose password only travels in a mounted config file"
+log "12/20  a mongo backup, whose password only travels in a mounted config file"
 docker run -d --name "${PROJECT}-mongo" --network "${PROJECT}_targets" \
   -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=rootpw mongo:8 >/dev/null
 for _ in $(seq 1 90); do
@@ -431,7 +431,7 @@ done
 # family switch picks mariadb-dump/mariadb or the executor exits 127. Nothing here ran that branch,
 # and it is version-sensitive in a way a descriptor test cannot see: the test asserts which string
 # was chosen, not that the string names a binary that exists in the image.
-log "13/19  the same adapter against mariadb, whose client binaries are named differently"
+log "13/20  the same adapter against mariadb, whose client binaries are named differently"
 docker run -d --name "${PROJECT}-maria" --network "${PROJECT}_targets" \
   -e MARIADB_ROOT_PASSWORD=rootpw -e MARIADB_DATABASE=shop mariadb:11 >/dev/null
 for _ in $(seq 1 90); do
@@ -480,7 +480,7 @@ done
 # one — so the service is recreated with it. That is also what an operator does, and it is the only
 # step here that proves the compose plumbing for these three variables works at all: they were
 # documented and, until recently, silently not passed through.
-log "14/19  a self-backup, sealed to escrow, over the internal network"
+log "14/20  a self-backup, sealed to escrow, over the internal network"
 cat >> "${WORK}/.env" <<EOF
 SCHRODUMP_SELF_BACKUP_DESTINATION_ID=${dest}
 SCHRODUMP_SELF_BACKUP_INTERVAL_MS=60000
@@ -521,7 +521,7 @@ done
 # it either — every one of them passes parallelism: 1.
 #
 # Reuses the postgres target from step 2; only the policy differs.
-log "15/19  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
+log "15/20  the other STAGED path: pg_dump -Fd, tarred, and pg_restore from a directory"
 pg_staged="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-pg-staged\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"FULL_RESTORE\",\"executionMode\":\"STAGED\",\"parallelism\":2,\"keepLast\":3,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$pg_staged" ] || fail "the STAGED postgres policy was not created"
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${pg_staged}/backup"
@@ -574,7 +574,7 @@ done
 # The claim is not just that it deletes. It is that it deletes EVERYTHING a backup wrote: a postgres
 # backup writes three objects, and pruning two of them leaves the third in the bucket permanently —
 # outside the window the operator configured, holding pg_dumpall's role password hashes.
-log "16/19  retention actually deleting, and leaving nothing behind"
+log "16/20  retention actually deleting, and leaving nothing behind"
 prune_policy="$(api -X POST -H "$JSON" -d "{\"name\":\"smoke-prune\",\"targetId\":\"${target}\",\"destinationId\":\"${dest}\",\"cron\":\"0 3 * * *\",\"verifyLevel\":\"NONE\",\"executionMode\":\"STREAM\",\"parallelism\":1,\"keepLast\":1,\"keepDaily\":0,\"keepWeekly\":0,\"keepMonthly\":0,\"keepYearly\":0,\"enabled\":true}" "${BASE}/backend/policies" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
 [ -n "$prune_policy" ] || fail "the retention policy was not created"
 
@@ -635,7 +635,7 @@ printf '   every globals.bin still has its artifact beside it — no half-delete
 # So this is the delivery path end to end, through the deployment: the secret decrypted from the
 # database, the body signed, and an HTTP request arriving at a real listener on the internal
 # network. The receiver is busybox nc from an image already present — no new dependency to pin.
-log "17/19  a notification actually arriving, signed, at a real listener"
+log "17/20  a notification actually arriving, signed, at a real listener"
 docker run -d --name "${PROJECT}-hook" --network "${PROJECT}_internal" postgres:18-alpine \
   sh -c 'while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" | nc -l -p 9999; done' >/dev/null
 for _ in $(seq 1 30); do
@@ -718,7 +718,7 @@ esac
 # It has to be a RESTORE, not a verify: an UNSCOPED mongo artifact is deliberately downgraded to
 # CHECKSUM by resolveVerifyPlan, because a multi-database archive has no single origin db to assert
 # against. The only way to prove --oplogReplay is to put the data back and look at it.
-log "18/19  a replica set, and the oplog actually replayed"
+log "18/20  a replica set, and the oplog actually replayed"
 # A --keyFile is not optional: mongod refuses to start a replica set with authorization enabled
 # without one. It is generated INSIDE the container because mongod rejects a key readable by anyone
 # but its owner, and a host-created file arrives owned by the wrong uid.
@@ -822,7 +822,7 @@ done
 # things at once — that an email actually arrives, and that the CA variable is passed through the
 # compose plumbing and read at boot. Variables that were "documented and silently not passed
 # through" are exactly what step 14 exists to catch.
-log "19/19  an email actually arriving, over TLS the deployment had to be told to trust"
+log "19/20  an email actually arriving, over TLS the deployment had to be told to trust"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -keyout "${WORK}/smtp-key.pem" -out "${WORK}/smtp-ca.pem" \
   -subj "/CN=${PROJECT}-smtp" -addext "subjectAltName=DNS:${PROJECT}-smtp" >/dev/null 2>&1
@@ -908,4 +908,66 @@ case "$result" in
   *) printf '   the channel now records a delivery that actually arrived\n' ;;
 esac
 
-printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored four over live data — one of them a replica set whose oplog was replayed — rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, pruned an expired backup without leaving part of it behind, delivered a signed notification to a listener that was really there, and delivered an email to a relay whose certificate it had to be told to trust.\n'
+# Job events: the opt-in firehose, and the one part of it no unit test can reach. The outbox row is
+# written by a database TRIGGER, so what has to be proved here is the whole chain against the real
+# migration in the real image — trigger to outbox to drain to a signed request on the wire.
+#
+# Its own listener, and a real HTTP one. The channel from step 17 is deliberately NOT subscribed,
+# so anything arriving here is a job event by construction; and busybox nc cannot serve the burst a
+# single job produces, nor surface the body that tells JOB_STATE from a fleet trigger.
+log "20/20  every job state change reaching a channel that asked for them"
+docker run -d --name "${PROJECT}-jobhook" --network "${PROJECT}_internal" \
+  -v "${PWD}/scripts/smoke-webhook-sink.mjs:/sink.mjs:ro" -e PORT=9998 \
+  --entrypoint node "${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}" /sink.mjs >/dev/null
+for _ in $(seq 1 30); do
+  case "$(docker logs "${PROJECT}-jobhook" 2>&1)" in *SINK-LISTENING*) break ;; esac
+  sleep 1
+done
+case "$(docker logs "${PROJECT}-jobhook" 2>&1)" in
+  *SINK-LISTENING*) : ;;
+  *) printf '\n--- job sink ---\n%s\n' "$(docker logs "${PROJECT}-jobhook" 2>&1)" >&2
+     fail "the job-event sink never came up" ;;
+esac
+
+api -o /dev/null -w '   channel %{http_code}\n' -X POST -H "$JSON" \
+  -d "{\"kind\":\"WEBHOOK\",\"url\":\"http://${PROJECT}-jobhook:9998/hook\",\"secret\":\"a-signing-secret-long-enough\",\"deliverJobEvents\":true}" \
+  "${BASE}/backend/notification-channels"
+
+api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
+
+# PENDING, RUNNING and SUCCEEDED of one job, each with an idempotency key of its own. Distinct keys
+# are the assertion that matters: without the job's state in the key every transition of a job
+# carries the same one, and a receiver that deduplicates keeps one delivery out of three.
+for attempt in $(seq 1 48); do
+  sleep 5
+  received="$(docker logs "${PROJECT}-jobhook" 2>&1)"
+  keys="$(printf '%s\n' "$received" | grep "JOB_STATE" | awk '{print $3}' | sort -u | wc -l | tr -d ' ')"
+  [ "$keys" -ge 3 ] && { printf '   %s job events, each keyed distinctly, after %ss\n' "$keys" "$((attempt * 5))"; break; }
+  [ "$attempt" -eq 48 ] && {
+    printf '\n--- job sink ---\n%s\n' "$(printf '%s\n' "$received" | tail -20)" >&2
+    printf '\n--- channels ---\n%s\n' "$(api "${BASE}/backend/notification-channels")" >&2
+    fail "a backup produced fewer than three distinctly-keyed job events (found: ${keys})"
+  }
+done
+
+# The body carries the state as a FIELD, not only inside the prose — a receiver that had to regex
+# the summary would break the day somebody improved the wording.
+case "$received" in
+  *'"state":"SUCCEEDED"'*) printf '   and the payload names the state as a field\n' ;;
+  *) printf '\n--- job sink ---\n%s\n' "$(printf '%s\n' "$received" | tail -20)" >&2
+     fail "a job event arrived without the job's state as a structured field" ;;
+esac
+
+# Every one of them signed. An unsigned job event is something anyone on the network can forge.
+case "$(printf '%s\n' "$received" | grep -c "SINK-DELIVERY unsigned")" in
+  0) printf '   every job event was signed\n' ;;
+  *) fail "a job event arrived without a signature" ;;
+esac
+
+# And the channel from step 17, which never asked for job events, must not have received any.
+case "$(docker logs "${PROJECT}-hook" 2>&1)" in
+  *JOB_STATE*) fail "a channel that did not subscribe received the job firehose" ;;
+  *) printf '   the unsubscribed channel received none of them\n' ;;
+esac
+
+printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored four over live data — one of them a replica set whose oplog was replayed — rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, pruned an expired backup without leaving part of it behind, delivered a signed notification to a listener that was really there, delivered an email to a relay whose certificate it had to be told to trust, and sent every state change of a job to the one channel that asked for them and to no other.\n'

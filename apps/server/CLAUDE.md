@@ -21,7 +21,7 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   testing.
 - `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — `scopedPrisma`;
   `data/patch.ts` — the shared `PATCH` semantics.
-- `notifications/` — a pure evaluator plus webhook and SMTP delivery (below).
+- `notifications/` — a pure evaluator, webhook and SMTP delivery, and the job-event outbox drain (below).
 - `observability/` — `pino.ts` (logging with redaction), `audit.ts` (the art. 37 trail, below) and
   `health.ts` (`GET /health`, below).
 - `bootstrap/` — first-boot admin creation and the setup-token flow.
@@ -266,6 +266,30 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
   step proves three things: the email arrives, the CA variable survives the compose plumbing, and
   the subject says Test rather than Alert. The smoke covered webhook delivery end to end and never
   once delivered an email, while the bug that motivated the coverage broke both kinds identically.
+- **Job events are an opt-in firehose, and the fleet default is unchanged.** `evaluate.ts` still
+  emits only the three fleet triggers and knows nothing about jobs — the unit of **alerting** is
+  the fleet. `deliverJobEvents` on a channel adds one delivery per `BackupJob` state transition on
+  top of that. The architecture decision keeps its meaning: this is an axis beside it, not a
+  reversal, and the UI states the volume the moment the box is ticked rather than letting it be
+  discovered from an inbox.
+- **The outbox is written by a database TRIGGER, never by application code.** `claimNextJob` flips
+  `PENDING → RUNNING` in raw SQL, because the claim has to be atomic against concurrent workers
+  (`FOR UPDATE SKIP LOCKED`). A Prisma client extension — the mechanism `data/scope.ts` uses for
+  `organizationId` — never sees that statement, so an application-side writer would miss the single
+  most common transition in the system. The trigger also catches whatever write site is added next
+  year by someone who never read this file, and it writes in the job's own transaction, so an event
+  can neither be lost to a crash between the two writes nor outlive a rolled-back state change.
+  This is the **only** trigger in the project; `job-event-trigger.integration.test.ts` is where it
+  is proved, and removing the trigger turns all four of its cases red.
+- **An event is marked delivered after the pass that ATTEMPTED it**, accepted or not — the same
+  trade-off `notificationState` makes, so one dead channel cannot replay the backlog to the healthy
+  ones forever; the failure lands on the channel row the interface already watches. Marked even
+  when nothing subscribed, or the trigger would grow a table behind a feature nobody switched on.
+  Drained 200 at a time, oldest first, and delivered rows are pruned after a day.
+- **The job's state is part of the idempotency key.** Without it, `PENDING`, `RUNNING` and
+  `SUCCEEDED` of one job all hash to the same key and a receiver that deduplicates — which is
+  precisely what the header asks it to do — keeps one delivery out of three. The fleet triggers'
+  keys are unchanged, and a test pins that.
 - **Both delivery paths are bounded (15 s).** Node's `fetch` has no default timeout at all, and
   nodemailer's stages need `connectionTimeout`/`greetingTimeout`/`socketTimeout` separately. This
   was survivable while delivery only ran inside the scheduler tick; it now also runs inside an

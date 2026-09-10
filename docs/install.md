@@ -223,6 +223,33 @@ The file is read once, at boot: a deployment that changes it has to restart to p
 > broken, and nothing yet distinguishes the two. **Send test** on the channel delivers for real and
 > reports what happened. Do that once after configuring, and again after changing the relay.
 
+### Getting every job, not only the fleet's open questions
+
+A channel receives the three fleet alerts by default — an artifact that failed verification,
+verification falling behind, a policy gone quiet. It deliberately does **not** fire on a job that
+ran, because a channel that fires on every job is a channel filtered into a folder within a week,
+and the three alerts that matter are filtered with it.
+
+If you want the stream anyway — validating a fresh deployment, feeding a dashboard, keeping a
+record outside the database — tick **Also send every job state change** when creating the channel.
+That channel then receives one delivery per transition: `PENDING`, `RUNNING`, and the terminal
+state, for every backup, verify, restore and retention job.
+
+Each delivery carries the job as structured fields rather than only as prose, so a receiver routes
+on them instead of parsing a sentence:
+
+```json
+{ "trigger": "JOB_STATE",
+  "key": "<jobId>",
+  "kind": "occurred",
+  "summary": "BACKUP job for policy \"shop-daily\" is RUNNING",
+  "job": { "id": "…", "kind": "BACKUP", "state": "RUNNING", "policyId": "…" } }
+```
+
+The `Idempotency-Key` header is distinct per transition, so a receiver that deduplicates keeps all
+three rather than collapsing them into one. Existing channels are unaffected: the option is off
+unless it is chosen.
+
 ### Upgrading
 
 ```
