@@ -185,6 +185,8 @@ export interface NotificationChannel {
   // Null alongside a null lastFailureAt is UNOBSERVED: configured, and nobody has watched it carry
   // anything. See channelState in lib/domain.ts.
   lastSuccessAt: string | null;
+  // Opt-in firehose: one delivery per job state transition, on top of the three fleet triggers.
+  deliverJobEvents: boolean;
 }
 
 // A dump of the deployment's own metadata database. Instance-scoped, so it has no organizationId
