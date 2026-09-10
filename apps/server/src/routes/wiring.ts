@@ -604,6 +604,7 @@ export function prismaNotificationChannelStore(
         data: {
           organizationId,
           kind: data.kind,
+          deliverJobEvents: data.deliverJobEvents,
           ...(data.url !== undefined ? { url: data.url } : {}),
           ...(data.encryptedSecret !== undefined
             ? { encryptedSecret: JSON.stringify(data.encryptedSecret) }
