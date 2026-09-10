@@ -18,13 +18,26 @@ import { deliverWebhook } from "./webhook.js";
 // The evaluator's three triggers are what a FLEET can be in. "TEST" is not one of them — nothing
 // about the fleet produces it and it is never an open condition — so it widens the wire vocabulary
 // only, and `evaluate.ts` keeps its exhaustive three.
-export type DeliverableTrigger = NotificationTrigger | "TEST";
+export type DeliverableTrigger = NotificationTrigger | "TEST" | "JOB_STATE";
+
+// Present only on JOB_STATE. The three fleet triggers describe the fleet, not a job — and a
+// receiver that had to regex the summary to learn the state would break the day someone improved
+// the wording.
+export interface DeliverableJob {
+  readonly id: string;
+  readonly kind: string;
+  readonly state: string;
+  readonly policyId: string | null;
+}
 
 export interface DeliverableNotification {
   readonly trigger: DeliverableTrigger;
   readonly key: string;
-  readonly kind: "opened" | "resolved";
+  // "occurred" is a job transition: it neither opens nor resolves a condition, and calling it
+  // either would make the other two words mean nothing.
+  readonly kind: "opened" | "resolved" | "occurred";
   readonly summary: string;
+  readonly job?: DeliverableJob;
 }
 
 // Deliberately not dressed as an alert. The button exists to prove the channel carries a message;

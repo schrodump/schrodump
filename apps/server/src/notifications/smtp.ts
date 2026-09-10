@@ -52,6 +52,11 @@ function subjectFor(notification: DeliverableNotification): string {
   // A test is not an alert and must not arrive looking like one. Without this case it fell through
   // to the final else and announced itself as a policy gone quiet — a button meant to prove the
   // channel works, lying about the fleet to do it.
+  // Before the TEST case and before the fleet wording: without one of its own, a job transition
+  // fell through to the final else and announced itself as a policy gone quiet.
+  if (notification.job !== undefined) {
+    return `[schrodump] Job: ${notification.job.kind} is ${notification.job.state}`;
+  }
   if (notification.trigger === "TEST") return "[schrodump] Test: this channel is reachable";
   const state = notification.kind === "resolved" ? "Resolved" : "Alert";
   const what =
