@@ -95,3 +95,63 @@ describe("runNotifications records what happened to the channel", () => {
     expect(prisma.updates[0]?.lastSuccessAt).toBeUndefined();
   });
 });
+
+// The snapshot is the ANCHOR for "the unobserved count is not coming down". It is compared against
+// now, and it is rewritten at the end of every tick — so it is always one tick old, and one tick is
+// 30 seconds by default while the gap that makes it count is fifteen minutes.
+//
+// An anchor that moves every time you look at it is not an anchor.
+describe("VERIFICATION_BEHIND — the anchor has to be allowed to age", () => {
+  it("fires when the unobserved count sits still for longer than the gap", async () => {
+    // Twenty minutes of ticks at the default cadence, with five artifacts nobody is verifying and
+    // the number never moving. This is the exact condition the trigger exists for: the case the
+    // whole product is about, jobs succeeding while nothing is verified.
+    let clock = new Date("2026-09-10T12:00:00.000Z").getTime();
+    let stored: { at: Date; unobserved: number } | null = null;
+    const sent: string[] = [];
+
+    const prisma = {
+      organization: { findMany: () => Promise.resolve([{ id: "org-1" }]) },
+      notificationChannel: {
+        findMany: () => Promise.resolve([WEBHOOK_ROW]),
+        update: () => Promise.resolve(WEBHOOK_ROW),
+      },
+      artifact: { count: () => Promise.resolve(5), findMany: () => Promise.resolve([]) },
+      backupPolicy: { findMany: () => Promise.resolve([]) },
+      backupJob: { findFirst: () => Promise.resolve(null) },
+      notificationSnapshot: {
+        findUnique: () => Promise.resolve(stored),
+        upsert: ({ create }: { create: { at: Date; unobserved: number } }) => {
+          stored = { at: create.at, unobserved: create.unobserved };
+          return Promise.resolve({});
+        },
+      },
+      notificationState: {
+        findMany: () => Promise.resolve([]),
+        create: () => Promise.resolve({}),
+        deleteMany: () => Promise.resolve({ count: 0 }),
+      },
+    };
+
+    const fetchMock = vi.fn(((_url: string, init: RequestInit) => {
+      sent.push(String(init.body));
+      return Promise.resolve({ ok: true, status: 200 });
+    }) as unknown as typeof fetch);
+
+    for (let tick = 0; tick < 40; tick += 1) {
+      await runNotifications({
+        prisma: prisma as never,
+        kek: KEK,
+        audit: { record: () => undefined },
+        now: () => new Date(clock),
+        fetch: fetchMock,
+        smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
+        log: { info: () => undefined, error: () => undefined },
+        minEvaluationGapMs: 900_000,
+      });
+      clock += 30_000;
+    }
+
+    expect(sent.some((body) => body.includes("VERIFICATION_BEHIND"))).toBe(true);
+  });
+});

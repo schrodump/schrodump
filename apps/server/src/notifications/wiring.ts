@@ -148,11 +148,24 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
       }
     }
 
-    await deps.prisma.notificationSnapshot.upsert({
-      where: { organizationId: org.id },
-      create: { organizationId: org.id, at: now, unobserved },
-      update: { at: now, unobserved },
-    });
+    // Re-anchored only once it has actually served as an anchor — never on every tick.
+    //
+    // This row is the fixed point "the unobserved count is not coming down" is measured against.
+    // Rewriting it each pass kept it one tick old (30s by default) against a gap of fifteen
+    // minutes, so `previous` was ALWAYS null and VERIFICATION_BEHIND could never fire at all: the
+    // trigger for the exact case this product exists to catch — jobs succeeding while nothing is
+    // verified — was unreachable in every deployment. An anchor that moves every time you look at
+    // it is not an anchor.
+    //
+    // The first snapshot has to be written to start the clock; after that the row stays put until
+    // the gap elapses, is compared against, and only then moves forward.
+    if (previousRow === null || previous !== null) {
+      await deps.prisma.notificationSnapshot.upsert({
+        where: { organizationId: org.id },
+        create: { organizationId: org.id, at: now, unobserved },
+        update: { at: now, unobserved },
+      });
+    }
   }
 
   return delivered;
