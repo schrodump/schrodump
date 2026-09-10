@@ -933,6 +933,9 @@ api -o /dev/null -w '   channel %{http_code}\n' -X POST -H "$JSON" \
   -d "{\"kind\":\"WEBHOOK\",\"url\":\"http://${PROJECT}-jobhook:9998/hook\",\"secret\":\"a-signing-secret-long-enough\",\"deliverJobEvents\":true}" \
   "${BASE}/backend/notification-channels"
 
+# Counted before the backup, for the leak check below.
+unsubscribed_before="$(docker logs "${PROJECT}-hook" 2>&1 | grep -c "Idempotency-Key" || true)"
+
 api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policies/${policy}/backup"
 
 # PENDING, RUNNING and SUCCEEDED of one job, each with an idempotency key of its own. Distinct keys
@@ -941,7 +944,10 @@ api -o /dev/null -w '   enqueue %{http_code}\n' -X POST "${BASE}/backend/policie
 for attempt in $(seq 1 48); do
   sleep 5
   received="$(docker logs "${PROJECT}-jobhook" 2>&1)"
-  keys="$(printf '%s\n' "$received" | grep "JOB_STATE" | awk '{print $3}' | sort -u | wc -l | tr -d ' ')"
+  # `|| true`, like every other counting pipeline in this script: grep exits 1 when it matches
+  # nothing, and under `set -e` with `pipefail` that kills the run on the first pass — before a
+  # single event could have arrived — with no output at all.
+  keys="$(printf '%s\n' "$received" | grep "JOB_STATE" | awk '{print $3}' | sort -u | wc -l | tr -d ' ' || true)"
   [ "$keys" -ge 3 ] && { printf '   %s job events, each keyed distinctly, after %ss\n' "$keys" "$((attempt * 5))"; break; }
   [ "$attempt" -eq 48 ] && {
     printf '\n--- job sink ---\n%s\n' "$(printf '%s\n' "$received" | tail -20)" >&2
@@ -959,15 +965,24 @@ case "$received" in
 esac
 
 # Every one of them signed. An unsigned job event is something anyone on the network can forge.
-case "$(printf '%s\n' "$received" | grep -c "SINK-DELIVERY unsigned")" in
+case "$(printf '%s\n' "$received" | grep -c "SINK-DELIVERY unsigned" || true)" in
   0) printf '   every job event was signed\n' ;;
   *) fail "a job event arrived without a signature" ;;
 esac
 
-# And the channel from step 17, which never asked for job events, must not have received any.
-case "$(docker logs "${PROJECT}-hook" 2>&1)" in
-  *JOB_STATE*) fail "a channel that did not subscribe received the job firehose" ;;
-  *) printf '   the unsubscribed channel received none of them\n' ;;
-esac
+# And the channel from step 17, which never asked for job events, must not have received the
+# firehose — the half of "opt-in" that is easy to ship broken, and the half a unit test with a fake
+# client cannot prove, because what is being trusted here is a WHERE clause against the real column.
+#
+# Counted, not grepped for JOB_STATE: busybox nc answers from its own stdin and never writes the
+# body to its log, so a grep for the trigger name could not fail and would be coverage in
+# appearance only. Three transitions of one job move this by at least three; the threshold leaves
+# room for a fleet notification legitimately arriving in the same window.
+unsubscribed_after="$(docker logs "${PROJECT}-hook" 2>&1 | grep -c "Idempotency-Key" || true)"
+if [ "$((unsubscribed_after - unsubscribed_before))" -ge 3 ]; then
+  printf '\n--- unsubscribed listener ---\n%s\n' "$(docker logs "${PROJECT}-hook" 2>&1 | tail -20)" >&2
+  fail "a channel that did not subscribe received the job firehose (${unsubscribed_before} -> ${unsubscribed_after})"
+fi
+printf '   the unsubscribed channel received none of them\n' 
 
 printf '\nsmoke: the deployment we ship backed up postgres, mysql, mariadb and mongo in both execution modes it offers, verified every one by restoring it, restored four over live data — one of them a replica set whose oplog was replayed — rebuilt its catalog from the bucket, kept an artifact readable across a key rotation, dumped its own metadata database to escrow, pruned an expired backup without leaving part of it behind, delivered a signed notification to a listener that was really there, delivered an email to a relay whose certificate it had to be told to trust, and sent every state change of a job to the one channel that asked for them and to no other.\n'
