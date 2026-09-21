@@ -182,7 +182,11 @@ describe("runRestoreJob", () => {
     });
     const outcome = await runRestoreJob(REQ, h.ports);
     expect(outcome.ok).toBe(false);
-    expect(outcome.error).toMatch(/sealed|identity/i);
+    expect(outcome.error).toMatch(/sealed to the escrow key alone/i);
+    // It used to tell the operator to "supply an identity in memory" — a path that does not exist.
+    // The refusal says what does: a restore outside Schrodump, and where the procedure is.
+    expect(outcome.error).not.toMatch(/in memory/i);
+    expect(outcome.error).toMatch(/Restoring a sealed artefact/);
   });
 });
 
