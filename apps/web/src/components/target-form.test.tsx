@@ -23,7 +23,7 @@ const TWO_DATABASES: DiscoverResult = {
   failure: null,
   driverCode: null,
   databases: [
-    { name: "ipog_finance", sizeBytes: 9_896_000_000 },
+    { name: "acme_finance", sizeBytes: 9_896_000_000 },
     { name: "postgres", sizeBytes: 7_690_000 },
   ],
   isReplicaSet: false,
@@ -54,9 +54,9 @@ const createButton = () => screen.getByRole("button", { name: "Create target" })
 
 async function fillConnection(user: ReturnType<typeof userEvent.setup>, engine = "postgres") {
   await user.selectOptions(screen.getByLabelText("Engine"), engine);
-  await user.type(screen.getByLabelText("Name"), "IPOG 1");
-  await user.type(screen.getByLabelText("Host"), "ipog_database");
-  await user.type(screen.getByLabelText("Username"), "ipog");
+  await user.type(screen.getByLabelText("Name"), "Acme 1");
+  await user.type(screen.getByLabelText("Host"), "acme_database");
+  await user.type(screen.getByLabelText("Username"), "acme");
   await user.type(screen.getByLabelText("Password"), "s3cret");
 }
 
@@ -138,7 +138,7 @@ describe("TargetForm chooses the scope from what the server holds", () => {
     await fillConnection(user);
     await user.click(discoverButton());
 
-    const finance = await screen.findByLabelText(/ipog_finance/);
+    const finance = await screen.findByLabelText(/acme_finance/);
     expect(screen.getByText("9.2 GB")).toBeInTheDocument();
     expect(screen.getByLabelText(/^postgres/)).toHaveAccessibleName(/maintenance database/);
     expect(createButton()).toBeDisabled();
@@ -147,7 +147,7 @@ describe("TargetForm chooses the scope from what the server holds", () => {
     expect(createButton()).toBeEnabled();
     await user.click(createButton());
 
-    await waitFor(() => expect(createdScope()).toEqual(["ipog_finance"]));
+    await waitFor(() => expect(createdScope()).toEqual(["acme_finance"]));
   });
 
   it("postgres: choosing is a click, never a default — nothing is pre-selected", async () => {
@@ -156,22 +156,22 @@ describe("TargetForm chooses the scope from what the server holds", () => {
     const user = renderForm();
     await fillConnection(user);
     await user.click(discoverButton());
-    await screen.findByLabelText(/ipog_finance/);
+    await screen.findByLabelText(/acme_finance/);
 
     expect(createButton()).toBeDisabled();
   });
 
   it("postgres: a name carried from a URL that the server does not hold is dropped, not saved", async () => {
     const user = renderForm();
-    await user.type(urlField(), "postgres://ipog:s3cret@ipog_database/ipog_finnace");
+    await user.type(urlField(), "postgres://acme:s3cret@acme_database/acme_finnace");
     await user.click(fillButton());
-    await user.type(screen.getByLabelText("Name"), "IPOG 1");
+    await user.type(screen.getByLabelText("Name"), "Acme 1");
     await user.click(discoverButton());
-    await screen.findByLabelText(/ipog_finance/);
+    await screen.findByLabelText(/acme_finance/);
 
     // The typo is gone and nothing is picked: Save stays refused instead of saving a name that
     // pg_dump would fail on at 02:00.
-    expect(screen.queryByText(/ipog_finnace/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/acme_finnace/)).not.toBeInTheDocument();
     expect(createButton()).toBeDisabled();
   });
 
@@ -226,14 +226,14 @@ describe("TargetForm keeps a discovery honest about where it came from", () => {
     const user = renderForm();
     await fillConnection(user);
     await user.click(discoverButton());
-    await user.click(await screen.findByLabelText(/ipog_finance/));
+    await user.click(await screen.findByLabelText(/acme_finance/));
     expect(createButton()).toBeEnabled();
 
     await user.type(screen.getByLabelText("Host"), "-replica");
 
     expect(screen.getByText("The connection changed since discover ran.")).toBeInTheDocument();
-    expect(screen.getByText(/The list came from postgres ipog_database:5432 as ipog/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/ipog_finance/)).toBeNull();
+    expect(screen.getByText(/The list came from postgres acme_database:5432 as acme/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/acme_finance/)).toBeNull();
     expect(createButton()).toBeDisabled();
     expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/run discover and pick a scope/i);
   });
@@ -241,10 +241,10 @@ describe("TargetForm keeps a discovery honest about where it came from", () => {
   it("says why Save is blocked, in the order the operator would fix things", async () => {
     const user = renderForm();
     expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/name the target before saving/i);
-    await user.type(screen.getByLabelText("Name"), "IPOG 1");
+    await user.type(screen.getByLabelText("Name"), "Acme 1");
     expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a host is required/i);
     await user.type(screen.getByLabelText("Host"), "db");
-    await user.type(screen.getByLabelText("Username"), "ipog");
+    await user.type(screen.getByLabelText("Username"), "acme");
     expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/a password is required/i);
   });
 

@@ -9,7 +9,7 @@ const { Providers, RuledList, ColumnHeaders, StatusBadge, ListFooter } = window.
     <RuledList className="max-w-2xl">
       <ColumnHeaders gridClassName="grid grid-cols-4 items-center gap-3" columns={[{ key: "a", label: "Artifact" }, { key: "s", label: "State" }, { key: "z", label: "Size" }, { key: "w", label: "Written" }]} />
       <div className="grid grid-cols-4 items-center gap-3 border-b border-border px-[18px] py-2.5 text-sm">
-        <span className="font-mono text-xs">cmtuga00</span><StatusBadge state="UNOBSERVED" /><span className="font-mono text-xs text-muted-foreground">1.2 GB</span><span className="font-mono text-xs text-subtle-foreground">3 hours ago</span>
+        <span className="font-mono text-xs">cm7k2p0q</span><StatusBadge state="UNOBSERVED" /><span className="font-mono text-xs text-muted-foreground">1.2 GB</span><span className="font-mono text-xs text-subtle-foreground">3 hours ago</span>
       </div>
       <ListFooter shown={1} total={1284} />
     </RuledList>

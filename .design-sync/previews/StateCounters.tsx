@@ -7,7 +7,7 @@ const oldest = (
   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10.5px] tracking-[0.13em] uppercase text-subtle-foreground">
     <span>Oldest unverified</span>
     <span className="rounded-sm border border-state-unobserved-border bg-state-unobserved-soft px-2 py-0.5 tracking-[0.04em] normal-case text-state-unobserved">
-      6 days ago — IPOG Nexus / Stream
+      6 days ago — Acme Ledger / Stream
     </span>
   </div>
 );

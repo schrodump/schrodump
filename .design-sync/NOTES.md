@@ -20,6 +20,6 @@ Repo-specific facts a re-sync needs. `config.json` holds the values; this file h
 
 - `cfg.dtsPropsFor` inlines domain unions by hand — a change to `ARTIFACT_STATES`, `JOB_STATES`, `VERIFY_LEVELS`, `PROBE_FAILURE_CODES` or a component's props in `apps/web/src/lib/domain.ts` / the ui files must be mirrored there, or the `.d.ts` the design agent reads goes stale.
 - `DS_SURFACE` in `prepare.mjs` is a hand list: a new reusable component in `apps/web/src/components/` is invisible until added (ui/ files are picked up automatically).
-- Previews carry copy and numbers that mimic real screens (IPOG Nexus, cmtuga00, 1,284 artifacts); they are illustrative, not data.
+- Previews carry copy and numbers that mimic real screens (Acme Ledger, cm7k2p0q, 1,284 artifacts); they are illustrative, not data.
 - The safelisted utility families in `tailwind.css` are a curated set; a design that needs a class outside them renders unstyled for that class.
 - Verified on node 24 + the app's pinned Tailwind/TypeScript; a Tailwind major bump changes the compiled class set.

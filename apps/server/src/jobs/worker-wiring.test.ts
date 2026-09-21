@@ -645,14 +645,14 @@ describe("VERIFY_INCONCLUSIVE_LOG", () => {
 });
 
 // On a real deployment an unscoped postgres target backed up `postgres` — the maintenance database,
-// 7.5 MB of catalogs — while `ipog_finance`, 9.4 GB, sat beside it untouched. The job was SUCCEEDED,
+// 7.5 MB of catalogs — while `acme_finance`, 9.4 GB, sat beside it untouched. The job was SUCCEEDED,
 // the artifact was 876 bytes, and the row said "9.4 GB" because sizeRawBytes was the probe's
 // server-wide estimate. Only a FULL_RESTORE verify caught it; the default CHECKSUM would not have.
 describe("postgresUnscopedAlternatives", () => {
-  const found = ["ipog_finance", "postgres"];
+  const found = ["acme_finance", "postgres"];
 
   it("names the databases an unscoped postgres target would silently leave behind", () => {
-    expect(postgresUnscopedAlternatives("postgres", [], "postgres", found)).toEqual(["ipog_finance"]);
+    expect(postgresUnscopedAlternatives("postgres", [], "postgres", found)).toEqual(["acme_finance"]);
   });
 
   it("is empty when the maintenance database is the only one, because then it is where the data lives", () => {
@@ -660,7 +660,7 @@ describe("postgresUnscopedAlternatives", () => {
   });
 
   it("never second-guesses an explicit scope", () => {
-    expect(postgresUnscopedAlternatives("postgres", ["ipog_finance"], "ipog_finance", found)).toEqual([]);
+    expect(postgresUnscopedAlternatives("postgres", ["acme_finance"], "acme_finance", found)).toEqual([]);
   });
 
   it("respects an explicit `postgres` too — naming it is a decision, defaulting to it is not", () => {
@@ -668,7 +668,7 @@ describe("postgresUnscopedAlternatives", () => {
   });
 
   it("treats an empty-string scope entry as unscoped, the same way originDatabaseFor does", () => {
-    expect(postgresUnscopedAlternatives("postgres", [""], "postgres", found)).toEqual(["ipog_finance"]);
+    expect(postgresUnscopedAlternatives("postgres", [""], "postgres", found)).toEqual(["acme_finance"]);
   });
 
   it("stays out of the other engines, whose dump tools copy everything the probe found", () => {
@@ -719,7 +719,7 @@ describe("buildDumpDescriptorFor", () => {
 
     let thrown: unknown;
     try {
-      build("STREAM", 1, probe(["ipog_finance", "postgres"]));
+      build("STREAM", 1, probe(["acme_finance", "postgres"]));
     } catch (error) {
       thrown = error;
     }
@@ -729,7 +729,7 @@ describe("buildDumpDescriptorFor", () => {
     // operator exactly as uninformed as the silent default did.
     expect(thrown).toBeInstanceOf(EngineDescriptorError);
     expect((thrown as EngineDescriptorError).code).toBe("POSTGRES_SCOPE_REQUIRED");
-    expect((thrown as Error).message).toMatch(/ipog_finance/);
+    expect((thrown as Error).message).toMatch(/acme_finance/);
     expect((thrown as Error).message).toMatch(/maintenance database/);
     expect((thrown as Error).message).toMatch(/scope/);
     expect(calls).toHaveLength(0);
@@ -742,14 +742,14 @@ describe("buildDumpDescriptorFor", () => {
     const build = buildDumpDescriptorFor({
       adapter,
       engine: "postgres",
-      connection: connection("ipog_finance"),
-      scopedDatabases: ["ipog_finance"],
+      connection: connection("acme_finance"),
+      scopedDatabases: ["acme_finance"],
       scopedSchemas: [],
       facts,
       stagingPathFor: () => undefined,
     });
 
-    build("STREAM", 1, probe(["ipog_finance"], ["public", "audit"]));
+    build("STREAM", 1, probe(["acme_finance"], ["public", "audit"]));
 
     expect(calls).toHaveLength(1);
     expect((calls[0] as { scope: { schemas: string[] } }).scope.schemas).toEqual([]);
@@ -760,19 +760,19 @@ describe("buildDumpDescriptorFor", () => {
     const build = buildDumpDescriptorFor({
       adapter,
       engine: "postgres",
-      connection: connection("ipog_finance"),
-      scopedDatabases: ["ipog_finance"],
+      connection: connection("acme_finance"),
+      scopedDatabases: ["acme_finance"],
       scopedSchemas: [],
       facts,
       stagingPathFor: () => "/scratch/job-1",
     });
-    const found = probe(["ipog_finance", "postgres"]);
+    const found = probe(["acme_finance", "postgres"]);
 
     build("STREAM", 1, found);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      connection: connection("ipog_finance"),
+      connection: connection("acme_finance"),
       executionMode: "STREAM",
       parallelism: 1,
       scope: found.scope,
@@ -786,14 +786,14 @@ describe("buildDumpDescriptorFor", () => {
     const build = buildDumpDescriptorFor({
       adapter,
       engine: "postgres",
-      connection: connection("ipog_finance"),
-      scopedDatabases: ["ipog_finance"],
+      connection: connection("acme_finance"),
+      scopedDatabases: ["acme_finance"],
       scopedSchemas: [],
       facts,
       stagingPathFor: () => "/scratch/job-1",
     });
 
-    build("STAGED", 4, probe(["ipog_finance"]));
+    build("STAGED", 4, probe(["acme_finance"]));
 
     expect(calls[0]).toMatchObject({ executionMode: "STAGED", parallelism: 4, stagingPath: "/scratch/job-1" });
   });

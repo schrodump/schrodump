@@ -11,7 +11,7 @@ export function ArtifactFacts() {
           { label: "Destination", value: "Cloudflare R2" },
           { label: "Created", value: "Sep 9, 2026, 3:46 PM" },
           { label: "Last verified", value: "2 hours ago", tone: "verified" },
-          { label: "Bucket key", value: "org/ipog-nexus/2026-09-09T18-46-12.archive" },
+          { label: "Bucket key", value: "org/acme-ledger/2026-09-09T18-46-12.archive" },
           { label: "Checksum", value: "sha256 · 9f3c…e1a0" },
           { label: "Restore verified", value: null },
         ]}

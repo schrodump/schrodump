@@ -11,8 +11,8 @@ function Gate({ initial }: { initial: string }) {
       <RetypeToConfirm
         id={`confirm-${initial || "empty"}`}
         label="Type the artifact id to confirm"
-        hint="cmtuga00"
-        subject="cmtuga00"
+        hint="cm7k2p0q"
+        subject="cm7k2p0q"
         value={value}
         onChange={setValue}
         mismatch="That is not this artifact's id."
@@ -30,5 +30,5 @@ export function Mismatch() {
 }
 
 export function Match() {
-  return <Gate initial="cmtuga00" />;
+  return <Gate initial="cm7k2p0q" />;
 }
