@@ -37,6 +37,9 @@ export interface StartedContainer {
   readonly stderr: Readable;
   wait(): Promise<number>; // container StatusCode
   kill(): Promise<void>;
+  // Force-remove, together with the container's anonymous volumes (see CONTAINER_REMOVE_OPTIONS).
+  // Takes no options on purpose: the engine decides how a container is removed, so no caller can
+  // get it half right.
   remove(): Promise<void>;
 }
 
@@ -45,7 +48,7 @@ export interface StartedContainer {
 export interface StartedService {
   readonly host: string; // in-network address of the container
   exec(command: string[]): Promise<number>; // runs command in the container, returns exit code
-  remove(): Promise<void>; // force-remove
+  remove(): Promise<void>; // force-remove, anonymous volumes included — same as StartedContainer
 }
 
 export interface DockerEngine {
@@ -203,7 +206,8 @@ export class DockerRunner implements Runner {
       // blocks forever on a stream that will never close. Runs BEFORE the removal so a removal that
       // HANGS cannot skip it. A no-op once the pipeline already ended the sink.
       endStdout(opts.stdout);
-      // Manual removal (never AutoRemove) so exit code and stderr are read first.
+      // Manual removal (never AutoRemove) so exit code and stderr are read first. The engine takes
+      // the container's anonymous volumes with it — see CONTAINER_REMOVE_OPTIONS.
       await container.remove().catch(() => undefined);
     }
   }
@@ -239,7 +243,8 @@ export class DockerRunner implements Runner {
       return await use({ host: svc.host, port: spec.port });
     } finally {
       // Manual removal (never AutoRemove), mirroring run(): always torn down, even if `use` threw
-      // or readiness never arrived.
+      // or readiness never arrived — and with its anonymous volume, which by now holds the restored
+      // database in clear.
       await svc.remove().catch(() => undefined);
     }
   }
@@ -435,6 +440,34 @@ export function serviceCreateOptions(spec: EphemeralServiceSpec): Docker.Contain
   };
 }
 
+// How every container this runner creates is removed — executors and sandboxes alike, on every
+// path, and by nothing else.
+//
+// `force` stops the container first. `v` is the half that is not obvious, and the one that matters.
+// Executors and the verify sandbox run the stock engine images (postgres:<major>-alpine, mysql:8.0,
+// mariadb:11, mongo:8), and every one of them declares a `VOLUME` for its data directory:
+// /var/lib/postgresql/data (/var/lib/postgresql from 18), /var/lib/mysql, /data/db and
+// /data/configdb. Nothing is mounted over those paths, so Docker satisfies each one with an
+// ANONYMOUS volume created alongside the container — and `DELETE /containers/{id}` leaves that
+// volume behind unless `v` is set.
+//
+// For a FULL_RESTORE verify that volume IS the restored database. On a live stack three verifies
+// left three dangling volumes, each a complete PostgreSQL data directory (pg_wal, postgresql.conf,
+// postmaster.pid), in clear under /var/lib/docker/volumes, kept forever: a daily verify of a 50 GB
+// database fills the host in days, and every backup that was encrypted before it left the host also
+// existed unencrypted on it. Dump executors built from the same images left an empty one per run.
+//
+// `v` removes ANONYMOUS volumes only. A bind mount (the scratch directory) and a named volume are
+// never touched, so this cannot reach anything the operator owns.
+export const CONTAINER_REMOVE_OPTIONS = { force: true, v: true } as const;
+
+// The one place the option is applied. The engine below removes containers from four sites — each
+// handle's remove(), and each engine method's reap of a container that was created but failed to
+// start — and a flag that has to be repeated at every site is a flag that gets forgotten at one.
+function removeWithVolumes(container: Docker.Container): Promise<unknown> {
+  return container.remove({ ...CONTAINER_REMOVE_OPTIONS });
+}
+
 class DockerodeEngine implements DockerEngine {
   readonly #docker: Docker;
 
@@ -469,31 +502,40 @@ class DockerodeEngine implements DockerEngine {
 
   async start(spec: ContainerSpec): Promise<StartedContainer> {
     const container = await this.#docker.createContainer(executorCreateOptions(spec));
-    // Read-only attach: stdout/stderr only, no stdin. Feeding a container's stdin needs a hijacked
-    // attach whose demux intermittently leaks attach-protocol framing into the stdout stream —
-    // corrupting it. No executor needs stdin (dumps read from the DB, restores read a mounted file).
-    const attachStream = await container.attach({ stream: true, stdout: true, stderr: true });
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    // demuxStream does `streama.on("data", ...)` and then `stdout.write(content)` WITHOUT reading
-    // the return value and without ever pausing its source. So the container's output arrives as
-    // fast as the socket delivers it and every byte is queued, whatever the consumer is doing.
-    //
-    // For a dump that is the whole backup. When the upload to object storage is slower than the
-    // database can be read — routinely true — the difference accumulates in this PassThrough, in
-    // memory, unbounded. Measured on a production MongoDB: 46 GB read, 1.4 GB uploaded, and the
-    // server holding 74 GiB of a 125 GiB host.
-    //
-    // The sink below is what demuxStream writes into instead. It forwards each chunk on and, when
-    // the destination says it is full, pauses the attach — which stops reading the socket, which
-    // is what finally reaches the container and makes `mongodump` wait. Resumed on drain.
-    demuxInto(container.modem, attachStream, stdout, stderr);
-    attachStream.on("end", () => {
-      stdout.end();
-      stderr.end();
-    });
 
-    await container.start();
+    // Once createContainer succeeds the container exists — and so does the anonymous volume Docker
+    // made for the image's VOLUME — so a failed attach or start must reap it here, as startService
+    // does: run() only gets a handle to remove on the RETURN path.
+    try {
+      // Read-only attach: stdout/stderr only, no stdin. Feeding a container's stdin needs a hijacked
+      // attach whose demux intermittently leaks attach-protocol framing into the stdout stream —
+      // corrupting it. No executor needs stdin (dumps read from the DB, restores read a mounted file).
+      const attachStream = await container.attach({ stream: true, stdout: true, stderr: true });
+      // demuxStream does `streama.on("data", ...)` and then `stdout.write(content)` WITHOUT reading
+      // the return value and without ever pausing its source. So the container's output arrives as
+      // fast as the socket delivers it and every byte is queued, whatever the consumer is doing.
+      //
+      // For a dump that is the whole backup. When the upload to object storage is slower than the
+      // database can be read — routinely true — the difference accumulates in this PassThrough, in
+      // memory, unbounded. Measured on a production MongoDB: 46 GB read, 1.4 GB uploaded, and the
+      // server holding 74 GiB of a 125 GiB host.
+      //
+      // The sink below is what demuxStream writes into instead. It forwards each chunk on and, when
+      // the destination says it is full, pauses the attach — which stops reading the socket, which
+      // is what finally reaches the container and makes `mongodump` wait. Resumed on drain.
+      demuxInto(container.modem, attachStream, stdout, stderr);
+      attachStream.on("end", () => {
+        stdout.end();
+        stderr.end();
+      });
+
+      await container.start();
+    } catch (err) {
+      await removeWithVolumes(container).catch(() => undefined);
+      throw err;
+    }
 
     return {
       stdout,
@@ -506,7 +548,7 @@ class DockerodeEngine implements DockerEngine {
         await container.kill();
       },
       remove: async () => {
-        await container.remove({ force: true });
+        await removeWithVolumes(container);
       },
     };
   }
@@ -522,7 +564,7 @@ class DockerodeEngine implements DockerEngine {
       await container.start();
       info = await container.inspect();
     } catch (err) {
-      await container.remove({ force: true }).catch(() => undefined);
+      await removeWithVolumes(container).catch(() => undefined);
       throw err;
     }
 
@@ -547,8 +589,10 @@ class DockerodeEngine implements DockerEngine {
         const { ExitCode } = await dockerExec.inspect();
         return ExitCode ?? 1;
       },
+      // The sandbox's anonymous volume is the restored database, in clear. It goes with the
+      // container or it stays on the host for good.
       remove: async () => {
-        await container.remove({ force: true });
+        await removeWithVolumes(container);
       },
     };
   }

@@ -18,6 +18,7 @@ rather than the software's.
 | The bucket + artefact keys  | Your data                                          |
 | The bucket alone            | Encrypted artefacts and their sizes and timing     |
 | The scratch volume mid-job  | One database dump, in clear                        |
+| A sandbox volume mid-verify | The restored database, in clear                    |
 
 ## The Docker socket is the most critical asset
 
@@ -136,6 +137,34 @@ Schrodump sweeps abandoned scratch directories at boot and periodically.
 > mid-cleanup. The executor was orphaned, the cleartext scratch survived, and the job stayed
 > `RUNNING`. Measured both ways on the same build: a single signal completed the shutdown in 86ms;
 > two never completed it at all.
+
+### A verify's sandbox holds it too, and goes with its container
+
+A `FULL_RESTORE` verify restores the artefact into a throwaway database server started from the
+stock engine image (`postgres:<major>-alpine`, `mysql:8.0`, `mariadb:11`, `mongo:8`). Those images
+declare a `VOLUME` for their data directory, so the restored database is written to an **anonymous
+Docker volume** under Docker's data root (`/var/lib/docker/volumes` by default) — not to the scratch
+directory, and in `STREAM` mode as much as in `STAGED`. For as long as the verify runs, that volume
+is a complete, unencrypted copy of your database.
+
+It is deleted with the container. Every container Schrodump creates — dump executors and verify
+sandboxes, on success, failure, timeout and abort alike — is removed together with its anonymous
+volumes (`docker rm -fv`; `v=true` in the API). **It was not always.** Removal used to pass `force`
+alone, which stops the container and keeps its anonymous volumes: on a live stack three verifies
+left three dangling volumes, each a complete PostgreSQL data directory, kept indefinitely. A daily
+verify of a 50 GB database fills a host in days that way, and every artefact that was encrypted
+before it left the host also existed in clear on it. Upgrading does not clean up what an earlier
+version left behind — `docker volume ls -f dangling=true` lists the candidates, but it lists every
+unreferenced volume on the host, not only Schrodump's, so inspect before you remove.
+
+Your responsibilities are the scratch directory's, applied to Docker's data root:
+
+- Put Docker's data root on an **encrypted filesystem** as well.
+- Leave it room for the largest database you verify, restored — uncompressed, indexes included.
+
+**Known limitation.** A `SIGKILL` of the server mid-verify skips the teardown, and nothing sweeps
+containers today: the sandbox keeps **running**, volume and all. It is a stock engine image
+attached to `EXECUTOR_NETWORK`; remove it with `docker rm -fv`.
 
 ## The session cookie is the operator, and HTTP gives it away
 
@@ -286,7 +315,9 @@ Dumps run in ephemeral containers, one per job, built from the target's own majo
   floats changes how backups are produced without anyone deciding it.
 - Passwords never reach `argv` — an argument list is readable by any process on the host. They go
   through the environment or a mounted config file, depending on what the tool supports.
-- Executors join a restricted network and mount nothing but the staging directory they need.
+- Executors join a restricted network and mount nothing but the staging directory they need —
+  plus the anonymous volume Docker creates for any `VOLUME` their image declares, which is
+  removed with the container ([above](#a-verifys-sandbox-holds-it-too-and-goes-with-its-container)).
 - They do not run as an unprivileged user, deliberately: they read and write a staging directory
   whose ownership the server controls, and forcing a different uid would break those writes rather
   than contain anything. Containment comes from the container being ephemeral, having no socket

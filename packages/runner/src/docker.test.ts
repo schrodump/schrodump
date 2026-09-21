@@ -3,11 +3,13 @@
 
 import { PassThrough, Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import type Docker from "dockerode";
 import { describe, expect, it } from "vitest";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import {
   DockerRunner,
+  createDockerRunner,
   demuxInto,
   executorCreateOptions,
   sanitizeStderr,
@@ -360,8 +362,8 @@ describe("DockerRunner.withEphemeralService", () => {
       new DockerRunner(engine).withEphemeralService(SERVICE_SPEC, async () => "x"),
     ).rejects.toMatchObject({ code: "RUNNER_NETWORK_MISSING" });
     // No container is created when the pre-flight fails — startService is never reached, so nothing
-    // can leak. (The internal force-remove-on-throw inside DockerodeEngine.startService is
-    // real-Docker-only; not unit-tested here.)
+    // can leak. (The force-remove-on-throw inside DockerodeEngine.startService is covered against a
+    // fake daemon under "removal takes the container's anonymous volumes with it", below.)
     expect(engine.startServiceCalled).toBe(false);
   });
 
@@ -498,6 +500,224 @@ describe("container create options", () => {
 
     expect(log?.Type).toBe("json-file");
     expect(log?.Config).toEqual({ "max-size": "10m", "max-file": "1" });
+  });
+});
+
+// The slice of dockerode the real engine calls, faked. FakeEngine above replaces the engine
+// wholesale, so it can only ever say THAT a container was removed — never with which options. The
+// defect below lived in exactly that gap, so these tests drive the real engine, through
+// createDockerRunner, against a daemon that records what every removal carried.
+interface FakeDaemonContainer {
+  readonly removals: unknown[];
+}
+
+class FakeDaemon {
+  readonly created: FakeDaemonContainer[] = [];
+  // The executor's process: exits by itself with statusCode, or runs until it is killed.
+  exitsByItself = true;
+  statusCode = 0;
+  // A start the daemon refuses AFTER the create succeeded — the container, and its anonymous
+  // volume, already exist by then.
+  startFails = false;
+  // What the sandbox's readiness probe exits with; anything but 0 means "not ready yet".
+  readinessExitCode = 0;
+
+  getNetwork(): { inspect(): Promise<unknown> } {
+    return { inspect: () => Promise.resolve({}) };
+  }
+
+  getImage(): { inspect(): Promise<unknown> } {
+    return { inspect: () => Promise.resolve({}) };
+  }
+
+  createContainer(options: Docker.ContainerCreateOptions): Promise<unknown> {
+    const record: FakeDaemonContainer = { removals: [] };
+    this.created.push(record);
+    const attach = new PassThrough();
+    let exit: (code: number) => void = () => undefined;
+    const exited = new Promise<number>((resolve) => {
+      exit = resolve;
+    });
+    // The process ending closes the attach, which is what ends the executor's stdout in start().
+    const stop = (code: number): void => {
+      if (!attach.writableEnded) attach.end();
+      exit(code);
+    };
+    const network = options.HostConfig?.NetworkMode ?? "";
+
+    return Promise.resolve({
+      modem: {
+        demuxStream(source: NodeJS.ReadableStream, out: Writable) {
+          source.on("data", (chunk: Buffer) => out.write(chunk));
+        },
+      },
+      attach: () => Promise.resolve(attach),
+      start: () => {
+        if (this.startFails) return Promise.reject(new Error("bind source path does not exist"));
+        if (this.exitsByItself) stop(this.statusCode);
+        return Promise.resolve();
+      },
+      wait: async () => ({ StatusCode: await exited }),
+      kill: () => {
+        stop(137);
+        return Promise.resolve();
+      },
+      inspect: () =>
+        Promise.resolve({
+          Name: "/sandbox",
+          NetworkSettings: { Networks: { [network]: { IPAddress: "172.18.0.9" } } },
+        }),
+      exec: () =>
+        Promise.resolve({
+          start: () => Promise.resolve(Readable.from([])),
+          inspect: () => Promise.resolve({ ExitCode: this.readinessExitCode }),
+        }),
+      remove: (removeOptions?: unknown) => {
+        record.removals.push(removeOptions);
+        stop(137);
+        return Promise.resolve();
+      },
+    });
+  }
+}
+
+function runnerOn(daemon: FakeDaemon): DockerRunner {
+  return createDockerRunner(daemon as unknown as Docker);
+}
+
+// Observed on a live stack: after three FULL_RESTORE verifies, three dangling Docker volumes, each a
+// complete PostgreSQL data directory — pg_wal, postgresql.conf, postmaster.pid — in clear under
+// /var/lib/docker/volumes, and nothing that would ever delete them. The stock engine images declare
+// a VOLUME for their data directory, nothing is mounted over it, so Docker creates an anonymous
+// volume with the container; `remove({ force: true })` stops the container and leaves the volume.
+// For the sandbox that volume is the restored database. A daily verify of a 50 GB database fills
+// the host in days, and every verified backup also existed unencrypted on it.
+//
+// The expectation is written out literally rather than imported: asserting against the exported
+// constant would stay green with `v` deleted from it, which is the one mutation that matters.
+describe("removal takes the container's anonymous volumes with it", () => {
+  const WITH_ITS_VOLUMES = { force: true, v: true };
+
+  function removedWithItsVolumes(daemon: FakeDaemon): void {
+    expect(daemon.created).toHaveLength(1);
+    expect(daemon.created[0]?.removals).toEqual([WITH_ITS_VOLUMES]);
+  }
+
+  describe("an executor", () => {
+    it("after a clean exit", async () => {
+      const daemon = new FakeDaemon();
+
+      const result = await runnerOn(daemon).run(DESCRIPTOR, opts());
+
+      expect(result.exitCode).toBe(0);
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the dump or restore it ran failed", async () => {
+      const daemon = new FakeDaemon();
+      daemon.statusCode = 1;
+
+      const result = await runnerOn(daemon).run(DESCRIPTOR, opts());
+
+      expect(result.exitCode).toBe(1);
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the run times out", async () => {
+      const daemon = new FakeDaemon();
+      daemon.exitsByItself = false;
+
+      await expect(runnerOn(daemon).run(DESCRIPTOR, opts({ timeoutMs: 30 }))).rejects.toMatchObject(
+        { code: "RUNNER_TIMEOUT" },
+      );
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the run is aborted by shutdown", async () => {
+      const daemon = new FakeDaemon();
+      daemon.exitsByItself = false;
+      const controller = new AbortController();
+
+      const run = runnerOn(daemon).run(DESCRIPTOR, opts({ signal: controller.signal }));
+      await flushMicrotasks();
+      controller.abort(new Error("shutdown"));
+
+      await expect(run).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the daemon created it but refused to start it", async () => {
+      // run() only gets a handle to remove on the return path, so this one has to be reaped inside
+      // the engine — and until this fix it was not reaped at all.
+      const daemon = new FakeDaemon();
+      daemon.startFails = true;
+
+      await expect(runnerOn(daemon).run(DESCRIPTOR, opts())).rejects.toMatchObject({
+        code: "RUNNER_FAILED",
+      });
+      removedWithItsVolumes(daemon);
+    });
+  });
+
+  describe("a verify sandbox", () => {
+    it("after the restore it hosted", async () => {
+      const daemon = new FakeDaemon();
+
+      const host = await runnerOn(daemon).withEphemeralService(SERVICE_SPEC, async (h) => h.host);
+
+      expect(host).toBe("172.18.0.9");
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the restore inside it failed", async () => {
+      const daemon = new FakeDaemon();
+
+      await expect(
+        runnerOn(daemon).withEphemeralService(SERVICE_SPEC, () =>
+          Promise.reject(new Error("pg_restore: error: could not execute query")),
+        ),
+      ).rejects.toThrow("pg_restore");
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when it never became ready", async () => {
+      const daemon = new FakeDaemon();
+      daemon.readinessExitCode = 1;
+
+      await expect(
+        runnerOn(daemon).withEphemeralService({ ...SERVICE_SPEC, readinessTimeoutMs: 50 }, () =>
+          Promise.resolve("unused"),
+        ),
+      ).rejects.toMatchObject({ code: "RUNNER_SERVICE_NOT_READY" });
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the verify is aborted by shutdown", async () => {
+      const daemon = new FakeDaemon();
+      daemon.readinessExitCode = 1; // never ready on its own — only the abort ends it
+      const controller = new AbortController();
+
+      const verify = runnerOn(daemon).withEphemeralService(
+        SERVICE_SPEC,
+        () => Promise.resolve("unused"),
+        { signal: controller.signal },
+      );
+      await flushMicrotasks();
+      controller.abort(new Error("shutdown"));
+
+      await expect(verify).rejects.toMatchObject({ code: "RUNNER_ABORTED" });
+      removedWithItsVolumes(daemon);
+    });
+
+    it("when the daemon created it but refused to start it", async () => {
+      const daemon = new FakeDaemon();
+      daemon.startFails = true;
+
+      await expect(
+        runnerOn(daemon).withEphemeralService(SERVICE_SPEC, () => Promise.resolve("unused")),
+      ).rejects.toThrow("bind source path does not exist");
+      removedWithItsVolumes(daemon);
+    });
   });
 });
 
