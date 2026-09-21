@@ -15,13 +15,13 @@ import { TargetRow } from "./page";
 
 const base: Target = {
   id: "t1",
-  name: "IPOG 1",
+  name: "Acme 1",
   engine: "postgres",
   host: "db.internal",
   port: 5432,
   username: "backup",
   tls: false,
-  scope: { databases: ["ipog_finance"], schemas: [], collections: [] },
+  scope: { databases: ["acme_finance"], schemas: [], collections: [] },
   createdAt: "2026-01-01T00:00:00.000Z",
   lastProbeAt: null,
   lastProbeOk: null,
@@ -43,7 +43,7 @@ function wrap(node: ReactNode) {
 describe("TargetRow", () => {
   it("shows the scope it backs up", () => {
     wrap(<TargetRow target={base} />);
-    expect(screen.getByText("Scope: ipog_finance")).toBeInTheDocument();
+    expect(screen.getByText("Scope: acme_finance")).toBeInTheDocument();
   });
 
   it("says 'whole instance' when nothing is scoped, never a blank", () => {

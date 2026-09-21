@@ -548,7 +548,7 @@ an admin-creation link, and an old log line stops working after an hour.
   database** (`postgresUnscopedAlternatives`, applied in `buildDumpDescriptorFor`,
   `jobs/worker-wiring.ts`). `pg_dump` copies exactly one database — the one the connection is open
   to — and an unscoped target connects to `postgres`. On a real deployment that turned a 9.4 GB
-  `ipog_finance` into an 876-byte artifact under a `SUCCEEDED` job, and the row read "9.4 GB"
+  `acme_finance` into an 876-byte artifact under a `SUCCEEDED` job, and the row read "9.4 GB"
   because `sizeRawBytes` was the probe's server-wide estimate. Only a `FULL_RESTORE` verify caught
   it; the default `CHECKSUM` would have made it `VERIFIED`. The refusal is an `EngineDescriptorError`
   (the class `backup.ts` writes verbatim into `BackupJob.reason`) naming the databases left behind,

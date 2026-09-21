@@ -8,7 +8,7 @@ const noop = () => undefined;
 export function Closed() {
   return (
     <div className="flex max-w-xs justify-end">
-      <AccountMenu email="ana.ribeiro@ipog.edu.br" onSignOut={noop} />
+      <AccountMenu email="operator@example.com" onSignOut={noop} />
     </div>
   );
 }

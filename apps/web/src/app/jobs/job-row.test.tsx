@@ -54,9 +54,9 @@ describe("JobRow says what the job is about", () => {
 
   it("does not print the same name twice when the policy is named after its target", () => {
     // The common case, and the reason this is not just two unconditional spans: a row reading
-    // "IPOG 1  IPOG 1" looks like a rendering bug rather than like information.
-    renderRow({ ...base, targetName: "IPOG 1", policyName: "IPOG 1" });
-    expect(screen.getAllByText(/IPOG 1/)).toHaveLength(1);
+    // "Acme 1  Acme 1" looks like a rendering bug rather than like information.
+    renderRow({ ...base, targetName: "Acme 1", policyName: "Acme 1" });
+    expect(screen.getAllByText(/Acme 1/)).toHaveLength(1);
   });
 
   it("renders a job whose policy is gone without inventing a name for it", () => {

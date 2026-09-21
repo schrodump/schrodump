@@ -195,10 +195,10 @@ describe("testTargetConnection reports what the server holds", () => {
   const rich: ProbeResult = {
     serverVersionNum: 170_011,
     databases: [
-      { name: "ipog_finance", sizeBytes: 9_896_000_000 },
+      { name: "acme_finance", sizeBytes: 9_896_000_000 },
       { name: "postgres", sizeBytes: 7_690_000 },
     ],
-    scope: { databases: ["ipog_finance", "postgres"], schemas: [], collections: [] },
+    scope: { databases: ["acme_finance", "postgres"], schemas: [], collections: [] },
     facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
   };
 

@@ -6,7 +6,7 @@ import { ColumnHeaders, GroupHeader, ListFooter, RuledList, StatusBadge } from "
 const GRID = "grid grid-cols-[1.4fr_1fr_0.8fr_0.8fr] items-center gap-3";
 
 const ROWS = [
-  { id: "cmtuga00", target: "IPOG Nexus", state: "UNOBSERVED", size: "1.2 GB", age: "3 hours ago" },
+  { id: "cm7k2p0q", target: "Acme Ledger", state: "UNOBSERVED", size: "1.2 GB", age: "3 hours ago" },
   { id: "cmtufy2z", target: "Billing", state: "VERIFIED", size: "412 MB", age: "yesterday" },
   { id: "cmtu9k1p", target: "Warehouse", state: "FAILED", size: "876 B", age: "2 days ago" },
 ] as const;

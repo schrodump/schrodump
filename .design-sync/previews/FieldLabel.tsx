@@ -7,7 +7,7 @@ export function OverAnInput() {
   return (
     <div className="max-w-sm space-y-1.5">
       <FieldLabel htmlFor="host">Host</FieldLabel>
-      <Input id="host" defaultValue="db.ipog.internal" />
+      <Input id="host" defaultValue="db.acme.internal" />
     </div>
   );
 }

@@ -9,7 +9,7 @@ export function SignIn() {
       <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
         <div className="space-y-1.5">
           <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input id="email" type="email" autoComplete="username" defaultValue="ops@ipog.edu.br" />
+          <Input id="email" type="email" autoComplete="username" defaultValue="ops@example.com" />
         </div>
         <div className="space-y-1.5">
           <FieldLabel htmlFor="password">Password</FieldLabel>

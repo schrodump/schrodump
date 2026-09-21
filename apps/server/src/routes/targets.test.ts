@@ -41,7 +41,7 @@ const DISCOVERED: TestConnectionResult = {
   failure: null,
   driverCode: null,
   databases: [
-    { name: "ipog_finance", sizeBytes: 9_896_000_000 },
+    { name: "acme_finance", sizeBytes: 9_896_000_000 },
     { name: "postgres", sizeBytes: 7_690_000 },
   ],
   isReplicaSet: false,
@@ -252,7 +252,7 @@ describe("targets — the recorded probe travels to the client", () => {
 });
 
 // On a real deployment an unscoped postgres target dumped `postgres` — the maintenance database —
-// while `ipog_finance`, 9.4 GB, sat beside it. The dump-time guard (worker-wiring) is the second
+// while `acme_finance`, 9.4 GB, sat beside it. The dump-time guard (worker-wiring) is the second
 // lock; this is the first, and the cheaper one: a target that cannot back up what it means cannot
 // be created.
 describe("scopeProblem", () => {
@@ -262,7 +262,7 @@ describe("scopeProblem", () => {
     expect(scopeProblem("postgres", scope())).toMatch(/exactly one database/);
     expect(scopeProblem("postgres", scope())).toMatch(/maintenance database/);
     expect(scopeProblem("postgres", scope("a", "b"))).toMatch(/one target per database/);
-    expect(scopeProblem("postgres", scope("ipog_finance"))).toBeNull();
+    expect(scopeProblem("postgres", scope("acme_finance"))).toBeNull();
   });
 
   it("lets a mongodb target name none (whole instance) or one, never several", () => {
@@ -333,7 +333,7 @@ describe("PATCH /targets/:id applies the same rule, reading the engine off the r
     const res = await app.inject({
       method: "PATCH",
       url: "/targets/t1",
-      payload: { scope: { databases: ["ipog_finance"], schemas: [], collections: [] } },
+      payload: { scope: { databases: ["acme_finance"], schemas: [], collections: [] } },
     });
     expect(res.statusCode).toBe(200);
     await app.close();
@@ -375,7 +375,7 @@ describe("POST /targets/discover", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json<TestConnectionResult>().databases.map((d) => d.name)).toEqual([
-      "ipog_finance",
+      "acme_finance",
       "postgres",
     ]);
     expect(created).toBe(0);

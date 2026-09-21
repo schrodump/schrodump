@@ -4,8 +4,8 @@
 import { VerdictPanel } from "@schrodump/web";
 
 const databases = [
-  { name: "ipog_finance", sizeBytes: 9_446_000_000 },
-  { name: "ipog_nexus", sizeBytes: 1_288_000_000 },
+  { name: "acme_finance", sizeBytes: 9_446_000_000 },
+  { name: "acme_ledger", sizeBytes: 1_288_000_000 },
   { name: "postgres", sizeBytes: 8_400_000 },
 ];
 
@@ -14,7 +14,7 @@ export function Connected() {
     <div className="max-w-xl">
       <VerdictPanel
         result={{ ok: true, serverVersionNum: 160_002, failure: null, driverCode: null, databases, isReplicaSet: null }}
-        hostPort="db.ipog.internal:5432"
+        hostPort="db.acme.internal:5432"
         user="schrodump_ro"
         tls
       />
@@ -27,7 +27,7 @@ export function Refused() {
     <div className="max-w-xl">
       <VerdictPanel
         result={{ ok: false, serverVersionNum: null, failure: "INSUFFICIENT_PRIVILEGES", driverCode: null, databases: [], isReplicaSet: null }}
-        hostPort="db.ipog.internal:5432"
+        hostPort="db.acme.internal:5432"
         user="schrodump_ro"
         tls
       />
@@ -40,7 +40,7 @@ export function UnknownWithDriverCode() {
     <div className="max-w-xl">
       <VerdictPanel
         result={{ ok: false, serverVersionNum: null, failure: "UNKNOWN", driverCode: "28P01", databases: [], isReplicaSet: null }}
-        hostPort="db.ipog.internal:5432"
+        hostPort="db.acme.internal:5432"
         user="schrodump_ro"
         tls={false}
       />

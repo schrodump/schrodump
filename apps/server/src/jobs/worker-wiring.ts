@@ -312,7 +312,7 @@ export function verifiedProvenance(
 // unscoped target that connection is opened to `postgres`, the maintenance database. When that is
 // the only database on the server it is also where the data lives, and dumping it is right. When
 // the server holds others, it is a guess, and the wrong one: on a real deployment it turned a
-// 9.4 GB `ipog_finance` into an 876-byte artifact under a SUCCEEDED job — sized by the probe's
+// 9.4 GB `acme_finance` into an 876-byte artifact under a SUCCEEDED job — sized by the probe's
 // server-wide estimate, so the row even read "9.4 GB". Only a FULL_RESTORE verify caught it; a
 // CHECKSUM verify, the default, would have made it VERIFIED.
 //

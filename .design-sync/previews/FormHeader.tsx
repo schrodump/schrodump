@@ -18,7 +18,7 @@ export function Create() {
 export function Edit() {
   return (
     <div className="max-w-xl">
-      <FormHeader mode="Editing" aside="engine fixed after creation" title="IPOG Nexus" intro="Changes apply to the next run." />
+      <FormHeader mode="Editing" aside="engine fixed after creation" title="Acme Ledger" intro="Changes apply to the next run." />
     </div>
   );
 }
