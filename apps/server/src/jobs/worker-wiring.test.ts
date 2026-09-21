@@ -844,7 +844,7 @@ describe("backupContextFor — routing a backup by what its target selects", () 
     scope: { databases: ["billing", "mysql", "shop", "sys"], schemas: [], collections: [] },
     estimatedBytes: 1_000_000,
   };
-  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
+  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: true };
 
   // runBackupJob over fake ports, with the REAL adapter building the descriptor the executor would
   // run — so what is asserted is the command, not only the mode it was built for.
@@ -883,6 +883,7 @@ describe("backupContextFor — routing a backup by what its target selects", () 
         return Promise.resolve({ release: () => Promise.resolve() });
       },
       resolveRecipients: () => Promise.resolve({ recipients: ["age1op"], keyIds: ["op"] }),
+      discardObjects: () => Promise.resolve(),
       executeAndUpload: ({ mode, parallelism, probe }) => {
         executed.push({ mode, parallelism, command: buildDescriptor(mode, parallelism, probe).command });
         return Promise.resolve({

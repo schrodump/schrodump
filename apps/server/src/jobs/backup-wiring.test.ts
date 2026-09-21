@@ -632,6 +632,7 @@ describe("runBackupJob over createBackupPorts — a failure after the upload lea
         organizationId: "org-1",
         requestedParallelism: 1,
         scratchConfigured: false,
+        singleDatabaseStagingScope: null,
       },
       ports,
     );
