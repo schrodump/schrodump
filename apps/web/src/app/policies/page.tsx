@@ -11,7 +11,7 @@ import { PolicyForm } from "@/components/policy-form";
 import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import { useCurrentRole } from "@/hooks/use-current-role";
+import { useCurrentRole, useInstanceTimeZone } from "@/hooks/use-current-role";
 import { useDeletePolicy, useTriggerBackup, useUpdatePolicy } from "@/hooks/use-mutations";
 import { useInstance, usePolicies } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
@@ -22,17 +22,20 @@ import type { Policy } from "@/lib/types";
 const ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_9rem_auto]";
 
 // One row per policy: what it is and how deep it verifies, when it runs (the cron is the source
-// of truth, with a reading and the next firing beside it), what it keeps, and the actions. Three
-// conditions put a persistent warning under the row — not a toast, because each one means backups
-// are quietly not doing what someone assumed.
+// of truth, with a reading on the instance's clock and the server's next firing beside it), what
+// it keeps, and the actions. Three conditions put a persistent warning under the row — not a
+// toast, because each one means backups are quietly not doing what someone assumed.
 export function PolicyRow({
   policy,
   role = "viewer",
+  timeZone = null,
   now = new Date(),
   onEdit,
 }: {
   policy: Policy;
   role?: Role;
+  // The instance's zone (GET /me); null until known.
+  timeZone?: string | null;
   now?: Date;
   onEdit?: () => void;
 }) {
@@ -76,7 +79,14 @@ export function PolicyRow({
 
         <div className="min-w-0">
           <div className="font-mono text-[12.5px]">{policy.cron}</div>
-          <CronReading cron={policy.cron} enabled={policy.enabled} now={now} className="mt-0.5 text-[11px]" />
+          <CronReading
+            cron={policy.cron}
+            enabled={policy.enabled}
+            timeZone={timeZone}
+            nextRunAt={policy.nextRunAt}
+            now={now}
+            className="mt-0.5 text-[11px]"
+          />
         </div>
 
         <div className="font-mono text-[12.5px] tabular-nums">{keep}</div>
@@ -160,6 +170,7 @@ export function PolicyRow({
 export default function PoliciesPage() {
   const t = useT();
   const role = useCurrentRole();
+  const timeZone = useInstanceTimeZone();
   const policies = usePolicies();
   const instance = useInstance();
   const [showForm, setShowForm] = useState(false);
@@ -199,7 +210,7 @@ export default function PoliciesPage() {
 
       {showForm && manage ? (
         <Panel tone="section" className="mt-5 p-5">
-          <PolicyForm onDone={() => setShowForm(false)} scratchConfigured={scratchConfigured} />
+          <PolicyForm onDone={() => setShowForm(false)} scratchConfigured={scratchConfigured} timeZone={timeZone} />
         </Panel>
       ) : null}
 
@@ -216,13 +227,19 @@ export default function PoliciesPage() {
             {policies.data.map((policy) =>
               editingId === policy.id ? (
                 <Panel key={policy.id} tone="section" className="m-3 p-5">
-                  <PolicyForm onDone={() => setEditingId(null)} scratchConfigured={scratchConfigured} policy={policy} />
+                  <PolicyForm
+                    onDone={() => setEditingId(null)}
+                    scratchConfigured={scratchConfigured}
+                    timeZone={timeZone}
+                    policy={policy}
+                  />
                 </Panel>
               ) : (
                 <PolicyRow
                   key={policy.id}
                   policy={policy}
                   role={role}
+                  timeZone={timeZone}
                   onEdit={() => setEditingId(policy.id)}
                 />
               ),

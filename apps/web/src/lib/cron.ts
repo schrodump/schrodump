@@ -4,8 +4,14 @@
 // The five-field cron the scheduler runs (minute hour day-of-month month day-of-week), read the
 // way the scheduler reads it: `*`, lists, ranges and steps. The expression is the source of truth;
 // what this module adds is the two things a reader cannot get from "0 2 * * *" at a glance — when
-// it fires next, on their clock, and a plain-language reading for the shapes that have one. A
-// shape with no reading returns null rather than a wrong sentence.
+// it fires next, and a plain-language reading for the shapes that have one. A shape with no
+// reading returns null rather than a wrong sentence.
+//
+// Whose clock: the INSTANCE's (SCHRODUMP_TZ, which GET /me carries), never the viewer's. This
+// module used to walk the browser's clock while the scheduler ran on the container's UTC, so a
+// São Paulo operator read "next tomorrow 02:00" for a job that ran at 23:00 their time. For a
+// saved policy the server's own `nextRunAt` is the answer and nothing here computes it; nextRun
+// is the form's live preview of an expression not yet saved.
 
 interface Field {
   readonly values: ReadonlySet<number>;
@@ -27,6 +33,10 @@ const RANGES = {
   month: [1, 12],
   dayOfWeek: [0, 7],
 } as const;
+
+// February counts 29: an expression for the 29th fires in leap years, which is rare, not never.
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 function parseField(raw: string, [min, max]: readonly [number, number]): Field | null {
   if (raw === "*") return { values: new Set(), any: true };
@@ -67,6 +77,17 @@ export function parseCron(expression: string): CronFields | null {
   const month = parseField(parts[3] ?? "", RANGES.month);
   const dayOfWeek = parseField(parts[4] ?? "", RANGES.dayOfWeek);
   if (minute === null || hour === null || dayOfMonth === null || month === null || dayOfWeek === null) return null;
+  // A day of month that no listed month has — 30 February, 31 April — is an expression that never
+  // fires, and the scheduler refuses it: the server answers 400 on `cron`, and a policy stored
+  // before that check existed is skipped on every tick. Refusing it here is what blocks Save on the
+  // form's "unreadable" path instead of letting the operator meet the 400. Only when day of week is
+  // `*`: a restricted day of week is OR'd with the day of month, so the expression still fires.
+  if (!dayOfMonth.any && dayOfWeek.any) {
+    const earliest = Math.min(...dayOfMonth.values);
+    const months = month.any ? ALL_MONTHS : [...month.values];
+    const longest = Math.max(...months.map((m) => DAYS_IN_MONTH[m - 1] ?? 31));
+    if (earliest > longest) return null;
+  }
   // 7 is Sunday too, as in every cron since Vixie's.
   const sundaySafe = dayOfWeek.values.has(7) ? { values: new Set([...dayOfWeek.values, 0]), any: false } : dayOfWeek;
   return { minute, hour, dayOfMonth, month, dayOfWeek: sundaySafe };
@@ -76,40 +97,113 @@ function matches(field: Field, value: number): boolean {
   return field.any || field.values.has(value);
 }
 
-// Local time, minute resolution, like the wall clock the operator reads. Day-of-month and
-// day-of-week combine the way cron does: when both are restricted, either one matching fires.
-export function nextRun(expression: string, from: Date = new Date()): Date | null {
+// --- the instance's clock ---------------------------------------------------------------------
+//
+// The walk below runs on a WALL CLOCK encoded as a UTC Date — year, month, day, hour and minute in
+// the zone, read and set with the UTC accessors — so the browser's own zone cannot leak into it.
+// Only the two ends touch Intl: reading `from` on the zone's clock, and turning the match back
+// into an instant. formatToParts is the one Intl call, and a formatter per zone is kept.
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let formatter = formatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+    });
+    formatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+function viewerZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+// `at` on `timeZone`'s wall clock, to the minute, as a UTC-encoded Date.
+function wallClockOf(at: Date, timeZone: string): Date {
+  const parts = formatterFor(timeZone).formatToParts(at);
+  const part = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((p) => p.type === type)?.value);
+  return new Date(Date.UTC(part("year"), part("month") - 1, part("day"), part("hour") % 24, part("minute")));
+}
+
+// The instant a wall-clock time names in `timeZone`. Two readings of the zone's offset settle it,
+// DST edges included; a wall time the zone skips (the hour the clocks spring forward over) has no
+// instant, and resolves to the later candidate — past the jump, where cron-parser lands too.
+function instantOf(wall: Date, timeZone: string): Date {
+  const target = wall.getTime();
+  const offsetAt = (ms: number): number => wallClockOf(new Date(ms), timeZone).getTime() - ms;
+  const first = target - offsetAt(target);
+  const second = target - offsetAt(first);
+  if (wallClockOf(new Date(second), timeZone).getTime() === target) return new Date(second);
+  return new Date(Math.max(first, second));
+}
+
+// Whether `at` reads the same on `timeZone`'s clock as on the viewer's. When it does not, the
+// policy row says which clock its next-run time is on.
+export function sameWallClock(at: Date, timeZone: string): boolean {
+  try {
+    return wallClockOf(at, timeZone).getTime() === wallClockOf(at, viewerZone()).getTime();
+  } catch {
+    return true;
+  }
+}
+
+// Eight years: the longest gap between two 29ths of February in the Gregorian calendar (2096 to
+// 2104). Any expression parseCron accepts fires within it.
+const HORIZON_MS = 8 * 366 * 24 * 60 * 60 * 1000;
+
+// The first firing after `from` on `timeZone`'s clock (the viewer's own when absent), to the
+// minute. Day-of-month and day-of-week combine the way cron does: when both are restricted, either
+// one matching fires. null for an expression parseCron refuses — and for a zone this browser does
+// not know, which is an answer the preview cannot give rather than a schedule that does not parse.
+export function nextRun(expression: string, from: Date = new Date(), timeZone?: string): Date | null {
   const cron = parseCron(expression);
   if (cron === null) return null;
-  const at = new Date(from.getTime());
-  at.setSeconds(0, 0);
-  at.setMinutes(at.getMinutes() + 1);
-  const limit = from.getTime() + 366 * 24 * 60 * 60 * 1000;
-  while (at.getTime() <= limit) {
-    if (!matches(cron.month, at.getMonth() + 1)) {
-      at.setMonth(at.getMonth() + 1, 1);
-      at.setHours(0, 0, 0, 0);
-      continue;
+  try {
+    const zone = timeZone ?? viewerZone();
+    const at = wallClockOf(from, zone);
+    at.setUTCMinutes(at.getUTCMinutes() + 1);
+    const limit = at.getTime() + HORIZON_MS;
+    while (at.getTime() <= limit) {
+      if (!matches(cron.month, at.getUTCMonth() + 1)) {
+        at.setUTCMonth(at.getUTCMonth() + 1, 1);
+        at.setUTCHours(0, 0, 0, 0);
+        continue;
+      }
+      const domOk = matches(cron.dayOfMonth, at.getUTCDate());
+      const dowOk = matches(cron.dayOfWeek, at.getUTCDay());
+      const dayOk = cron.dayOfMonth.any || cron.dayOfWeek.any ? domOk && dowOk : domOk || dowOk;
+      if (!dayOk) {
+        at.setUTCDate(at.getUTCDate() + 1);
+        at.setUTCHours(0, 0, 0, 0);
+        continue;
+      }
+      if (!matches(cron.hour, at.getUTCHours())) {
+        at.setUTCHours(at.getUTCHours() + 1, 0, 0, 0);
+        continue;
+      }
+      if (!matches(cron.minute, at.getUTCMinutes())) {
+        at.setUTCMinutes(at.getUTCMinutes() + 1, 0, 0);
+        continue;
+      }
+      const instant = instantOf(at, zone);
+      // The hour the clocks fall back over reads twice; a match on its first pass can land at or
+      // before `from`, and the next firing is further on.
+      if (instant.getTime() > from.getTime()) return instant;
+      at.setUTCMinutes(at.getUTCMinutes() + 1, 0, 0);
     }
-    const domOk = matches(cron.dayOfMonth, at.getDate());
-    const dowOk = matches(cron.dayOfWeek, at.getDay());
-    const dayOk = cron.dayOfMonth.any || cron.dayOfWeek.any ? domOk && dowOk : domOk || dowOk;
-    if (!dayOk) {
-      at.setDate(at.getDate() + 1);
-      at.setHours(0, 0, 0, 0);
-      continue;
-    }
-    if (!matches(cron.hour, at.getHours())) {
-      at.setHours(at.getHours() + 1, 0, 0, 0);
-      continue;
-    }
-    if (!matches(cron.minute, at.getMinutes())) {
-      at.setMinutes(at.getMinutes() + 1, 0, 0);
-      continue;
-    }
-    return at;
+    return null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 // The shapes an operator actually writes. Anything else is left to the expression itself.
@@ -158,4 +252,10 @@ export function readCron(expression: string): CronReading | null {
   const dom = single(dayOfMonth);
   if (dayOfWeek.any && dom !== null) return { kind: "monthly", dayOfMonth: dom, hour: h, minute: m };
   return null;
+}
+
+// Whether a reading names a time on a clock — and so means nothing without saying whose. "Every
+// 15 minutes" is the same on every clock; "every day at 02:00" is not.
+export function namesAClockTime(reading: CronReading): boolean {
+  return reading.kind !== "everyMinute" && reading.kind !== "everyMinutes";
 }

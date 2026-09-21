@@ -69,10 +69,14 @@ const modeMeaning: Record<ExecutionMode, MessageKey> = {
 export function PolicyForm({
   onDone,
   scratchConfigured,
+  timeZone = null,
   policy,
 }: {
   onDone: () => void;
   scratchConfigured: boolean;
+  // The instance's zone (GET /me): the preview reads the expression being typed on the clock the
+  // scheduler will run it on. null until known, and the preview names no clock time until then.
+  timeZone?: string | null;
   policy?: Policy;
 }) {
   const t = useT();
@@ -186,7 +190,7 @@ export function PolicyForm({
         <div className="space-y-1.5">
           <FieldLabel htmlFor="cron">{t("policies.cron")}</FieldLabel>
           <Input id="cron" value={cron} className="font-mono" spellCheck={false} onChange={(e) => setCron(e.target.value)} />
-          <CronReading cron={cron} enabled className="text-[12px]" />
+          <CronReading cron={cron} enabled timeZone={timeZone} className="text-[12px]" />
         </div>
         <div className="space-y-1.5">
           <FieldLabel htmlFor="targetId">{t("policies.target")}</FieldLabel>

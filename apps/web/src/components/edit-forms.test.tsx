@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
+import { formatTime } from "@/lib/format";
 import type { Destination, Policy, Target } from "@/lib/types";
 import { DestinationForm } from "./destination-form";
 import { PolicyForm } from "./policy-form";
@@ -66,6 +67,7 @@ const POLICY: Policy = {
   parallelism: 1,
   compression: "zstd",
   enabled: true,
+  nextRunAt: "2026-01-02T03:00:00.000Z",
 };
 
 // Captures what the form actually sends, which is the thing under test — asserting on a mocked
@@ -193,12 +195,59 @@ describe("PolicyForm refuses what the scheduler could not run", () => {
     expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/does not parse as five-field cron/i);
   });
 
+  // SC-02: the form accepted 30 February because every field was in range, and the server stored
+  // it. It can never fire; Save is blocked on the same path as any expression that does not parse.
+  it.each(["0 0 30 2 *", "0 0 31 4 *"])("blocks Save for %j, which can never fire", async (cron) => {
+    const { calls } = captureFetch();
+    const user = renderWith(<PolicyForm onDone={() => undefined} scratchConfigured policy={POLICY} timeZone="UTC" />);
+    await user.clear(screen.getByLabelText("Schedule (cron)"));
+    await user.type(screen.getByLabelText("Schedule (cron)"), cron);
+    expect(save()).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/does not parse as five-field cron/i);
+    expect(screen.getByTestId("cron-reading")).toHaveTextContent("the expression does not parse");
+    await user.click(save());
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
   it("withholds the staged mode, with its reason, when scratch is not configured", () => {
     captureFetch();
     renderWith(<PolicyForm onDone={() => undefined} scratchConfigured={false} policy={POLICY} />);
     expect(screen.getByRole("option", { name: "Staged" })).toBeDisabled();
     expect(screen.getByText(/Staged needs scratch, which is not configured/)).toBeInTheDocument();
     expect(screen.getByLabelText("Parallelism")).toBeDisabled();
+  });
+});
+
+// SC-01: the preview walked the browser's clock while the scheduler ran on the instance's. It
+// reads the expression being typed on the instance's zone now, names it, and renders the next run
+// on the viewer's clock. `Date` alone is faked, so user-event's timers still run.
+describe("PolicyForm previews on the instance's clock", () => {
+  const NOW = new Date("2026-09-21T12:00:00.000Z");
+  // Two zones on either side of UTC; whichever this machine is not in.
+  const tokyo = NOW.getTimezoneOffset() === -540;
+  const ZONE = tokyo ? "America/Sao_Paulo" : "Asia/Tokyo";
+  const NEXT = tokyo ? "2026-09-22T05:00:00.000Z" : "2026-09-21T17:00:00.000Z";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("puts the next 02:00 where that zone's clock reads 02:00", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    captureFetch();
+    const user = renderWith(<PolicyForm onDone={() => undefined} scratchConfigured timeZone={ZONE} />);
+    await user.clear(screen.getByLabelText("Schedule (cron)"));
+    await user.type(screen.getByLabelText("Schedule (cron)"), "0 2 * * *");
+    const reading = screen.getByTestId("cron-reading");
+    expect(reading).toHaveTextContent(new RegExp(`^every day at .+ ${ZONE} · next`));
+    expect(reading).toHaveTextContent(formatTime(NEXT));
+  });
+
+  it("names no clock time and no next run until the zone is known", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    captureFetch();
+    renderWith(<PolicyForm onDone={() => undefined} scratchConfigured timeZone={null} />);
+    expect(screen.getByTestId("cron-reading")).toHaveTextContent(/^$/);
   });
 });
 
