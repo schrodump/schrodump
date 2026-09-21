@@ -97,6 +97,22 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
+# Waits until no job is PENDING or RUNNING. Creating a policy also dispatches its most recent past
+# cron window on top of the manual trigger, and each backup chains a verify, so a step that ends when
+# ITS artifact goes green can leave a second chained verify still starting. Recreating the container
+# then (steps 14 and 19) SIGTERMs it: the graceful shutdown aborts that verify, and the next step's
+# detector — which reads the whole /jobs list — blames itself for a job it never ran. That is issue
+# #103: 1.4 seconds from the verify starting to the SIGTERM, not a sandbox that could not come up.
+drain_queue() {
+  for _ in $(seq 1 60); do
+    case "$(api "${BASE}/backend/jobs")" in
+      *'"state":"RUNNING"'*|*'"state":"PENDING"'*) sleep 3 ;;
+      *) return 0 ;;
+    esac
+  done
+  fail "jobs were still PENDING or RUNNING after 3 minutes — cannot $1 safely"
+}
+
 log "1/20  docker compose up"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
@@ -111,7 +127,7 @@ docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
   -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-  minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/dev/null
+  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/dev/null
 for _ in $(seq 1 60); do
   docker exec "${PROJECT}-target" pg_isready -h 127.0.0.1 -U app -d shop >/dev/null 2>&1 && break
   sleep 2
@@ -225,12 +241,7 @@ log "9/20  rebuilding the catalog from the bucket alone"
 # RUNNING verify is a race of the script's own making. The server now answers that case legibly
 # rather than crashing, but a smoke step should assert the thing it is named after, not the
 # handling of a collision it caused.
-for _ in $(seq 1 40); do
-  case "$(api "${BASE}/backend/jobs")" in
-    *'"state":"RUNNING"'*|*'"state":"PENDING"'*) sleep 3 ;;
-    *) break ;;
-  esac
-done
+drain_queue "wipe the catalog"
 compose exec -T db psql -U schrodump -d schrodump -tAc 'DELETE FROM "Artifact"' >/dev/null
 api "${BASE}/backend/artifacts" | grep -q '"items":\[\]' || fail "the catalog was not emptied"
 api -o /dev/null -w '   rebuild %{http_code}\n' -X POST -H "$JSON" \
@@ -486,6 +497,7 @@ SCHRODUMP_SELF_BACKUP_DESTINATION_ID=${dest}
 SCHRODUMP_SELF_BACKUP_INTERVAL_MS=60000
 SELF_BACKUP_NETWORK=${PROJECT}_internal
 EOF
+drain_queue "recreate the container"
 compose up -d schrodump >/dev/null 2>&1
 for _ in $(seq 1 60); do
   case "$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null)" in
@@ -855,6 +867,7 @@ YAML
 echo "SCHRODUMP_SMTP_CA_FILE=/etc/schrodump/smtp-ca.pem" >> "${WORK}/.env"
 COMPOSE_FILE="compose.yaml:${WORK}/smtp-ca.compose.yaml"
 export COMPOSE_FILE
+drain_queue "recreate the container"
 compose up -d schrodump >/dev/null 2>&1
 for _ in $(seq 1 60); do
   case "$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null)" in
