@@ -7,6 +7,7 @@ import {
   resolveRetention,
   retentionIsConfigured,
   type RetentionPolicy,
+  type RetentionResolution,
 } from "@schrodump/core/retention";
 
 export interface LoadedManifests {
@@ -20,6 +21,12 @@ export interface LoadedManifests {
 export interface RetentionPorts {
   // Manifests of the artifacts under this policy, plus the ones that could not be read.
   loadManifests(): Promise<LoadedManifests>;
+  // The jobId of the policy's newest VERIFIED artifact, or null when it has none. Retention keeps
+  // it whatever the counters say. The manifests cannot answer this — verification state lives on
+  // the catalog row, written by a verify after the manifest was sealed — and without it the window
+  // ranks by createdAt alone: a run of FAILED verifies pushes the last copy known to restore out of
+  // keepLast and into the delete-set, and the job reads as an ordinary prune.
+  newestVerifiedJobId(): Promise<string | null>;
   // Deletes both the artifact object AND its manifest sidecar (plus the DB row).
   deleteArtifact(jobId: string): Promise<void>;
 }
@@ -27,6 +34,9 @@ export interface RetentionPorts {
 export interface RetentionResult {
   kept: string[];
   deleted: string[];
+  // The newest VERIFIED artifact's jobId when the window alone would have deleted it and it was
+  // kept only because of what it is. Null when the window covered it, or there is none.
+  newestVerifiedOutsideWindow: string | null;
   aborted: boolean;
   reason: string | null;
 }
@@ -35,7 +45,7 @@ export interface RetentionResult {
 // dependsOn chain). If resolveRetention detects an orphan, the WHOLE cycle aborts and nothing is
 // deleted — deleting the full while keeping incrementals is total data loss.
 function abort(reason: string): RetentionResult {
-  return { kept: [], deleted: [], aborted: true, reason };
+  return { kept: [], deleted: [], newestVerifiedOutsideWindow: null, aborted: true, reason };
 }
 
 export async function runRetention(
@@ -65,9 +75,16 @@ export async function runRetention(
     );
   }
 
-  let resolution: { keep: string[]; delete: string[] };
+  // A backup that SUCCEEDED is what chains this job, and a SUCCEEDED backup says nothing about
+  // whether it restores — so "a new copy just landed" is not, on its own, what makes pruning safe.
+  // Whatever the counters say, the newest copy a verify has proven survives the cycle.
+  const newestVerified = await ports.newestVerifiedJobId();
+
+  let resolution: RetentionResolution;
   try {
-    resolution = resolveRetention(manifests, policy, now);
+    resolution = resolveRetention(manifests, policy, now, {
+      alwaysKeep: newestVerified === null ? [] : [newestVerified],
+    });
   } catch (error) {
     if (error instanceof RetentionOrphanError) {
       return abort(error.message);
@@ -78,5 +95,28 @@ export async function runRetention(
   for (const jobId of resolution.delete) {
     await ports.deleteArtifact(jobId);
   }
-  return { kept: resolution.keep, deleted: resolution.delete, aborted: false, reason: null };
+  return {
+    kept: resolution.keep,
+    deleted: resolution.delete,
+    newestVerifiedOutsideWindow:
+      newestVerified !== null && resolution.keptOutsideWindow.includes(newestVerified)
+        ? newestVerified
+        : null,
+    aborted: false,
+    reason: null,
+  };
+}
+
+// The sentence a SUCCEEDED retention job records. A kept count above keepLast is not something to
+// leave the operator to work out: when the newest VERIFIED artifact survived only because it is
+// that, nothing newer than it has verified — every copy that pushed it out of the window is FAILED
+// or still UNOBSERVED. That is the finding, and the reason the count reads higher than the policy
+// says.
+export function retentionSummary(result: RetentionResult): string {
+  const counts = `retention kept ${result.kept.length}, deleted ${result.deleted.length}`;
+  if (result.newestVerifiedOutsideWindow === null) return counts;
+  return (
+    `${counts} — kept ${result.newestVerifiedOutsideWindow} outside the window: it is the newest ` +
+    `VERIFIED artifact, and nothing newer has verified`
+  );
 }

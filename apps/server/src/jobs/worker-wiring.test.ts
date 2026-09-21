@@ -24,6 +24,7 @@ import {
   sourceHasOplogFor,
   toBackupProbe,
   toRetentionPolicy,
+  newestVerifiedJobId,
   dumpScopeFor,
   verifyEngineWiring,
   VERIFY_INCONCLUSIVE_LOG,
@@ -52,6 +53,38 @@ describe("toRetentionPolicy", () => {
       minAgeBeforeDelete: 86_400_000,
     });
     expect(typeof policy.minAgeBeforeDelete).toBe("number");
+  });
+});
+
+// The artifact retention must never delete is chosen by this query, so its shape is the guarantee:
+// VERIFIED only (never the newest artifact of any state), newest first, and scoped to the
+// organization and to the same policy/destination the cycle prunes.
+describe("newestVerifiedJobId", () => {
+  const scope = { organizationId: "org-mine", destinationId: "dest-1", policyId: "policy-1" };
+
+  it("asks for the newest VERIFIED artifact of this policy, filtered by organization", async () => {
+    const findFirst = vi.fn(async (_args: unknown) => ({ jobId: "job-verified" }));
+    const prisma = { artifact: { findFirst } } as unknown as Pick<PrismaClient, "artifact">;
+
+    expect(await newestVerifiedJobId(prisma, scope)).toBe("job-verified");
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-mine",
+        destinationId: "dest-1",
+        job: { policyId: "policy-1" },
+        state: "VERIFIED",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { jobId: true },
+    });
+  });
+
+  it("answers null when the policy has no VERIFIED artifact", async () => {
+    const prisma = {
+      artifact: { findFirst: vi.fn(async () => null) },
+    } as unknown as Pick<PrismaClient, "artifact">;
+
+    expect(await newestVerifiedJobId(prisma, scope)).toBeNull();
   });
 });
 

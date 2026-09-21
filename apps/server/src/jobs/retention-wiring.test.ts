@@ -23,6 +23,7 @@ describe("retention deletes everything a backup wrote", () => {
       prefix: "p",
       organizationId: "org1",
       artifactJobIds: () => Promise.resolve([]),
+      newestVerifiedJobId: () => Promise.resolve(null),
       deleteArtifactRow: () => Promise.resolve(),
     });
 
