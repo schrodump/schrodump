@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { Manifest } from "@schrodump/core/manifest";
 import type { RetentionPolicy } from "@schrodump/core/retention";
-import { runRetention, type RetentionPorts } from "./retention.js";
+import { retentionSummary, runRetention, type RetentionPorts } from "./retention.js";
 
 function manifest(jobId: string, createdAt: string, dependsOn: string[] = []): Manifest {
   return {
@@ -44,11 +44,13 @@ function policy(over: Partial<RetentionPolicy> = {}): RetentionPolicy {
 function ports(
   manifests: Manifest[],
   unreadable: string[] = [],
+  newestVerified: string | null = null,
 ): RetentionPorts & { deleted: string[] } {
   const deleted: string[] = [];
   return {
     deleted,
     loadManifests: () => Promise.resolve({ manifests, unreadable }),
+    newestVerifiedJobId: () => Promise.resolve(newestVerified),
     deleteArtifact: (jobId) => {
       deleted.push(jobId);
       return Promise.resolve();
@@ -120,5 +122,47 @@ describe("runRetention", () => {
     expect(result.aborted).toBe(true);
     expect(result.reason).toMatch(/manifest/i);
     expect(p.deleted).toEqual([]);
+  });
+
+  // keepLast 7 under FULL_RESTORE verify, and a schema change makes every new artifact FAIL its
+  // restore. Ranked by createdAt alone, the seven FAILED copies fill the window and the one VERIFIED
+  // copy behind them is deleted — the job reads "retention kept 7, deleted 1" and the operator holds
+  // nothing that restores. This is the failure the README says the product exists to prevent.
+  it("never deletes the newest VERIFIED artifact, even when FAILED ones fill keepLast", async () => {
+    const manifests = [
+      manifest("ancient", "2026-07-01T00:00:00Z"),
+      manifest("verified", "2026-07-15T00:00:00Z"),
+      ...[16, 17, 18, 19, 20, 21, 22].map((day) =>
+        manifest(`failed-${day}`, `2026-07-${day}T00:00:00Z`),
+      ),
+    ];
+    const p = ports(manifests, [], "verified");
+    const result = await runRetention(policy({ keepLast: 7 }), p, NOW);
+
+    expect(result.aborted).toBe(false);
+    expect(p.deleted).not.toContain("verified");
+    expect(result.kept).toContain("verified");
+    // Still retention, not a freeze: what is neither in the window nor protected goes.
+    expect(p.deleted).toEqual(["ancient"]);
+    expect(result.newestVerifiedOutsideWindow).toBe("verified");
+    // A kept count above keepLast has to say why, or it reads as a miscount.
+    expect(retentionSummary(result)).toBe(
+      "retention kept 8, deleted 1 — kept verified outside the window: it is the newest VERIFIED " +
+        "artifact, and nothing newer has verified",
+    );
+  });
+
+  it("says nothing extra when the window already keeps the newest VERIFIED artifact", async () => {
+    const manifests = [
+      manifest("old", "2026-07-20T00:00:00Z"),
+      manifest("verified", "2026-07-21T00:00:00Z"),
+      manifest("new", "2026-07-22T00:00:00Z"),
+    ];
+    const p = ports(manifests, [], "verified");
+    const result = await runRetention(policy({ keepLast: 2 }), p, NOW);
+
+    expect(p.deleted).toEqual(["old"]);
+    expect(result.newestVerifiedOutsideWindow).toBeNull();
+    expect(retentionSummary(result)).toBe("retention kept 2, deleted 1");
   });
 });

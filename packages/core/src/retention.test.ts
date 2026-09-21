@@ -105,6 +105,67 @@ describe("resolveRetention", () => {
   });
 });
 
+// The scenario this exists for: keepLast 7 under FULL_RESTORE verify, and a schema change makes
+// every new artifact FAIL its restore. Ranked by createdAt alone, the seven FAILED copies fill the
+// window and the one VERIFIED copy behind them is deleted — "retention kept 7, deleted 1", and the
+// operator holds nothing that restores. resolveRetention cannot see verification state; the caller
+// names what must survive.
+describe("resolveRetention alwaysKeep", () => {
+  const failedThenVerified = [
+    mf("verified", "2026-07-15T00:00:00Z"),
+    ...[16, 17, 18, 19, 20, 21, 22].map((day) => mf(`failed-${day}`, `2026-07-${day}T00:00:00Z`)),
+  ];
+
+  it("keeps a named artifact that newer ones pushed out of keepLast, and says it did", () => {
+    const result = resolveRetention(failedThenVerified, policy({ keepLast: 7 }), NOW, {
+      alwaysKeep: ["verified"],
+    });
+
+    expect(result.keep).toContain("verified");
+    expect(result.delete).toEqual([]);
+    expect(result.keptOutsideWindow).toEqual(["verified"]);
+  });
+
+  it("does not change what the counters keep: the newer artifacts still fill the window", () => {
+    const result = resolveRetention(failedThenVerified, policy({ keepLast: 7 }), NOW, {
+      alwaysKeep: ["verified"],
+    });
+
+    expect(result.keep).toHaveLength(8);
+    for (const day of [16, 17, 18, 19, 20, 21, 22]) {
+      expect(result.keep).toContain(`failed-${day}`);
+    }
+  });
+
+  it("reports nothing kept outside the window when the window already covers the named id", () => {
+    const result = resolveRetention(failedThenVerified, policy({ keepLast: 8 }), NOW, {
+      alwaysKeep: ["verified"],
+    });
+
+    expect(result.keep).toContain("verified");
+    expect(result.keptOutsideWindow).toEqual([]);
+  });
+
+  it("ignores a named id that has no manifest in the input", () => {
+    const result = resolveRetention(failedThenVerified, policy({ keepLast: 7 }), NOW, {
+      alwaysKeep: ["not-in-this-bucket"],
+    });
+
+    expect(result.keep).not.toContain("not-in-this-bucket");
+    expect(result.keptOutsideWindow).toEqual([]);
+    expect(result.delete).toEqual(["verified"]);
+  });
+
+  it("holds a named artifact to the dependency invariant like any other kept one", () => {
+    const full = mf("full", "2026-01-01T00:00:00Z");
+    const inc = mf("inc", "2026-02-01T00:00:00Z", ["full"]);
+    const fresh = mf("fresh", "2026-07-22T00:00:00Z");
+    expect(() =>
+      resolveRetention([full, inc, fresh], policy({ keepLast: 1 }), NOW, { alwaysKeep: ["inc"] }),
+    ).toThrow(RetentionOrphanError);
+  });
+});
+
 // Every keep* counter defaults to 0, in the Zod schema and in the Prisma column. So "the operator
 // never expressed a retention intent" and "the operator asked to keep nothing" arrive at
 // resolveRetention as the same input — and it answers the second one: delete everything.

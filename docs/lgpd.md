@@ -37,9 +37,10 @@ display — the interface can replace a credential, never show one.
 ### Retention (art. 15, art. 16)
 
 Retention is a grandfather-father-son policy per backup policy: keep N last, N daily, N weekly, N
-monthly, N yearly. Artefacts outside the policy are deleted.
+monthly, N yearly. Artefacts outside the policy are deleted — except the policy's newest
+`VERIFIED` artefact, which retention never deletes (see the last point below).
 
-Four things to get right:
+Five things to get right:
 
 - **Set retention from your legal basis, not from disk space.** Art. 16 says data is eliminated
   when processing ends, with narrow exceptions (legal obligation, study by a research body,
@@ -58,6 +59,13 @@ Four things to get right:
   backing up also stops deleting**, so a disabled or persistently failing policy will hold
   artefacts past the window you set. If elimination is the duty you are relying on, monitor that
   backups are still succeeding, not just that a retention window is configured.
+- **The newest `VERIFIED` artefact outlives the window when nothing newer verifies.** Retention
+  keeps the last copy a restore has proven, whatever the counters say, so that a run of failing
+  verifies cannot leave you with no backup that restores (art. 46 is a duty too). The cost for
+  art. 16 is one artefact, held past the window until a newer one verifies; the retention job's
+  reason names it whenever that happens. A policy whose verifies have been failing for longer than
+  its window is holding data it would otherwise have eliminated — fix the verify, do not delete the
+  copy.
 
 ### Audit trail (art. 37)
 
@@ -155,6 +163,8 @@ promised to delete that the storage will not let you delete.
 - [ ] Retention counters actually non-zero on every policy — all-zero means retain forever.
 - [ ] Backups still succeeding on every policy you rely on for elimination; retention prunes only
       after a successful backup, so a broken policy quietly stops deleting.
+- [ ] Verifies passing on every policy you rely on for elimination; retention holds the newest
+      `VERIFIED` artefact past the window until a newer one verifies.
 - [ ] `SCHRODUMP_KEK` stored outside the backup host, with an offline copy.
 - [ ] Restore runbook includes re-applying pending erasure requests.
 - [ ] Erasure requests logged with dates, so step 4 is possible at all.

@@ -91,6 +91,7 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
       prefix: PREFIX,
       organizationId: ORG,
       artifactJobIds: () => Promise.resolve([...rows]),
+      newestVerifiedJobId: () => Promise.resolve(null),
       deleteArtifactRow: (jobId) => {
         rows.delete(jobId);
         return Promise.resolve();

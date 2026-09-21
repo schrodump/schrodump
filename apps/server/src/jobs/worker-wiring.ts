@@ -53,7 +53,7 @@ import {
   runRestorePipeline,
 } from "./restore-executor.js";
 import { createRetentionPorts } from "./retention-wiring.js";
-import { runRetention as runRetentionCycle } from "./retention.js";
+import { retentionSummary, runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
 import { dumpIsMultiDatabaseFor, runRestoreJob } from "./restore.js";
 import { producerVersion } from "../version.js";
@@ -192,6 +192,27 @@ export function toRetentionPolicy(row: {
     keepYearly: row.keepYearly,
     minAgeBeforeDelete: Number(row.minAgeBeforeDeleteMs),
   };
+}
+
+// The jobId of a policy's newest VERIFIED artifact — the one its retention never deletes, whatever
+// the counters say. Scoped exactly as the retention cycle's own artifact list (this policy's
+// backups, on this policy's destination), so it can only name an artifact the cycle is reasoning
+// over. System process: raw prisma, organizationId filtered explicitly.
+export async function newestVerifiedJobId(
+  prisma: Pick<PrismaClient, "artifact">,
+  scope: { organizationId: string; destinationId: string; policyId: string },
+): Promise<string | null> {
+  const artifact = await prisma.artifact.findFirst({
+    where: {
+      organizationId: scope.organizationId,
+      destinationId: scope.destinationId,
+      job: { policyId: scope.policyId },
+      state: "VERIFIED",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { jobId: true },
+  });
+  return artifact?.jobId ?? null;
 }
 
 // Pure adapter from the RICH engine probe to backup.ts's ProbeResult. estimatedBytes is the sum of
@@ -1459,9 +1480,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
   // Applies one policy's GFS retention. Reached only by chaining off a SUCCEEDED backup of that
   // same policy — pruning old copies is safe exactly when a new one just landed, never when the
-  // backup failed. Every refusal (unconfigured policy, unreadable manifest, would-be orphan) comes
-  // back from runRetentionCycle as `aborted` and FAILS the job with the reason, because a
-  // retention cycle that declined to run is a fact the operator must be able to read afterwards.
+  // backup failed — and never of the newest VERIFIED one, because a copy that landed is not yet a
+  // copy that restores (newestVerifiedJobId above). Every refusal (unconfigured policy, unreadable
+  // manifest, would-be orphan) comes back from runRetentionCycle as `aborted` and FAILS the job
+  // with the reason, because a retention cycle that declined to run is a fact the operator must be
+  // able to read afterwards.
   const runRetention = async (job: ClaimedJob): Promise<void> => {
     const policyId = job.policyId;
     if (policyId === null) {
@@ -1522,6 +1545,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               select: { jobId: true },
             })
           ).map((artifact) => artifact.jobId),
+        newestVerifiedJobId: () =>
+          newestVerifiedJobId(prisma, {
+            organizationId: job.organizationId,
+            destinationId: policy.destinationId,
+            policyId,
+          }),
         deleteArtifactRow: async (artifactJobId) => {
           await prisma.artifact.deleteMany({
             where: { organizationId: job.organizationId, jobId: artifactJobId },
@@ -1535,11 +1564,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       await failJob(job.id, `retention aborted: ${result.reason ?? "unknown reason"}`);
       return;
     }
-    await setJobState(
-      job.id,
-      "SUCCEEDED",
-      `retention kept ${result.kept.length}, deleted ${result.deleted.length}`,
-    );
+    await setJobState(job.id, "SUCCEEDED", retentionSummary(result));
   };
 
   return { runBackup, runVerify, runRestore, runRetention };

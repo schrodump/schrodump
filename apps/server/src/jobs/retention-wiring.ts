@@ -17,6 +17,8 @@ export interface RetentionWiringDeps {
   organizationId: string;
   // jobIds of the artifacts under this policy.
   artifactJobIds(): Promise<string[]>;
+  // jobId of the newest of those whose catalog state is VERIFIED, or null (organization-scoped).
+  newestVerifiedJobId(): Promise<string | null>;
   // Removes the DB Artifact row (organization-scoped).
   deleteArtifactRow(jobId: string): Promise<void>;
 }
@@ -46,6 +48,7 @@ export function createRetentionPorts(deps: RetentionWiringDeps): RetentionPorts 
       }
       return { manifests, unreadable };
     },
+    newestVerifiedJobId: () => deps.newestVerifiedJobId(),
     deleteArtifact: async (jobId) => {
       const artifact = artifactKey(deps.prefix, deps.organizationId, jobId);
       await deps.driver.delete([

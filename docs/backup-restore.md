@@ -137,11 +137,25 @@ Every restore is recorded: who, what artefact, which scope, when.
 
 ## Deleting an artefact
 
-Retention deletes artefacts automatically as its policy ages them out. An operator can also delete
-one by hand — to clear a `FAILED` artefact, or an old one no longer worth keeping. It is
-operator-only, irreversible, and reaches the **bucket**, not just the catalogue: the object, its
-manifest sidecar and (for PostgreSQL) the `globals` sidecar are removed, then the catalogue row.
-The action is recorded in the audit trail (`artifact.delete`).
+Retention deletes artefacts automatically as its policy ages them out, with one exception: it
+never deletes the policy's newest `VERIFIED` artefact, whatever the counters say. Retention runs
+after a backup lands, and a backup that lands is not yet one that restores — if a schema change
+makes every new artefact fail its restore, the copies that fill the window are exactly the ones
+that cannot restore, and ranking by age alone would delete the last one that can. When the window
+alone would have deleted it, the retention job keeps it and says so in its reason:
+
+```
+retention kept 8, deleted 1 — kept <jobId> outside the window: it is the newest VERIFIED
+artifact, and nothing newer has verified
+```
+
+That is why the kept count can read one more than the policy asks for. The artefact leaves once a
+newer one verifies and retention next runs.
+
+An operator can also delete one by hand — to clear a `FAILED` artefact, or an old one no longer
+worth keeping. It is operator-only, irreversible, and reaches the **bucket**, not just the
+catalogue: the object, its manifest sidecar and (for PostgreSQL) the `globals` sidecar are
+removed, then the catalogue row. The action is recorded in the audit trail (`artifact.delete`).
 
 Deleting a **`VERIFIED`** artefact — one a restore has proven good — requires an explicit
 acknowledgement, because throwing away a backup you know restores is the one deletion the product

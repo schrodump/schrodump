@@ -50,11 +50,32 @@ export function retentionIsConfigured(policy: RetentionPolicy): boolean {
   );
 }
 
+export interface RetentionOptions {
+  // jobIds kept whatever the counters and the age floor say. The caller names them because this
+  // package cannot see what decides it: whether an artifact is VERIFIED is a fact of the catalog,
+  // written by a verify after the manifest was sealed, never a field of the manifest. The server
+  // passes the policy's newest VERIFIED artifact — ranking by createdAt alone would otherwise
+  // delete the last copy known to restore as soon as enough newer, FAILED ones pile up in front of
+  // it. An id with no manifest in the input is ignored. The dependency invariant applies to these
+  // exactly as to any other kept manifest.
+  alwaysKeep?: readonly string[];
+}
+
+export interface RetentionResolution {
+  keep: string[];
+  delete: string[];
+  // The part of `keep` that is there only because `alwaysKeep` named it: the counters and the age
+  // floor alone would have deleted it. Returned so the caller can say so, rather than report a kept
+  // count that silently exceeds keepLast.
+  keptOutsideWindow: string[];
+}
+
 export function resolveRetention(
   manifests: Manifest[],
   policy: RetentionPolicy,
   now: Date,
-): { keep: string[]; delete: string[] } {
+  options: RetentionOptions = {},
+): RetentionResolution {
   const sorted = [...manifests].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
   const keep = new Set<string>();
@@ -75,6 +96,17 @@ export function resolveRetention(
     }
   }
 
+  // Last, so that what is recorded here is exactly what the window would have deleted. Before the
+  // orphan check, so a protected manifest is held to the same invariant as every other kept one.
+  const alwaysKeep = new Set(options.alwaysKeep ?? []);
+  const keptOutsideWindow: string[] = [];
+  for (const manifest of sorted) {
+    if (alwaysKeep.has(manifest.jobId) && !keep.has(manifest.jobId)) {
+      keep.add(manifest.jobId);
+      keptOutsideWindow.push(manifest.jobId);
+    }
+  }
+
   const deleteIds = sorted.filter((m) => !keep.has(m.jobId)).map((m) => m.jobId);
   const deleteSet = new Set(deleteIds);
 
@@ -91,6 +123,7 @@ export function resolveRetention(
   return {
     keep: sorted.filter((m) => keep.has(m.jobId)).map((m) => m.jobId),
     delete: deleteIds,
+    keptOutsideWindow,
   };
 }
 

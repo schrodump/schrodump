@@ -44,7 +44,8 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 - **Encrypted at rest** — every artifact is encrypted with [`age`](https://age-encryption.org) to
   two recipients (operational + escrow); keys are wrapped by a KEK that lives outside the host.
 - **S3-compatible destinations** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Scheduling with GFS retention** — grandfather-father-son, aware of full/incremental chains.
+- **Scheduling with GFS retention** — grandfather-father-son, aware of full/incremental chains,
+  and it never deletes a policy's newest verified copy.
 - **Deliberate restore friction** — role-gated, scoped by an engine capability matrix, and an
   overwrite requires typing the database name.
 - **Web UI** — a dashboard built around the three states, in English, Portuguese and Spanish.
