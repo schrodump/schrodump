@@ -27,6 +27,7 @@ const artifact: Artifact = {
   executionMode: "STREAM",
   sourceHasOplog: null,
   dumpIsMultiDatabase: null,
+  rolePasswordsCaptured: null,
   serverVersionNum: 160_002,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,

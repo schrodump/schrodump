@@ -50,6 +50,15 @@ export const ManifestSchema = z.object({
   // gone — a required field would fail that recovery on every existing artifact. Absent therefore
   // means "unknown provenance", which is a weaker claim than false.
   sourceHasOplog: z.boolean().optional(),
+  // postgres only: whether the globals dump beside this artifact carries role password hashes.
+  // pg_dumpall can read them only as a superuser; any other role — every managed service's master
+  // user, a least-privilege backup role — gets the roles, memberships and settings WITHOUT them
+  // (--no-role-passwords), and a restore of those globals recreates roles that cannot log in until
+  // someone sets a password. That is a fact about what is in the bucket, so it is written here as
+  // well as on the row: a catalog rebuild is the moment an operator needs to know it and the only
+  // source it has. OPTIONAL for the reason sourceHasOplog is — every manifest already written lacks
+  // it, and absent means "not recorded", which is a weaker claim than either value.
+  rolePasswordsCaptured: z.boolean().optional(),
   createdAt: z.iso.datetime({ offset: true }),
   durationMs: z.number().int().min(0),
 });

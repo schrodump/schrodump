@@ -125,4 +125,13 @@ describe("catalog rebuild — facts the manifest carries must survive the trip",
     const row = await importedRow();
     expect(row.dumpIsMultiDatabase).toBeNull();
   });
+
+  // Whether restoring the globals brings back roles that can log in. The manifest is the only
+  // record of it once the metadata database is gone, so a rebuild that dropped it would turn a
+  // known "no passwords" into an unknown.
+  it("carries whether role passwords were captured, both answers, and null when never recorded", async () => {
+    expect((await importedRow({ rolePasswordsCaptured: false })).rolePasswordsCaptured).toBe(false);
+    expect((await importedRow({ rolePasswordsCaptured: true })).rolePasswordsCaptured).toBe(true);
+    expect((await importedRow()).rolePasswordsCaptured).toBeNull();
+  });
 });

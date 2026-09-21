@@ -19,6 +19,7 @@ import type { StorageDriver } from "@schrodump/storage/driver";
 import { manifestKey, writeManifest } from "@schrodump/storage/manifest-sidecar";
 import { encryptStream } from "../crypto/artifact.js";
 import type { ExecutionMode } from "./execution-mode.js";
+import { describeToolFailure } from "./restore-executor.js";
 import type { BackupPorts, ProbeResult, Recipients, Reservation, UploadResult } from "./backup.js";
 
 const PART_SIZE = 64 * 1024 * 1024;
@@ -75,12 +76,28 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
   const objectKey = (name: string): string =>
     `${deps.prefix}/${deps.organizationId}/${deps.jobId}/${name}`;
 
+  // Every key this backup has started writing and not yet deleted. Recorded BEFORE each write, not
+  // after it succeeds: a failed multipart upload or a put that rejected late can still have left an
+  // object, and a key missing from here is a key nobody will ever delete. DeleteObjects treats an
+  // absent key as success, so over-recording costs nothing.
+  const written = new Set<string>();
+  const discard = async (keys: string[]): Promise<void> => {
+    if (keys.length === 0) return;
+    await deps.driver.delete(keys);
+    for (const key of keys) written.delete(key);
+  };
+
+  // `what` names the step in the job's reason ("globals dump execution failed (exit code 1): ...").
+  // Without it a globals failure read exactly like a database-dump failure, one step after the
+  // database dump had already succeeded and been uploaded.
   const uploadEncrypted = async (
     descriptor: ExecutionDescriptor,
     recipients: string[],
     key: string,
+    what: "dump" | "dump archive" | "globals dump",
     extraMounts: RunMount[] = [],
   ): Promise<{ checksum: string; sizeBytes: number; rawBytes: number }> => {
+    written.add(key);
     const dumpOut = new PassThrough();
     const runPromise = deps.runner.run(descriptor, {
       network: deps.network,
@@ -170,10 +187,21 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     // `key` even though the run failed — persistArtifact is never called on this path, so no Artifact
     // row will ever exist to let retention reclaim it. Delete it best-effort before throwing so it
     // doesn't outlive the job as a permanent orphan; a delete failure must never mask the run's error.
+    // A key whose delete failed here stays in `written`, so discardObjects tries it once more — and
+    // says so in the job's reason if that fails too.
     if (runOutcome.status === "rejected" || runOutcome.value.exitCode !== 0) {
-      await deps.driver.delete([key]).catch(() => undefined);
+      await discard([key]).catch(() => undefined);
       if (runOutcome.status === "rejected") throw runOutcome.reason;
-      throw new Error(`dump execution failed (exit code ${runOutcome.value.exitCode})`);
+      // The tool's own words, not the exit code alone. The runner already captured, truncated and
+      // redacted this stderr (every env value, the password included), and dropping it left an
+      // operator with "exit code 1" for `permission denied for table pg_authid` — the one sentence
+      // that says what to change. The restore path learned this first; describeToolFailure is its.
+      throw new Error(
+        describeToolFailure(
+          `${what} execution failed (exit code ${runOutcome.value.exitCode})`,
+          runOutcome.value.stderr,
+        ),
+      );
     }
 
     if (putOutcome.status === "rejected") throw putOutcome.reason;
@@ -187,8 +215,8 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     // header. Delete the orphan first, exactly as the non-zero-exit path does: persistArtifact is
     // never reached, so no row would ever exist for retention to reclaim it by.
     if (rawBytes === 0) {
-      await deps.driver.delete([key]).catch(() => undefined);
-      throw new Error("dump produced no data (the tool exited 0 but wrote nothing)");
+      await discard([key]).catch(() => undefined);
+      throw new Error(`${what} produced no data (the tool exited 0 but wrote nothing)`);
     }
 
     return { checksum: hash.digest("hex"), sizeBytes, rawBytes };
@@ -218,7 +246,9 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
     });
     if (dump.exitCode !== 0) {
-      throw new Error(`dump execution failed (exit code ${dump.exitCode})`);
+      throw new Error(
+        describeToolFailure(`dump execution failed (exit code ${dump.exitCode})`, dump.stderr),
+      );
     }
 
     // The archive step reuses the dump's own image — every engine image already ships tar, so this
@@ -227,6 +257,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       buildArchiveStaging({ image: dumpDescriptor.image, stagingPath }),
       recipients,
       key,
+      "dump archive",
       [{ source: stagingPath, target: stagingPath, readOnly: true }],
     );
   };
@@ -256,7 +287,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       const { checksum, sizeBytes, rawBytes } =
         mode === "STAGED"
           ? await archiveStagedDump(dumpDescriptor, recipients.recipients, key)
-          : await uploadEncrypted(dumpDescriptor, recipients.recipients, key);
+          : await uploadEncrypted(dumpDescriptor, recipients.recipients, key, "dump");
       return {
         bucketKey: key,
         manifestKey: manifestKey(deps.prefix, deps.organizationId, deps.jobId),
@@ -275,16 +306,28 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     executeGlobals: async ({ recipients, probe }) => {
       const globals = deps.buildGlobalsDescriptor(probe);
       if (globals === null) return;
-      await uploadEncrypted(globals, recipients.recipients, objectKey("globals.bin"));
+      await uploadEncrypted(
+        globals,
+        recipients.recipients,
+        objectKey("globals.bin"),
+        "globals dump",
+      );
     },
 
-    writeManifest: ({ probe, mode, recipients, upload }) =>
-      writeManifest(
+    writeManifest: async ({ probe, mode, recipients, upload }) => {
+      // Recorded before the write for the reason `written` gives. The manifest is the object a
+      // catalog rebuild turns into a row, so one left behind by a failed job would come back as an
+      // artifact the job never produced.
+      written.add(manifestKey(deps.prefix, deps.organizationId, deps.jobId));
+      await writeManifest(
         deps.driver,
         deps.prefix,
         deps.buildManifest({ probe, mode, recipients, upload }),
-      ),
+      );
+    },
 
     persistArtifact: deps.persistArtifact,
+
+    discardObjects: () => discard([...written]),
   };
 }

@@ -259,12 +259,15 @@ export interface RestorePipelineDeps {
 // a non-zero exit or a source error so a truncated/failed restore never reports ok. Every decrypted
 // dump is always removed in finally; cleanup releases the reserved scratch dir.
 // How much of a tool's stderr a failure message keeps. The runner already caps capture at 8 KiB and
-// redacts credentials; the LAST lines are where pg_restore, the mysql client and mongorestore say
-// what broke, and this message becomes a job's `reason` — read in a ledger row, not a log viewer.
+// redacts credentials; the LAST lines are where pg_restore, the mysql client and mongorestore (and
+// on the backup side pg_dump, pg_dumpall, mysqldump and mongodump) say what broke, and this message
+// becomes a job's `reason` — read in a ledger row, not a log viewer.
 const STDERR_DETAIL_LIMIT = 2000;
 
 // `summary` names the step and its exit code; the tool's own stderr, trimmed and tail-bounded,
-// follows it. Nothing but the summary when the tool said nothing.
+// follows it. Nothing but the summary when the tool said nothing. Shared with backup-wiring, whose
+// dump failures threw the exit code alone until a managed postgres answered every backup with
+// `permission denied for table pg_authid` and the reason said "exit code 1".
 export function describeToolFailure(summary: string, stderr: string): string {
   const detail = stderr.trim();
   if (detail === "") return summary;

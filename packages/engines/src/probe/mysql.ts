@@ -57,7 +57,7 @@ export async function probeMysql(conn: ProbeConnection): Promise<ProbeResult> {
         schemas: schemaRows.map((row) => String(row.name)),
         collections: [],
       },
-      facts: { isReplicaSet: false, hasMyisam },
+      facts: { isReplicaSet: false, hasMyisam, canReadRolePasswords: false },
     };
   } finally {
     await connection.end();

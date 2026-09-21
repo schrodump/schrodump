@@ -199,7 +199,7 @@ describe("testTargetConnection reports what the server holds", () => {
       { name: "postgres", sizeBytes: 7_690_000 },
     ],
     scope: { databases: ["ipog_finance", "postgres"], schemas: [], collections: [] },
-    facts: { isReplicaSet: false, hasMyisam: false },
+    facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
   };
 
   it("returns every database by name and size on success", async () => {
@@ -209,7 +209,10 @@ describe("testTargetConnection reports what the server holds", () => {
   });
 
   it("returns whether the server is a replica set, which decides a mongo scope outright", async () => {
-    const replicaSet = { ...rich, facts: { isReplicaSet: true, hasMyisam: false } };
+    const replicaSet = {
+      ...rich,
+      facts: { isReplicaSet: true, hasMyisam: false, canReadRolePasswords: false },
+    };
 
     const outcome = await testTargetConnection(target({ engine: "mongodb" }), table(async () => replicaSet));
 

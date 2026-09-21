@@ -58,6 +58,10 @@ export interface Artifact {
   // Whether this artifact's dump script carries more than one database. Only mysql/mariadb answer
   // it; null means never recorded, which is NOT the same as no — see canConfineRestore.
   dumpIsMultiDatabase: boolean | null;
+  // postgres only: whether the globals dump carries role password hashes. false is a
+  // least-privilege backup role — its roles restore without passwords. null means not recorded
+  // (another engine, or an artifact older than the fact), which is NOT the same as false.
+  rolePasswordsCaptured: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

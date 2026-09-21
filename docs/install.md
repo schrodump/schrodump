@@ -538,6 +538,43 @@ One user per database you back up. That is more setup than a single root credent
 same posture the rest of this tool takes: the thing holding your credentials should hold the
 narrowest ones that work.
 
+### PostgreSQL targets: what the backup role needs
+
+A PostgreSQL backup does not need a superuser, and on a managed service (RDS, Aurora, Cloud SQL,
+Azure, Supabase, Neon, DigitalOcean, Heroku, Aiven) it cannot have one. What it needs is to read
+every object in the database it dumps:
+
+```sql
+CREATE ROLE schrodump_backup LOGIN PASSWORD '<password>';
+GRANT CONNECT ON DATABASE shop TO schrodump_backup;
+
+-- PostgreSQL 14 and later: read every table, view and sequence, in every schema, including
+-- the ones created after today.
+GRANT pg_read_all_data TO schrodump_backup;
+
+-- PostgreSQL 13 has no pg_read_all_data. Grant per schema, and repeat for each one:
+GRANT USAGE ON SCHEMA public TO schrodump_backup;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO schrodump_backup;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO schrodump_backup;
+-- ...and for tables created later (run as the role that will create them):
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO schrodump_backup;
+```
+
+A table the role cannot read fails the dump — with `pg_dump`'s own message in the job's reason —
+rather than being left out of it. Leave `CONNECT` on the server's other databases with `PUBLIC`,
+where PostgreSQL puts it: the connection test measures the size of every database on the server,
+which needs it, and the roles are dumped over a connection to the `postgres` maintenance database.
+On a server that revoked it, the connection test is where that shows.
+
+**What a non-superuser does not get is role passwords.** Every PostgreSQL backup also dumps the
+roles, memberships and tablespaces (`globals.bin`), and the password hashes among them live in
+`pg_authid`, which only a superuser can read. Schrodump asks the server which one it is talking to
+before the dump runs: a superuser's backup carries the hashes, anyone else's is taken with
+`--no-role-passwords`, and the artefact records which — **Role passwords: not captured** in its
+details. Restoring those roles onto a fresh server creates them without passwords; set them
+afterwards. [backup-restore.md](backup-restore.md#what-logical-backups-do-not-cover) has the
+details.
+
 ### Reaching your databases
 
 Executors join the network named by `EXECUTOR_NETWORK`. If your databases run in Docker on the

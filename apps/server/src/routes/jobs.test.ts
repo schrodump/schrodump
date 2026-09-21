@@ -35,6 +35,7 @@ const service: JobsService = {
         executionMode: "STREAM",
         sourceHasOplog: null,
         dumpIsMultiDatabase: null,
+        rolePasswordsCaptured: null,
         serverVersionNum: 160002,
         sizeRawBytes: 9_000_000_000,
         sizeCompressedBytes: 1_500_000_000,

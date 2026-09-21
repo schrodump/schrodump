@@ -515,6 +515,21 @@ export function sourceHasOplogFor(engine: EngineKind, facts: TargetFacts): boole
   return engine === "mongodb" ? facts.isReplicaSet : undefined;
 }
 
+// Whether the globals dump this backup is about to write carries role password hashes. The postgres
+// adapter emits --no-role-passwords exactly when the probe found the role cannot read pg_authid, so
+// the answer is the same fact it read — recorded on the manifest and the row because the difference
+// only surfaces at restore, as roles that exist and cannot log in. worker-wiring.test.ts pins this
+// against the descriptor itself, so the two cannot drift apart.
+//
+// undefined for every other engine, for the reason sourceHasOplogFor gives: they write no globals,
+// and false would claim that something was left out of a dump that never had it.
+export function rolePasswordsCapturedFor(
+  engine: EngineKind,
+  facts: TargetFacts,
+): boolean | undefined {
+  return engine === "postgres" ? facts.canReadRolePasswords : undefined;
+}
+
 export function originDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
   const first = scopedDatabases[0];
   if (first !== undefined && first.length > 0) return first;
@@ -797,6 +812,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         ...(sourceHasOplogFor(engine, facts) !== undefined
           ? { sourceHasOplog: sourceHasOplogFor(engine, facts) }
           : {}),
+        // In the bucket beside the globals it describes, so a catalog rebuild still knows whether
+        // restoring them brings back roles that can log in.
+        ...(rolePasswordsCapturedFor(engine, facts) !== undefined
+          ? { rolePasswordsCaptured: rolePasswordsCapturedFor(engine, facts) }
+          : {}),
         jobId: job.id,
         organizationId: job.organizationId,
         engine,
@@ -828,6 +848,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             executionMode: mode,
             serverVersionNum: probe.serverVersionNum,
             sourceHasOplog: sourceHasOplogFor(engine, facts) ?? null,
+            rolePasswordsCaptured: rolePasswordsCapturedFor(engine, facts) ?? null,
             // Recorded from the scope the dump actually named. Restore cannot re-derive it: the set
             // of databases a credential can see changes, and the question is about the script in
             // the bucket, not about today's server.

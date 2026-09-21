@@ -41,6 +41,7 @@ interface Harness {
   released: { value: boolean };
   persistedStates: string[];
   states: string[];
+  reasons: (string | undefined)[];
 }
 
 function makeHarness(
@@ -52,9 +53,11 @@ function makeHarness(
   const released = { value: false };
   const persistedStates: string[] = [];
   const states: string[] = [];
+  const reasons: (string | undefined)[] = [];
   const ports: BackupPorts = {
-    setState: (state) => {
+    setState: (state, reason) => {
       states.push(state);
+      reasons.push(reason);
       calls.push(`setState:${state}`);
       return Promise.resolve();
     },
@@ -96,9 +99,13 @@ function makeHarness(
       persistedStates.push(input.state);
       return Promise.resolve("artifact-1");
     },
+    discardObjects: () => {
+      calls.push("discardObjects");
+      return Promise.resolve();
+    },
     ...over,
   };
-  return { ports, calls, released, persistedStates, states };
+  return { ports, calls, released, persistedStates, states, reasons };
 }
 
 describe("runBackupJob", () => {
@@ -183,5 +190,86 @@ describe("runBackupJob", () => {
     await runBackupJob(CTX, h.ports);
 
     expect(reasons).toEqual([undefined]);
+  });
+});
+
+// Every step after the upload can fail, and none of them used to clean up after the one before it.
+// A postgres globals dump refused by a managed server left the database dump in the bucket with no
+// manifest and no row — nothing that could ever find it again. The objects belong to a row, and
+// until the row exists they belong to nobody.
+describe("runBackupJob — a failure before the row exists leaves nothing in the bucket", () => {
+  const POSTGRES_CAPS: Capabilities = {
+    stagedCapable: true,
+    maxParallelism: 8,
+    requiresSeparateGlobalsDump: true,
+  };
+
+  const refused = (message: string) => () => Promise.reject(new Error(message));
+  const STEPS: [string, Partial<BackupPorts>][] = [
+    [
+      "the globals dump",
+      {
+        executeGlobals: refused(
+          "globals dump execution failed (exit code 1): permission denied for table pg_authid",
+        ),
+      },
+    ],
+    ["the manifest write", { writeManifest: refused("put failed: manifest") }],
+    ["the row insert", { persistArtifact: refused("insert failed") }],
+  ];
+
+  // ...and the step's own failure stays the reason.
+  it.each(STEPS)("discards what was written when %s fails", async (_step, over) => {
+    const h = makeHarness(over, POSTGRES_CAPS);
+    const outcome = await runBackupJob(CTX, h.ports);
+
+    expect(outcome.ok).toBe(false);
+    expect(h.calls).toContain("discardObjects");
+    // Discarded BEFORE the job is closed: a FAILED job whose objects are still being deleted is a
+    // window in which the bucket and the ledger disagree.
+    expect(h.calls.indexOf("discardObjects")).toBeLessThan(h.calls.indexOf("setState:FAILED"));
+    expect(h.persistedStates).toEqual([]);
+    // The reason is the step's own failure, not a word about cleanup.
+    const reason = h.reasons[h.states.indexOf("FAILED")];
+    expect(reason).not.toMatch(/could not be removed/);
+    expect(reason?.length).toBeGreaterThan(0);
+  });
+
+  it("says so in the reason when the objects could not be removed, without losing the cause", async () => {
+    const h = makeHarness(
+      {
+        executeGlobals: refused("globals dump execution failed (exit code 1)"),
+        discardObjects: refused("DeleteObjects: 503"),
+      },
+      POSTGRES_CAPS,
+    );
+    await runBackupJob(CTX, h.ports);
+
+    const reason = h.reasons[h.states.indexOf("FAILED")] ?? "";
+    expect(reason.startsWith("globals dump execution failed (exit code 1)")).toBe(true);
+    expect(reason).toMatch(/could not be removed/);
+  });
+
+  // The other direction, and the more dangerous one: once the row exists the objects ARE the
+  // artifact. Deleting them because a later bookkeeping write failed would leave a row that points
+  // at nothing — a backup the catalog promises and the bucket does not hold.
+  it("never discards the objects of an artifact whose row was written", async () => {
+    let first = true;
+    const h = makeHarness(
+      {
+        setState: (state) => {
+          if (state === "SUCCEEDED" && first) {
+            first = false;
+            return Promise.reject(new Error("the job row could not be updated"));
+          }
+          return Promise.resolve();
+        },
+      },
+      POSTGRES_CAPS,
+    );
+    await runBackupJob(CTX, h.ports);
+
+    expect(h.calls).toContain("persistArtifact");
+    expect(h.calls).not.toContain("discardObjects");
   });
 });

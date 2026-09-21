@@ -50,6 +50,33 @@ describe("parseManifest — sourceHasOplog", () => {
   });
 });
 
+describe("parseManifest — rolePasswordsCaptured", () => {
+  it("carries both answers through a parse -> serialize -> parse round trip", () => {
+    for (const captured of [true, false]) {
+      const parsed = parseManifest({ ...VALID, rolePasswordsCaptured: captured });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      const again = parseManifest(JSON.parse(serializeManifest(parsed.manifest)));
+      expect(again.ok).toBe(true);
+      if (!again.ok) return;
+      expect(again.manifest.rolePasswordsCaptured).toBe(captured);
+    }
+  });
+
+  it("still parses a manifest written before the fact was recorded", () => {
+    // The catalog rebuild reads every manifest already in a bucket, and none of them has this
+    // field. Required, it would fail disaster recovery on every postgres artifact ever written.
+    const parsed = parseManifest(VALID);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.rolePasswordsCaptured).toBeUndefined();
+  });
+
+  it("refuses a value that is not a boolean rather than reading it as one", () => {
+    expect(parseManifest({ ...VALID, rolePasswordsCaptured: "yes" }).ok).toBe(false);
+  });
+});
+
 describe("parseManifest / serializeManifest", () => {
   it("round-trips parse -> serialize -> parse", () => {
     const first = parseManifest(VALID);

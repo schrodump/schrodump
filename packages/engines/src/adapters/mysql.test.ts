@@ -26,7 +26,7 @@ function dumpInput(over: Partial<DumpInput> = {}): DumpInput {
     executionMode: "STREAM",
     parallelism: 1,
     scope: { databases: ["app"], schemas: [], collections: [] },
-    facts: { isReplicaSet: false, hasMyisam: false },
+    facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     ...over,
   };
 }
@@ -141,7 +141,7 @@ describe("mysqlAdapter.buildDump", () => {
 
   it("returns a structured warning when MyISAM is in scope, never silencing it", () => {
     const descriptor = mysqlAdapter.buildDump(
-      dumpInput({ facts: { isReplicaSet: false, hasMyisam: true } }),
+      dumpInput({ facts: { isReplicaSet: false, hasMyisam: true, canReadRolePasswords: false } }),
     );
     expect(descriptor.warnings).toBeDefined();
     expect(descriptor.warnings?.[0]?.code).toBe("MYISAM_UNDER_SINGLE_TRANSACTION");

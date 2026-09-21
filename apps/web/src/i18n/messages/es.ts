@@ -426,6 +426,10 @@ export const es: Record<MessageKey, string> = {
     "La restauración completa no es posible para este artefacto; solo se verificó su checksum.",
   "artifacts.detail.raw": "Tamaño original",
   "artifacts.oplog": "Punto en el tiempo (oplog)",
+  "artifacts.detail.rolePasswords": "Contraseñas de los roles",
+  "artifacts.rolePasswords.captured": "Capturadas",
+  "artifacts.rolePasswords.notCaptured":
+    "No capturadas — el rol del backup no puede leerlas; los roles restaurados necesitan una contraseña nueva",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
   "artifacts.delete": "Eliminar",

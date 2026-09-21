@@ -26,7 +26,7 @@ function dumpInput(over: Partial<DumpInput> = {}): DumpInput {
     executionMode: "STREAM",
     parallelism: 1,
     scope: { databases: ["app"], schemas: [], collections: [] },
-    facts: { isReplicaSet: false, hasMyisam: false },
+    facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     ...over,
   };
 }
@@ -110,8 +110,14 @@ describe("postgresAdapter.buildDump", () => {
 });
 
 describe("postgresAdapter.buildGlobalsDump", () => {
-  it("emits pg_dumpall --globals-only as a separate descriptor", () => {
-    const descriptor = postgresAdapter.buildGlobalsDump?.(dumpInput());
+  const withRolePasswords = (canReadRolePasswords: boolean): DumpInput =>
+    dumpInput({ facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords } });
+
+  it("emits pg_dumpall --globals-only as a separate descriptor, with password hashes for a role that can read them", () => {
+    const descriptor = postgresAdapter.buildGlobalsDump?.(withRolePasswords(true));
+    // No --no-role-passwords: a superuser's globals.bin recreates its roles WITH their passwords on
+    // restore, and that must not regress to "roles without passwords" for the deployments that had
+    // it.
     expect(descriptor?.command).toEqual([
       "pg_dumpall",
       "-h",
@@ -123,6 +129,23 @@ describe("postgresAdapter.buildGlobalsDump", () => {
       "--globals-only",
     ]);
     expect(descriptor?.outputKind).toBe("stdout");
+  });
+
+  // The first backup of every managed postgres failed here: pg_dumpall reads pg_authid unless told
+  // otherwise, and nobody but a superuser may. With the flag it reads pg_roles and succeeds.
+  it("asks for no role passwords when the role cannot read pg_authid", () => {
+    const descriptor = postgresAdapter.buildGlobalsDump?.(withRolePasswords(false));
+    expect(descriptor?.command).toEqual([
+      "pg_dumpall",
+      "-h",
+      "db.internal",
+      "-p",
+      "5432",
+      "-U",
+      "backup",
+      "--globals-only",
+      "--no-role-passwords",
+    ]);
   });
 });
 

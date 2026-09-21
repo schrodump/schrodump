@@ -24,6 +24,7 @@ import {
   originDatabaseFor,
   postgresUnscopedAlternatives,
   resolveVerifyPlan,
+  rolePasswordsCapturedFor,
   verifiedProvenance,
   sanitizeReason,
   sourceHasOplogFor,
@@ -227,7 +228,11 @@ describe("verifiedProvenance", () => {
 });
 
 describe("sourceHasOplogFor", () => {
-  const facts = (isReplicaSet: boolean) => ({ isReplicaSet, hasMyisam: false });
+  const facts = (isReplicaSet: boolean) => ({
+    isReplicaSet,
+    hasMyisam: false,
+    canReadRolePasswords: false,
+  });
 
   it("records true for a mongo dump of a replica set — the archive carries an oplog", () => {
     // buildDump emits --oplog exactly when it dumps a replica set, and refuses a SCOPED dump there,
@@ -245,6 +250,52 @@ describe("sourceHasOplogFor", () => {
     expect(sourceHasOplogFor("postgres", facts(false))).toBeUndefined();
     expect(sourceHasOplogFor("mysql", facts(true))).toBeUndefined();
     expect(sourceHasOplogFor("mariadb", facts(false))).toBeUndefined();
+  });
+});
+
+describe("rolePasswordsCapturedFor", () => {
+  const facts = (canReadRolePasswords: boolean): TargetFacts => ({
+    isReplicaSet: false,
+    hasMyisam: false,
+    canReadRolePasswords,
+  });
+
+  it("records what the postgres globals dump will capture, for both kinds of role", () => {
+    expect(rolePasswordsCapturedFor("postgres", facts(true))).toBe(true);
+    // Every managed postgres's master user, and any least-privilege role.
+    expect(rolePasswordsCapturedFor("postgres", facts(false))).toBe(false);
+  });
+
+  it("records nothing for an engine that writes no globals, rather than a misleading false", () => {
+    expect(rolePasswordsCapturedFor("mysql", facts(false))).toBeUndefined();
+    expect(rolePasswordsCapturedFor("mariadb", facts(true))).toBeUndefined();
+    expect(rolePasswordsCapturedFor("mongodb", facts(false))).toBeUndefined();
+  });
+
+  // The recorded fact and the command are decided in two places from one probe fact. If they ever
+  // disagree, the manifest says "passwords captured" over a globals.bin that has none — and the
+  // operator learns otherwise from a role that cannot log in after a restore.
+  it("agrees with the flag the postgres adapter actually emits", () => {
+    for (const canRead of [true, false]) {
+      const descriptor = resolveAdapter("postgres").buildGlobalsDump?.({
+        connection: {
+          host: "db",
+          port: 5432,
+          database: "app",
+          username: "u",
+          password: "p",
+          tls: false,
+        },
+        serverVersionNum: 170_000,
+        executionMode: "STREAM",
+        parallelism: 1,
+        scope: { databases: ["app"], schemas: [], collections: [] },
+        facts: facts(canRead),
+      });
+      expect(descriptor?.command.includes("--no-role-passwords")).toBe(
+        rolePasswordsCapturedFor("postgres", facts(canRead)) === false,
+      );
+    }
   });
 });
 
@@ -332,7 +383,7 @@ describe("toBackupProbe", () => {
         { name: "reporting", sizeBytes: 2500 },
       ],
       scope: { databases: ["app", "reporting"], schemas: [], collections: [] },
-      facts: { isReplicaSet: false, hasMyisam: false },
+      facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     };
     expect(toBackupProbe(rich)).toEqual({
       serverVersionNum: 160002,
@@ -346,7 +397,7 @@ describe("toBackupProbe", () => {
       serverVersionNum: 80004,
       databases: [],
       scope: { databases: [], schemas: [], collections: [] },
-      facts: { isReplicaSet: false, hasMyisam: false },
+      facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     };
     expect(toBackupProbe(rich).estimatedBytes).toBe(0);
   });
@@ -636,7 +687,7 @@ describe("buildDumpDescriptorFor", () => {
     password: "pw",
     tls: false,
   });
-  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
+  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false };
   const probe = (databases: string[], schemas: string[] = []) => ({
     serverVersionNum: 170_011,
     scope: { databases, schemas, collections: [] },
@@ -793,7 +844,7 @@ describe("backupContextFor — routing a backup by what its target selects", () 
     scope: { databases: ["billing", "mysql", "shop", "sys"], schemas: [], collections: [] },
     estimatedBytes: 1_000_000,
   };
-  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
+  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: true };
 
   // runBackupJob over fake ports, with the REAL adapter building the descriptor the executor would
   // run — so what is asserted is the command, not only the mode it was built for.
@@ -832,6 +883,7 @@ describe("backupContextFor — routing a backup by what its target selects", () 
         return Promise.resolve({ release: () => Promise.resolve() });
       },
       resolveRecipients: () => Promise.resolve({ recipients: ["age1op"], keyIds: ["op"] }),
+      discardObjects: () => Promise.resolve(),
       executeAndUpload: ({ mode, parallelism, probe }) => {
         executed.push({ mode, parallelism, command: buildDescriptor(mode, parallelism, probe).command });
         return Promise.resolve({

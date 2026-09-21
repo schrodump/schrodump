@@ -444,49 +444,55 @@ model NotificationSnapshot {
 }
 
 model Artifact {
-  id                  String               @id @default(cuid())
-  organizationId      String
-  jobId               String               @unique
-  destinationId       String
-  state               ArtifactState        @default(UNOBSERVED)
+  id                    String               @id @default(cuid())
+  organizationId        String
+  jobId                 String               @unique
+  destinationId         String
+  state                 ArtifactState        @default(UNOBSERVED)
   // How the artifact reached the state above: the verify level that actually ran. NULL until a
   // verify sets VERIFIED or FAILED (and on artifacts written before this was tracked). The ternary
   // state alone cannot tell a green proven by a real FULL_RESTORE from one only CHECKSUM-verified,
   // and the dashboard must not blur them — see docs/backup-restore.md and the root CLAUDE.md thesis.
-  verifiedLevel       VerifyLevel?
+  verifiedLevel         VerifyLevel?
   // True when that level was a DOWNGRADE from what was asked: a FULL_RESTORE policy whose artifact
   // cannot be restore-verified in v1 (an unscoped replica-set / multi-database archive), or a sealed
   // destination the server holds no identity for. A VERIFIED with this set is a checksum-only green
   // against the operator's intent — the exact case that has to read differently from a real restore.
-  verifiedDegraded    Boolean              @default(false)
-  bucketKey           String
-  manifestKey         String
-  engine              EngineKind
-  executionMode       ExecutionMode        @default(STREAM)
-  serverVersionNum    Int
-  sizeRawBytes        BigInt
-  sizeCompressedBytes BigInt
-  checksumAlgorithm   String
-  checksum            String
-  compression         CompressionAlgorithm
+  verifiedDegraded      Boolean              @default(false)
+  bucketKey             String
+  manifestKey           String
+  engine                EngineKind
+  executionMode         ExecutionMode        @default(STREAM)
+  serverVersionNum      Int
+  sizeRawBytes          BigInt
+  sizeCompressedBytes   BigInt
+  checksumAlgorithm     String
+  checksum              String
+  compression           CompressionAlgorithm
   // Fingerprints of the recipients the artifact was encrypted for.
-  keyIds              String[]
+  keyIds                String[]
   // mongodb only: whether the archive was dumped with --oplog (i.e. from a replica set). NULL means
   // unknown — either a non-mongo engine, or an artifact written before the fact was tracked. Restore
   // needs it to decide whether --oplogReplay is safe; it cannot be re-derived later, because the
   // origin's topology may have changed or the origin may be gone.
-  sourceHasOplog      Boolean?
+  sourceHasOplog        Boolean?
   // mysql/mariadb only: whether the dump script carries more than one database (mysqldump
   // --databases with two or more names). NULL means unknown — either an engine whose restore is not
   // a replayed script, or an artifact written before the fact was tracked. Restore reads it to
   // decide whether a sub-cluster target can be confined at all: for these engines DATABASE and
   // FULL_CLUSTER build the same command, so a multi-database script rewrites every database it
   // carries regardless of which one was asked for.
-  dumpIsMultiDatabase Boolean?
+  dumpIsMultiDatabase   Boolean?
+  // postgres only: whether the globals dump beside this artifact (globals.bin) carries role password
+  // hashes. Only a superuser can read them; a least-privilege role — every managed service's master
+  // user — backs up roles, memberships and settings without them, and restoring those globals
+  // recreates roles that cannot log in until a password is set. NULL means not recorded — a
+  // non-postgres engine, or an artifact written before the fact was tracked.
+  rolePasswordsCaptured Boolean?
   // jobIds this artifact depends on (full/incremental chain).
-  dependsOn           String[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  dependsOn             String[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   job          BackupJob          @relation("ProducedBy", fields: [jobId], references: [id], onDelete: Cascade)

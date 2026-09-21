@@ -29,6 +29,7 @@ const row = {
   executionMode: "STAGED",
   sourceHasOplog: null,
   dumpIsMultiDatabase: null,
+  rolePasswordsCaptured: null,
   serverVersionNum: 160002,
   sizeRawBytes: 9_000_000_000n,
   sizeCompressedBytes: 1_500_000_000n,
@@ -430,6 +431,20 @@ describe("toArtifactRecord carries the oplog fact", () => {
       false,
     );
     expect(toArtifactRecord({ ...row, dumpIsMultiDatabase: null }).dumpIsMultiDatabase).toBe(null);
+  });
+
+  // A postgres artifact backed up by a least-privilege role carries its roles without passwords.
+  // The row recorded it; if the mapper drops it, the operator learns it mid-restore instead.
+  it("passes rolePasswordsCaptured through, including the null that means 'not recorded'", () => {
+    expect(toArtifactRecord({ ...row, rolePasswordsCaptured: true }).rolePasswordsCaptured).toBe(
+      true,
+    );
+    expect(toArtifactRecord({ ...row, rolePasswordsCaptured: false }).rolePasswordsCaptured).toBe(
+      false,
+    );
+    expect(toArtifactRecord({ ...row, rolePasswordsCaptured: null }).rolePasswordsCaptured).toBe(
+      null,
+    );
   });
 
   it("passes sourceHasOplog through, including the null that means 'not a mongo dump'", () => {

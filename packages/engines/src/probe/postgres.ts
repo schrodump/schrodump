@@ -35,6 +35,15 @@ export async function probePostgres(conn: ProbeConnection): Promise<ProbeResult>
         "WHERE schema_name NOT IN ('pg_catalog', 'information_schema') AND schema_name NOT LIKE 'pg\\_%'",
     );
 
+    // The exact predicate pg_dumpall depends on, not `rolsuper`: it reads pg_authid unless given
+    // --no-role-passwords, and that read is refused to everyone but a superuser or a role granted
+    // SELECT on it. A managed service's "master" user (rds_superuser, cloudsqlsuperuser,
+    // azure_pg_admin, ...) is not a superuser and gets false here, which is what it is.
+    const authid = await client.query<{ can_read: boolean }>(
+      "SELECT has_table_privilege('pg_catalog.pg_authid', 'SELECT') AS can_read",
+    );
+    const canReadRolePasswords = authid.rows[0]?.can_read === true;
+
     return {
       serverVersionNum,
       databases,
@@ -43,7 +52,7 @@ export async function probePostgres(conn: ProbeConnection): Promise<ProbeResult>
         schemas: schemas.rows.map((row) => row.schema_name),
         collections: [],
       },
-      facts: { isReplicaSet: false, hasMyisam: false },
+      facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords },
     };
   } finally {
     await client.end();
