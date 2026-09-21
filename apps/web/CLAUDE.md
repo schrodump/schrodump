@@ -107,7 +107,12 @@ through four steps and then a failed job citing a key nobody had told them to cr
 and the canary and probe ones tick only when the server recorded a pass (`lastCanaryOk` /
 `lastProbeOk` `=== true`): `null` (never run) and `false` (ran and was refused) both stay open,
 because a bucket nobody proved writable is the same open question the product refuses to paint green
-anywhere else. The card stays until all six are done — it cannot be dismissed.
+anywhere else. The last step needs a policy that verifies by **restoring** (`FULL_RESTORE`), not
+merely one with verify on: the card promises that step turns a backup into an answer, and a checksum
+only says the bytes survived. The same reasoning is why a new policy starts at `FULL_RESTORE` in the
+form (and on the server) wherever scratch is configured; `scratchConfigured` comes from `GET /me`,
+which every role reads, because `/instance` is admin-only and told operators "no scratch". The card
+stays until all six are done — it cannot be dismissed.
 
 ## Design system (the Foundations contract)
 

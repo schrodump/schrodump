@@ -29,7 +29,7 @@ three states**, and the colour is content, not decoration:
 
 | State | | Meaning |
 | --- | --- | --- |
-| 🟢 **VERIFIED** | green | Something opened it and checked. It restores. |
+| 🟢 **VERIFIED** | green | Something opened it and checked. By default that means it was restored into a throwaway database; a checksum-only green says so beside the badge. |
 | 🟡 **UNOBSERVED** | amber | It was written; nothing has looked inside. It may be perfect, or empty. **This is the default.** |
 | 🔴 **FAILED** | red | It was checked and it is not good. |
 
@@ -38,7 +38,8 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 
 ## Features
 
-- **Verified restore** — checksum, or a full restore into a throwaway database, per policy.
+- **Verified restore** — by default every backup is restored into a throwaway database and
+  checked; a cheaper checksum is a per-policy choice, and the badge says which one a green came from.
 - **Agentless** — nothing is installed on your database host. Dumps run in ephemeral containers
   built from the target's own major version.
 - **Encrypted at rest** — every artifact is encrypted with [`age`](https://age-encryption.org) to

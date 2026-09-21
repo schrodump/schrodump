@@ -11,7 +11,7 @@ import { PolicyForm } from "@/components/policy-form";
 import { ColumnHeaders, RuledList } from "@/components/ruled-list";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import { useCurrentRole, useInstanceTimeZone } from "@/hooks/use-current-role";
+import { useCurrentRole, useInstanceTimeZone, useScratchConfigured } from "@/hooks/use-current-role";
 import { useDeletePolicy, useTriggerBackup, useUpdatePolicy } from "@/hooks/use-mutations";
 import { useInstance, usePolicies } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
@@ -179,7 +179,9 @@ export default function PoliciesPage() {
   // Whether this deploy can stage a dump or sandbox a restore: the single most consequential
   // fact about it, and the API says so. Unknown reads as not configured — the form then withholds
   // the staged mode with its reason, which is the honest default while the answer loads.
-  const scratchConfigured = instance.data?.scratch.configured ?? false;
+  // From /me, which every role can read; /instance is admin-only and answered "not configured" for an
+  // operator on a deployment that has scratch.
+  const scratchConfigured = useScratchConfigured() ?? instance.data?.scratch.configured ?? false;
 
   const columns = [
     { key: "policy", label: t("policies.col.policy") },

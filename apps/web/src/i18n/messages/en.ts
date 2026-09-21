@@ -512,7 +512,7 @@ export const en = {
   "guided.step.canary": "Run the canary on that destination",
   "guided.step.target": "Create a database target",
   "guided.step.probe": "Test the target connection",
-  "guided.step.policy": "Create a policy with verify enabled",
+  "guided.step.policy": "Create a policy that verifies by restoring",
   "guided.open": "Open",
   "guided.done": "Done",
 

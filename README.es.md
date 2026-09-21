@@ -30,7 +30,7 @@ artefacto está en **uno de tres estados**, y el color es contenido, no decoraci
 
 | Estado | | Significado |
 | --- | --- | --- |
-| 🟢 **VERIFIED** | verde | Algo lo abrió y lo comprobó. Se restaura. |
+| 🟢 **VERIFIED** | verde | Algo lo abrió y lo comprobó. Por defecto, eso significa que se restauró en una base desechable; un verde solo por checksum lo dice junto a la insignia. |
 | 🟡 **UNOBSERVED** | ámbar | Se escribió; nadie ha mirado dentro. Puede estar perfecto, o vacío. **Es el valor por defecto.** |
 | 🔴 **FAILED** | rojo | Se comprobó y no sirve. |
 
@@ -39,8 +39,8 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
 
 ## Características
 
-- **Restauración verificada** — checksum, o una restauración completa en una base desechable, por
-  política.
+- **Restauración verificada** — por defecto cada copia se restaura en una base desechable y se
+  comprueba; un checksum, más barato, es una elección por política, y la insignia dice de cuál vino un verde.
 - **Sin agente** — no se instala nada en el host de tu base de datos. Los volcados se ejecutan en
   contenedores efímeros construidos a partir de la versión mayor del propio destino.
 - **Cifrado en reposo** — cada artefacto se cifra con [`age`](https://age-encryption.org) para dos

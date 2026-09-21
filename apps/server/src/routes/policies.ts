@@ -20,8 +20,14 @@ function cronField(timeZone: string) {
     });
 }
 
-// verifyLevel default is CHECKSUM — verify is ON by default; turning it off (NONE) is an explicit
-// choice the UI must warn about.
+// verifyLevel defaults to FULL_RESTORE: the product's claim is that a backup is not trusted until a
+// restore has verified it, and the default was CHECKSUM — a hash of the bytes, which the roadmap
+// records would have marked the 876-byte and the extension-less artifacts VERIFIED. A green now means
+// a restore reproduced the database unless someone chose less, and the UI says which beside the badge.
+// Where a full restore cannot run (a sealed destination, an unscoped replica-set dump) the verify
+// downgrades to CHECKSUM and records verifiedDegraded; without scratch it cannot run at all and ends
+// INCONCLUSIVE, leaving the artifact amber — the honest answer, never a false green. Turning verify
+// off (NONE) is an explicit choice the UI must warn about.
 function createPolicySchema(timeZone: string) {
   return z.object({
     name: z.string().min(1),
@@ -34,7 +40,7 @@ function createPolicySchema(timeZone: string) {
     keepMonthly: z.number().int().min(0).default(0),
     keepYearly: z.number().int().min(0).default(0),
     minAgeBeforeDeleteMs: z.number().int().min(0).default(0),
-    verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]).default("CHECKSUM"),
+    verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]).default("FULL_RESTORE"),
     executionMode: z.enum(["STREAM", "STAGED"]).default("STREAM"),
     parallelism: z.number().int().min(1).default(1),
     compression: z.enum(["none", "zstd", "gzip"]).default("zstd"),

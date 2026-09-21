@@ -510,7 +510,7 @@ export const ptBR: Record<MessageKey, string> = {
   "guided.step.canary": "Rodar o canary nesse destino",
   "guided.step.target": "Criar um banco alvo",
   "guided.step.probe": "Testar a conexão com o alvo",
-  "guided.step.policy": "Criar uma política com verify ligado",
+  "guided.step.policy": "Crie uma política que verifica restaurando",
   "guided.open": "Abrir",
   "guided.done": "Feito",
 

@@ -103,7 +103,12 @@ export function PolicyForm({
         }
       : { keepLast: 7, keepDaily: 0, keepWeekly: 4, keepMonthly: 6, keepYearly: 1 },
   );
-  const [verifyLevel, setVerifyLevel] = useState<VerifyLevel>(policy?.verifyLevel ?? "CHECKSUM");
+  // A new policy restores to verify wherever this deployment can: a checksum proves the bytes, only
+  // a restore proves the data, and the product's claim is the second. Without scratch a full restore
+  // could only ever end "could not run", so the form starts at CHECKSUM there and says why below.
+  const [verifyLevel, setVerifyLevel] = useState<VerifyLevel>(
+    policy?.verifyLevel ?? (scratchConfigured ? "FULL_RESTORE" : "CHECKSUM"),
+  );
   const [executionMode, setExecutionMode] = useState<ExecutionMode>(policy?.executionMode ?? "STREAM");
   const [parallelism, setParallelism] = useState(policy?.parallelism ?? 1);
   const [invalid, setInvalid] = useState(false);
