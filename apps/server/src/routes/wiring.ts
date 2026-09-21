@@ -290,7 +290,6 @@ export function toArtifactRecord(row: {
     destinationId: row.destinationId,
     targetName: row.job?.policy?.target?.name ?? null,
     policyName: row.job?.policy?.name ?? null,
-    restoreInto: restoreIntoOf(row.engine, row.job?.policy?.target ?? null),
     state: row.state,
     // Passed through as recorded: verifiedLevel is null until a verify reaches a verdict, and a
     // green with verifiedDegraded true is a checksum the operator asked full restore for — the row
@@ -321,6 +320,11 @@ export function toArtifactRecord(row: {
     dependsOn: row.dependsOn,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    // Last, and that is load-bearing for a reader we ship: scripts/smoke-compose.sh reads this list
+    // with `tr '}' '\n'` and greps each line for an artifact's own fields. A nested object in the
+    // middle of the record split every item in two, `id` on one line and `executionMode` on the next,
+    // and the smoke could no longer find the artifact it had just written.
+    restoreInto: restoreIntoOf(row.engine, row.job?.policy?.target ?? null),
   };
 }
 
