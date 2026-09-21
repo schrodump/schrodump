@@ -115,6 +115,19 @@ export function ArtifactRow({
             ? t("common.yes")
             : t("common.no"),
     },
+    // Only when recorded: null is another engine, or an artifact older than the fact. "Not
+    // captured" reads as a caution — a least-privilege backup role brings its roles back unable to
+    // log in, and that should be read here rather than discovered in the middle of a restore.
+    {
+      label: t("artifacts.detail.rolePasswords"),
+      value:
+        artifact.rolePasswordsCaptured === null
+          ? null
+          : artifact.rolePasswordsCaptured
+            ? t("artifacts.rolePasswords.captured")
+            : t("artifacts.rolePasswords.notCaptured"),
+      tone: artifact.rolePasswordsCaptured === false ? "caution" : "plain",
+    },
     {
       label: t("artifacts.detail.dependsOn"),
       value: artifact.dependsOn.length > 0 ? artifact.dependsOn.map((id) => id.slice(0, 8)).join(" · ") : null,

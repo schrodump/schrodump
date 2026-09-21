@@ -162,7 +162,7 @@ export function createSelfBackupPorts(
         // The whole database, not a subset: a partial metadata dump restores to a catalog that
         // silently disagrees with the bucket.
         scope: { databases: [connection.database], schemas: [], collections: [] },
-        facts: { isReplicaSet: false, hasMyisam: false },
+        facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
       });
 
       const dumpOut = new PassThrough();

@@ -76,6 +76,12 @@ export interface ArtifactRecord {
   // only a recorded false clears the gate. `null` for every engine whose restore is not a replayed
   // script, deliberately: false would assert something about a script those artifacts do not have.
   dumpIsMultiDatabase: boolean | null;
+  // postgres only: whether the globals dump beside this artifact carries role password hashes.
+  // false is what a least-privilege role — every managed service's master user — produces: the
+  // roles are there, and restoring them recreates roles that cannot log in until a password is
+  // set. Exposed because that surfaces at the worst moment otherwise, mid-restore. `null` is "not
+  // recorded" (another engine, or an artifact written before the fact was tracked), not "no".
+  rolePasswordsCaptured: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: number;
   sizeCompressedBytes: number;

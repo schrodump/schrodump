@@ -126,7 +126,7 @@ describe.skipIf(!enabled)("self-backup recovery drill (integration)", () => {
       executionMode: "STREAM",
       parallelism: 1,
       scope: { databases: ["app"], schemas: [], collections: [] },
-      facts: { isReplicaSet: false, hasMyisam: false },
+      facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     });
     const plaintext = await execInContainer(
       source.getName().replace(/^\//, ""),

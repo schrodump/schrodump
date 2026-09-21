@@ -265,6 +265,7 @@ export function toArtifactRecord(row: {
   executionMode: string;
   sourceHasOplog: boolean | null;
   dumpIsMultiDatabase: boolean | null;
+  rolePasswordsCaptured: boolean | null;
   serverVersionNum: number;
   sizeRawBytes: bigint;
   sizeCompressedBytes: bigint;
@@ -310,6 +311,10 @@ export function toArtifactRecord(row: {
     // restore gate treats as unproven rather than as safe. Coercing it to false would hand the UI
     // permission the server does not give.
     dumpIsMultiDatabase: row.dumpIsMultiDatabase,
+    // Passed through unchanged, null included: null is "not recorded" (another engine, or an
+    // artifact older than the column), and coercing it to either answer would tell the operator
+    // something about the globals that nobody observed.
+    rolePasswordsCaptured: row.rolePasswordsCaptured,
     serverVersionNum: row.serverVersionNum,
     sizeRawBytes: Number(row.sizeRawBytes),
     sizeCompressedBytes: Number(row.sizeCompressedBytes),

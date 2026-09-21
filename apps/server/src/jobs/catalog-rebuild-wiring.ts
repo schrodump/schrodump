@@ -75,6 +75,10 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
           // A rebuild must not silently downgrade a known-oplog artifact to unknown provenance:
           // that would make every later restore of it record a caveat it does not deserve.
           sourceHasOplog: manifest.sourceHasOplog ?? null,
+          // The same rule: a rebuilt row must still say whether restoring its globals brings back
+          // roles that can log in. Absent from a manifest written before the fact was recorded,
+          // which stays NULL rather than being guessed.
+          rolePasswordsCaptured: manifest.rolePasswordsCaptured ?? null,
           // Derived here rather than stored in the manifest, because the manifest already answers
           // it: the dump scope is what mysqldump's --databases list was. This is why an artifact
           // predating the column is not stranded — a rebuild recovers the fact from the bucket

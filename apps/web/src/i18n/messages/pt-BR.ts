@@ -425,6 +425,10 @@ export const ptBR: Record<MessageKey, string> = {
     "A restauração completa não é possível para este artefato; só o checksum foi verificado.",
   "artifacts.detail.raw": "Tamanho original",
   "artifacts.oplog": "Ponto no tempo (oplog)",
+  "artifacts.detail.rolePasswords": "Senhas dos papéis",
+  "artifacts.rolePasswords.captured": "Capturadas",
+  "artifacts.rolePasswords.notCaptured":
+    "Não capturadas — o papel do backup não consegue lê-las; os papéis restaurados precisam de uma senha nova",
   "artifacts.verify": "Verificar",
   "artifacts.restore": "Restaurar",
   "artifacts.delete": "Excluir",

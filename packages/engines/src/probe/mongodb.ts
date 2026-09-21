@@ -49,7 +49,7 @@ export async function probeMongodb(conn: ProbeConnection): Promise<ProbeResult> 
         schemas: [],
         collections: [],
       },
-      facts: { isReplicaSet, hasMyisam: false },
+      facts: { isReplicaSet, hasMyisam: false, canReadRolePasswords: false },
     };
   } finally {
     await client.close();

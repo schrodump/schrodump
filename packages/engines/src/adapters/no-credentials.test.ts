@@ -40,7 +40,7 @@ function commandsFor(kind: EngineKind): string[][] {
     executionMode: "STREAM",
     parallelism: 1,
     scope: EMPTY_SCOPE,
-    facts: { isReplicaSet: false, hasMyisam: false },
+    facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
   };
   const restore: RestoreInput = {
     connection: CONN,
@@ -85,7 +85,7 @@ describe("no credential ever appears in a command", () => {
         executionMode: "STREAM",
         parallelism: 1,
         scope: EMPTY_SCOPE,
-        facts: { isReplicaSet: false, hasMyisam: false },
+        facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
       }).env;
       expect(Object.values(env)).toContain(PASSWORD);
     });

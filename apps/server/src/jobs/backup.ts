@@ -77,6 +77,12 @@ export interface BackupPorts {
     recipients: Recipients;
     upload: UploadResult;
   }): Promise<string>;
+  // Deletes every object this backup has written to the bucket so far — artifact.bin, globals.bin,
+  // manifest.json, whichever exist. Called when the job fails before its Artifact row does: without
+  // a row nothing ever learns those keys (retention and the delete route both start from the row),
+  // so they would stay in the bucket for good — a postgres globals dump with role password hashes
+  // among them. Rejects when the delete fails, so the job's reason can say the objects remain.
+  discardObjects(): Promise<void>;
 }
 
 export interface BackupOutcome {
@@ -86,11 +92,30 @@ export interface BackupOutcome {
   warnings: string[];
 }
 
+// A failed job's reason, plus a note when the objects it had already written could not be removed.
+// Deliberately never thrown: the dump's own failure is the root cause and must stay the reason's
+// subject — but an orphan nobody can see is exactly what the note exists to prevent, so the note
+// is not swallowed either.
+async function discardingObjects(ports: BackupPorts, reason: string): Promise<string> {
+  try {
+    await ports.discardObjects();
+    return reason;
+  } catch {
+    return `${reason} (and the objects it had already written to the bucket could not be removed)`;
+  }
+}
+
 // The 11-step pipeline. Scratch is always released in `finally`; the artifact is always born
 // UNOBSERVED.
 export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Promise<BackupOutcome> {
   await ports.setState("RUNNING");
   let reservation: Reservation | null = null;
+  // Once the row exists the objects are the artifact's, and deleting them would leave a row
+  // pointing at nothing. Before it, they belong to nobody: a globals dump refused by the server, a
+  // manifest write or a row insert that failed all used to leave artifact.bin (and whatever followed
+  // it) in the bucket with no row — which is how a 154 KB artifact.bin outlived a FAILED postgres
+  // backup.
+  let persisted = false;
   try {
     const probe = await ports.probe(); // 1
     const caps = ports.capabilities(probe.serverVersionNum); // 2
@@ -131,6 +156,7 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
       recipients,
       upload,
     });
+    persisted = true;
     // A degradation is written on the job it happened to. The warnings were returned in the outcome
     // and read by nobody, so a policy asking for parallelism 4 over an unscoped mysql target would
     // stream at 1 with no trace of why. The ledger already shows a SUCCEEDED job's reason as what
@@ -141,7 +167,8 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
     );
     return { ok: true, artifactId, mode: mode.mode, warnings: mode.warnings };
   } catch (error) {
-    await ports.setState("FAILED", error instanceof Error ? error.message : "unknown error");
+    const reason = error instanceof Error ? error.message : "unknown error";
+    await ports.setState("FAILED", persisted ? reason : await discardingObjects(ports, reason));
     return { ok: false, artifactId: null, mode: null, warnings: [] };
   } finally {
     if (reservation !== null) {

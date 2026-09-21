@@ -67,6 +67,11 @@ describe.skipIf(!enabled)("probe integration (testcontainers)", () => {
       const result = await probePostgres(connFor(container, 5432, "app", "schrodump"));
       expect(result.serverVersionNum).toBeGreaterThan(130000);
       expect(result.databases.length).toBeGreaterThan(0);
+      // POSTGRES_USER is a superuser, so the globals dump keeps capturing role password hashes.
+      // The least-privilege half — false, and the backup still succeeding — is
+      // adapters/postgres-globals.integration.test.ts. Asserted here too because this file is the
+      // one CI runs against the edges of the supported range (13 and 18).
+      expect(result.facts.canReadRolePasswords).toBe(true);
     } finally {
       await container.stop();
     }

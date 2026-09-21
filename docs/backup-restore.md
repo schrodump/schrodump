@@ -34,6 +34,18 @@ State this out loud before you rely on it:
 - **Not everything is in the dump.** Roles, tablespaces, server configuration and extensions can
   live outside a database-scoped dump. What is included depends on the engine and the scope you
   chose.
+- **PostgreSQL roles come with their passwords only when a superuser took the backup.** Every
+  PostgreSQL backup writes a second object beside the database dump, `globals.bin`
+  (`pg_dumpall --globals-only`): the roles, their memberships and settings, and the tablespaces.
+  Password hashes live in `pg_authid`, which only a superuser can read — so for any other role,
+  which includes the master user of every managed service (RDS, Aurora, Cloud SQL, Azure, Supabase,
+  Neon, DigitalOcean, Heroku, Aiven), the globals are dumped with `--no-role-passwords`. The roles
+  are all there; restoring them onto a fresh server creates roles that cannot log in until someone
+  sets a password (`ALTER ROLE ... PASSWORD`). Restoring them over the server they came from leaves
+  the passwords it already has alone. Each artefact records which one it holds — **Role passwords:
+  captured / not captured** in its details, `rolePasswordsCaptured` in the API and the manifest —
+  because this is the kind of gap you want to read on a Tuesday afternoon, not discover mid-restore.
+  Artefacts written before this was recorded say nothing either way.
 - **A dump is a moving target unless the engine gives you a snapshot.** Schrodump uses each
   engine's consistent-snapshot mechanism where one exists. Where it does not, the dump is
   consistent per table, not across tables.

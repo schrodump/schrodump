@@ -12,7 +12,7 @@ import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { PutOptions, PutResult, StorageDriver } from "@schrodump/storage/driver";
 import type { RunOptions, RunResult, Runner } from "@schrodump/runner/runner";
 import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
-import type { ProbeResult } from "./backup.js";
+import { runBackupJob, type BackupOutcome, type ProbeResult } from "./backup.js";
 
 const PROBE: ProbeResult = {
   serverVersionNum: 160002,
@@ -468,5 +468,217 @@ describe("createBackupPorts.executeAndUpload", () => {
     });
 
     expect(capture[0]?.signal).toBe(controller.signal);
+  });
+});
+
+// A dump tool that failed says why on stderr, and the runner has already captured and redacted it.
+// The job's reason used to carry the exit code alone — "dump execution failed (exit code 1)" for a
+// managed postgres answering `permission denied for table pg_authid`, the one sentence that says
+// what to change.
+describe("createBackupPorts — a failed dump says what the tool said", () => {
+  const STDERR =
+    'pg_dump: error: connection to server at "db" failed: FATAL:  role "backup" does not exist';
+
+  function failingRunner(stderr: string): Runner {
+    return {
+      run: (_descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 1, stderr, durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+  }
+
+  it("keeps the stderr of a STREAM dump in the failure", async () => {
+    const { deps, recipient } = await makeDeps(1, { runner: failingRunner(STDERR) });
+    await expect(
+      createBackupPorts(deps).executeAndUpload({
+        mode: "STREAM",
+        parallelism: 1,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow(`dump execution failed (exit code 1): ${STDERR}`);
+  });
+
+  it("keeps the stderr of a STAGED dump in the failure", async () => {
+    const { deps, recipient } = await makeDeps(1, { runner: failingRunner(STDERR) });
+    await expect(
+      createBackupPorts({ ...deps, stagingPath: "/scratch/job-1" }).executeAndUpload({
+        mode: "STAGED",
+        parallelism: 2,
+        probe: PROBE,
+        recipients: { recipients: [recipient], keyIds: ["k"] },
+      }),
+    ).rejects.toThrow(`dump execution failed (exit code 1): ${STDERR}`);
+  });
+});
+
+// The whole backup, through the real ports, for the engine that writes three objects. Every step
+// after the database dump's upload can fail — the globals dump (a managed postgres refusing
+// pg_authid), the manifest write, the row insert — and each used to leave what came before it in
+// the bucket with no row: a 154 KB artifact.bin under a FAILED job, found by listing the bucket.
+describe("runBackupJob over createBackupPorts — a failure after the upload leaves nothing behind", () => {
+  const PREFIX = "backups/org-1/job-1";
+  const PG_DUMPALL_STDERR =
+    "pg_dumpall: error: query failed: ERROR:  permission denied for table pg_authid";
+
+  const GLOBALS: ExecutionDescriptor = {
+    image: "postgres:16-alpine",
+    command: ["pg_dumpall", "--globals-only"],
+    env: {},
+    outputKind: "stdout",
+  };
+
+  // The database dump succeeds; the globals dump does whatever the case asks of it.
+  function runnerWithGlobals(globals: { exitCode: number; stderr: string }): Runner {
+    return {
+      run: (descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        const isGlobals = descriptor.command[0] === "pg_dumpall";
+        if (!isGlobals || globals.exitCode === 0) opts.stdout?.write(Buffer.from(FIXTURE_PAYLOAD));
+        opts.stdout?.end();
+        return Promise.resolve(
+          isGlobals
+            ? { exitCode: globals.exitCode, stderr: globals.stderr, durationMs: 1 }
+            : { exitCode: 0, stderr: "", durationMs: 1 },
+        );
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+  }
+
+  // Records what reached the bucket and what left it; `refuse` fails the put of one key.
+  function recordingDriver(refuse?: (key: string) => boolean): {
+    driver: StorageDriver;
+    put: string[];
+    deleted: string[];
+  } {
+    const put: string[] = [];
+    const deleted: string[] = [];
+    return {
+      put,
+      deleted,
+      driver: {
+        ...fakeDriver({ deletedKeys: deleted }),
+        put: (key: string, body: Readable): Promise<PutResult> => {
+          put.push(key);
+          if (refuse?.(key) === true) {
+            body.resume();
+            return Promise.reject(new Error(`put failed: ${key}`));
+          }
+          return new Promise((resolve, reject) => {
+            body.on("error", reject);
+            body.resume();
+            body.on("end", () => resolve({ etag: "e", sizeBytes: 0, checksum: null }));
+          });
+        },
+      },
+    };
+  }
+
+  async function backup(options: {
+    globals?: { exitCode: number; stderr: string };
+    refuse?: (key: string) => boolean;
+    persist?: () => Promise<string>;
+  }): Promise<{
+    outcome: BackupOutcome;
+    put: string[];
+    deleted: string[];
+    reason: string | undefined;
+    persisted: boolean;
+  }> {
+    const { driver, put, deleted } = recordingDriver(options.refuse);
+    const { deps } = await makeDeps(0, {
+      runner: runnerWithGlobals(options.globals ?? { exitCode: 0, stderr: "" }),
+      driver,
+    });
+    let reason: string | undefined;
+    let persisted = false;
+    const ports = createBackupPorts({
+      ...deps,
+      setState: (state, why) => {
+        if (state === "FAILED") reason = why;
+        return Promise.resolve();
+      },
+      buildGlobalsDescriptor: () => GLOBALS,
+      buildManifest: ({ probe, mode, recipients, upload }) => ({
+        manifestVersion: 1,
+        jobId: "job-1",
+        organizationId: "org-1",
+        engine: "postgres",
+        serverVersionNum: probe.serverVersionNum,
+        toolVersion: "test",
+        executionMode: mode,
+        parallelism: 1,
+        scope: probe.scope,
+        sizeRawBytes: upload.sizeRawBytes,
+        sizeCompressedBytes: upload.sizeCompressedBytes,
+        checksumAlgorithm: upload.checksumAlgorithm,
+        checksum: upload.checksum,
+        compression: "gzip",
+        encryption: { algorithm: "age", keyIds: recipients.keyIds },
+        dependsOn: [],
+        createdAt: new Date(0).toISOString(),
+        durationMs: 0,
+      }),
+      persistArtifact: () => {
+        persisted = true;
+        return options.persist?.() ?? Promise.resolve("artifact-1");
+      },
+    });
+    const outcome = await runBackupJob(
+      {
+        jobId: "job-1",
+        organizationId: "org-1",
+        requestedParallelism: 1,
+        scratchConfigured: false,
+      },
+      ports,
+    );
+    return { outcome, put, deleted, reason, persisted };
+  }
+
+  it("deletes the uploaded database dump when the server refuses the globals dump, and says why", async () => {
+    const result = await backup({ globals: { exitCode: 1, stderr: PG_DUMPALL_STDERR } });
+
+    expect(result.outcome.ok).toBe(false);
+    expect(result.persisted).toBe(false);
+    expect(result.put).toEqual([`${PREFIX}/artifact.bin`, `${PREFIX}/globals.bin`]);
+    expect(new Set(result.deleted)).toEqual(new Set(result.put));
+    // The step AND the tool's words: an operator reading this knows it was the globals, and why.
+    expect(result.reason).toBe(`globals dump execution failed (exit code 1): ${PG_DUMPALL_STDERR}`);
+  });
+
+  it("deletes the database dump and the globals when the manifest cannot be written", async () => {
+    const result = await backup({ refuse: (key) => key.endsWith("/manifest.json") });
+
+    expect(result.outcome.ok).toBe(false);
+    expect(new Set(result.deleted)).toEqual(
+      new Set([`${PREFIX}/artifact.bin`, `${PREFIX}/globals.bin`, `${PREFIX}/manifest.json`]),
+    );
+  });
+
+  // The manifest is the object a catalog rebuild turns back into a row. Left behind, it would
+  // resurrect an artifact the FAILED job never produced.
+  it("deletes all three, the manifest included, when the row cannot be written", async () => {
+    const result = await backup({ persist: () => Promise.reject(new Error("insert failed")) });
+
+    expect(result.outcome.ok).toBe(false);
+    expect(new Set(result.deleted)).toEqual(
+      new Set([`${PREFIX}/artifact.bin`, `${PREFIX}/globals.bin`, `${PREFIX}/manifest.json`]),
+    );
+    expect(result.reason).toBe("insert failed");
+  });
+
+  it("deletes nothing when the backup succeeds", async () => {
+    const result = await backup({});
+
+    expect(result.outcome.ok).toBe(true);
+    expect(result.put).toEqual([
+      `${PREFIX}/artifact.bin`,
+      `${PREFIX}/globals.bin`,
+      `${PREFIX}/manifest.json`,
+    ]);
+    expect(result.deleted).toEqual([]);
   });
 });

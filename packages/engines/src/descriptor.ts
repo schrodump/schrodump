@@ -40,6 +40,13 @@ export interface DumpScope {
 export interface TargetFacts {
   readonly isReplicaSet: boolean;
   readonly hasMyisam: boolean;
+  // postgres: whether the connected role may SELECT from pg_authid, the catalog that holds role
+  // password hashes. pg_dumpall reads pg_authid unless told --no-role-passwords, and only a
+  // superuser (or a role a superuser explicitly granted it to) may — so on every managed service
+  // (RDS, Cloud SQL, Azure, Supabase, Neon, ...) and for any least-privilege role this is false,
+  // and a globals dump that asks for passwords fails the whole backup. false for the other engines,
+  // which have no such catalog; nothing reads it there.
+  readonly canReadRolePasswords: boolean;
 }
 
 export interface DumpInput {

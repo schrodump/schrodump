@@ -31,6 +31,7 @@ const base: Artifact = {
   executionMode: "STREAM",
   sourceHasOplog: null,
   dumpIsMultiDatabase: null,
+  rolePasswordsCaptured: null,
   serverVersionNum: 80_000,
   sizeRawBytes: 4096,
   sizeCompressedBytes: 1024,
@@ -102,6 +103,36 @@ describe("ArtifactRow and the oplog fact", () => {
     // that has none — the same distinction the API mapper preserves.
     renderRow({ ...base, engine: "postgres", sourceHasOplog: null });
     expect(screen.queryByText(/oplog/i)).toBeNull();
+  });
+});
+
+// A postgres artifact taken by a least-privilege role (every managed service's master user) carries
+// its roles without their passwords. Restoring it brings back roles that cannot log in, and the
+// row is where that should be read — not the middle of a restore.
+describe("ArtifactRow and the role-password fact", () => {
+  const postgres = (rolePasswordsCaptured: boolean | null): Artifact => ({
+    ...base,
+    engine: "postgres",
+    rolePasswordsCaptured,
+  });
+
+  it("says so, as a caution, when role passwords were not captured", () => {
+    renderRow(postgres(false));
+    const value = screen.getByText(/not captured/i);
+    expect(value.className).toMatch(/text-caution/);
+    expect(screen.getByText(/role passwords/i)).toBeTruthy();
+  });
+
+  it("states a capture plainly", () => {
+    renderRow(postgres(true));
+    const value = screen.getByText(/^captured$/i);
+    expect(value.className).not.toMatch(/text-caution/);
+  });
+
+  it("stays silent when it was never recorded — null is not a 'not captured'", () => {
+    renderRow(postgres(null));
+    expect(screen.queryByText(/role passwords/i)).toBeNull();
+    expect(screen.queryByText(/captured/i)).toBeNull();
   });
 });
 

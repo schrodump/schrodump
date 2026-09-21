@@ -92,6 +92,26 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   stderr in the typed message; the same rule that lets the INCONCLUSIVE log keep `detail` — a
   `SchrodumpError` message is built from redacted stderr, never driver prose — lets the verify
   persist it as the job reason.
+- **A postgres backup by a non-superuser succeeds, and says its roles carry no passwords.** Every
+  postgres backup writes `globals.bin` (`pg_dumpall --globals-only`) beside the database dump, and
+  pg_dumpall reads password hashes from `pg_authid`, which only a superuser may. So the first backup
+  of every managed postgres and of every least-privilege role used to FAIL at that step. The probe
+  now answers `canReadRolePasswords` (see `packages/engines/CLAUDE.md`), the adapter adds
+  `--no-role-passwords` when it is false, and `rolePasswordsCapturedFor` (worker-wiring) records the
+  same fact on the manifest and the row as `rolePasswordsCaptured` — optional on the manifest and
+  nullable on the row, like `sourceHasOplog`, because every artifact already written lacks it and a
+  catalog rebuild must still parse them. A test pins the recorded fact against the flag the adapter
+  actually emits, since the two are decided in different packages from one input.
+- **A failed backup job carries the tool's words, and leaves nothing in the bucket.** Both dumps and
+  the STAGED archive step throw `describeToolFailure` (restore-executor.ts) — the step, the exit
+  code, the runner's redacted stderr — where they threw the exit code alone: a managed postgres
+  refusing `pg_authid` read "dump execution failed (exit code 1)". And `runBackupJob` calls
+  `discardObjects` on any failure before `persistArtifact` returns, deleting every key the ports
+  started writing (artifact.bin, globals.bin, manifest.json). Before that the database dump
+  uploaded first and a later refusal left it in the bucket with no manifest and no row — nothing,
+  retention and the delete route included, starts from anything but the row. After the row exists
+  nothing is discarded: the objects are the artifact then, and deleting them would leave a row
+  pointing at nothing. A failed discard is appended to the reason rather than swallowed.
 - **A postgres dump is never schema-scoped by discovery.** `dumpScopeFor` hands the postgres adapter
   the probe's databases but the TARGET's schemas (empty unless an operator set them through the
   API; the interface never does). The probe lists every non-system schema of the connected database

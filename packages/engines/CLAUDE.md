@@ -39,6 +39,18 @@ directory.
   scope is **discovery**: it tells the operator what is there, it does not decide what is copied.
   A least-privilege credential is still the right configuration, and `scripts/smoke-compose.sh`
   uses one — but it is least privilege now, not the mechanism that keeps the scope unambiguous.
+- **`probePostgres` reports `canReadRolePasswords`, and `buildGlobalsDump` obeys it.** It is
+  `has_table_privilege('pg_catalog.pg_authid', 'SELECT')` — the exact read `pg_dumpall` makes for
+  password hashes unless given `--no-role-passwords`, and one only a superuser (or a role granted it)
+  may make. `rolsuper` would be the wrong predicate. Before this fact existed every globals dump
+  asked for passwords, so the first backup of every managed postgres (RDS, Cloud SQL, Azure,
+  Supabase, Neon, ...) and of every least-privilege role failed with `permission denied for table
+  pg_authid`. False, the globals go out with `--no-role-passwords` — roles, memberships and settings
+  intact, no hashes. Decided before the run rather than by retrying on failure: one execution, no
+  stderr to pattern-match in whatever language the server's `lc_messages` speaks, and the answer is
+  known in time for the manifest to record it (`rolePasswordsCaptured`, `apps/server`).
+  `adapters/postgres-globals.integration.test.ts` proves it against a real server, including the
+  negative control that the same role asked for passwords is still refused.
 - **Classifying a driver error is `apps/server`'s job** (`probe/test-connection.ts`), not this
   package's. The probe may propagate the raw error — the server translates it into a code without
   leaking the credential. Do not swallow or rewrite the error here.

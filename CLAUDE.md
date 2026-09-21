@@ -108,10 +108,11 @@ environment set — otherwise they are `describe.skipIf`:
   version **and digest** pinned. There is **no `age` executor** — artifact encryption is
   in-process via the `age-encryption` library. See `apps/server/CLAUDE.md` for why.
 - CI: `ci.yml` (dco, readme-sync, check, integration, executor images build, image build/smoke — the
-  last of which stands the **composed stack** up and drives eighteen steps through it: all four
+  last of which stands the **composed stack** up and drives twenty-one steps through it: all four
   engines in both execution modes, verified by restore, three restored over live data, a catalog
   rebuild, a key rotation, a self-backup, retention actually deleting, a signed notification
-  delivered, and a replica set whose oplog is actually replayed. It exists because three defects
+  delivered, a replica set whose oplog is actually replayed, and a postgres backup taken by a role
+  that is not a superuser — what every managed service hands out. It exists because three defects
   shipped in the seam between the code and `compose.yaml` that no other test could see, and
   covering the rest found six more),
   `security.yml` (dependency audit, Trivy, gitleaks, SPDX), `release.yml` (multi-arch image, cosign, SBOM, and the

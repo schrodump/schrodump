@@ -426,6 +426,13 @@ export const en = {
     "Full restore is not possible for this artifact; only its checksum was verified.",
   "artifacts.detail.raw": "Original size",
   "artifacts.oplog": "Point-in-time (oplog)",
+  // postgres only, and only when recorded. "Not captured" is what a least-privilege role (every
+  // managed service's master user) produces: the roles restore, and cannot log in until someone
+  // sets a password — which is the moment an operator should not be learning it.
+  "artifacts.detail.rolePasswords": "Role passwords",
+  "artifacts.rolePasswords.captured": "Captured",
+  "artifacts.rolePasswords.notCaptured":
+    "Not captured — the backup role cannot read them; restored roles need a new password",
   "artifacts.verify": "Verify",
   "artifacts.restore": "Restore",
   "artifacts.delete": "Delete",

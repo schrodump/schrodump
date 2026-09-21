@@ -26,7 +26,7 @@ function dumpInput(over: Partial<DumpInput> = {}): DumpInput {
     executionMode: "STREAM",
     parallelism: 1,
     scope: { databases: [], schemas: [], collections: [] },
-    facts: { isReplicaSet: false, hasMyisam: false },
+    facts: { isReplicaSet: false, hasMyisam: false, canReadRolePasswords: false },
     ...over,
   };
 }
@@ -63,7 +63,7 @@ describe("mongodbAdapter.buildDump", () => {
 
   it("adds --oplog for a full dump of a replica set", () => {
     const descriptor = mongodbAdapter.buildDump(
-      dumpInput({ facts: { isReplicaSet: true, hasMyisam: false } }),
+      dumpInput({ facts: { isReplicaSet: true, hasMyisam: false, canReadRolePasswords: false } }),
     );
     expect(descriptor.command).toContain("--oplog");
   });
@@ -72,7 +72,7 @@ describe("mongodbAdapter.buildDump", () => {
     expect(() =>
       mongodbAdapter.buildDump(
         dumpInput({
-          facts: { isReplicaSet: true, hasMyisam: false },
+          facts: { isReplicaSet: true, hasMyisam: false, canReadRolePasswords: false },
           scope: { databases: ["app"], schemas: [], collections: [] },
         }),
       ),

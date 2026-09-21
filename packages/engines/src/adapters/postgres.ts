@@ -85,11 +85,27 @@ export const postgresAdapter: EngineAdapter = {
 
   // pg_dump excludes roles and tablespaces; a restore without globals fails on a missing role.
   // This is a descriptor separate from the per-database dump (requiresSeparateGlobalsDump).
+  //
+  // Role password hashes are captured only when the probe proved the role can read them. Without
+  // --no-role-passwords pg_dumpall reads pg_authid, and for anyone but a superuser that is
+  // `permission denied for table pg_authid`, exit 1 — so the first backup of every managed postgres
+  // (RDS, Cloud SQL, Azure, Supabase, Neon, ...) and of every least-privilege role FAILED here,
+  // after the database dump had already been uploaded. With the flag it reads pg_roles instead and
+  // emits the same roles, memberships and settings without a PASSWORD clause. Decided from the
+  // probe rather than by retrying on failure: one run, no stderr to pattern-match in whatever
+  // language the server's lc_messages speaks, and the choice is known before the dump runs, which
+  // is what lets the manifest record it (rolePasswordsCaptured). A superuser keeps capturing the
+  // hashes exactly as before — restoring globals.bin recreates its roles with their passwords.
   buildGlobalsDump(input) {
     const connection = input.connection;
     return {
       image: this.imageFor(input.serverVersionNum),
-      command: ["pg_dumpall", ...connArgs(connection), "--globals-only"],
+      command: [
+        "pg_dumpall",
+        ...connArgs(connection),
+        "--globals-only",
+        ...(input.facts.canReadRolePasswords ? [] : ["--no-role-passwords"]),
+      ],
       env: connEnv(connection),
       outputKind: "stdout",
     };
