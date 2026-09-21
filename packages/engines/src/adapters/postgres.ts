@@ -98,8 +98,24 @@ export const postgresAdapter: EngineAdapter = {
   buildRestore(input) {
     const image = this.imageFor(input.serverVersionNum);
     const connection = input.connection;
+    // -n is what confines --clean to the requested schemas, exactly as -t does for tables below —
+    // and an empty selection widened the same way. A SCHEMA restore whose scope named no schema
+    // emitted no -n at all and ran `pg_restore --clean` over the WHOLE database: reproduced on a
+    // composed stack with two schemas modified after the backup, both came back, and the job said
+    // SUCCEEDED while the dialog had promised "one schema inside the target database".
     const schemaArgs =
-      input.target === "SCHEMA" ? input.scope.schemas.flatMap((schema) => ["-n", schema]) : [];
+      input.target === "SCHEMA"
+        ? (() => {
+            if (input.scope.schemas.length === 0) {
+              throw new EngineDescriptorError(
+                "POSTGRES_RESTORE_SCHEMA_REQUIRED",
+                "a SCHEMA restore must name at least one schema; without one --clean would " +
+                  "rewrite every schema in the database",
+              );
+            }
+            return input.scope.schemas.flatMap((schema) => ["-n", schema]);
+          })()
+        : [];
     // -t is what confines --clean below to the requested tables. Without it a TABLE restore ran
     // --clean over the WHOLE dump: every table in the database dropped and replaced to write one
     // of them, which is why the capability was withdrawn. The two are one decision, not two flags.

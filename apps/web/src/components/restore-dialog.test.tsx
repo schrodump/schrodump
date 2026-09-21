@@ -15,8 +15,9 @@ const artifact: Artifact = {
   id: "artifact-1",
   jobId: "job-1",
   destinationId: "destination-1",
-  targetName: null,
-  policyName: null,
+  targetName: "shop-prod",
+  policyName: "nightly",
+  restoreInto: { host: "db.internal", port: 5432, database: "shop", schemas: [], collections: [] },
   state: "UNOBSERVED",
   verifiedLevel: null,
   verifiedDegraded: false,
@@ -101,19 +102,58 @@ describe("RestoreDialog", () => {
 
   it("disables scopes the engine cannot restore, with a reason", async () => {
     await openDialog();
-    // PostgreSQL restores cluster/database/schema/table — table via pg_restore -t, which confines
-    // --clean to the requested tables. Never collection: it has none.
+    // Postgres restores cluster/database/schema/table, never collection: it has none.
     expect(screen.getByLabelText("Database")).toBeEnabled();
-    expect(screen.getByLabelText("Schema")).toBeEnabled();
-    expect(screen.getByLabelText("Table")).toBeEnabled();
     expect(screen.getByLabelText("Collection")).toBeDisabled();
     expect(screen.getAllByText("Not supported for PostgreSQL")).toHaveLength(1);
   });
 
-  it("blocks restore over an existing database until the name is typed exactly", async () => {
+  // The server restores into the producing policy's target and nowhere else. The dialog used to name
+  // the artifact and collect a "target database" the request never carried, so an operator could
+  // believe they were restoring into a scratch copy while the worker wrote over production.
+  it("says where the restore writes — the target, its host and port, and the database", async () => {
+    await openDialog();
+    const into = screen.getByTestId("restore-into");
+    expect(into).toHaveTextContent("shop-prod");
+    expect(into).toHaveTextContent("db.internal:5432");
+    expect(into).toHaveTextContent("database shop");
+    expect(screen.queryByLabelText("Target database")).toBeNull();
+  });
+
+  // The widening that was live: a SCHEMA restore whose target named no schema ran
+  // pg_restore --clean over the whole database. Nothing in the interface can name one, so the
+  // option says so instead of being offered.
+  it("withholds SCHEMA and TABLE when nothing names the schema or the table, with the reason", async () => {
+    await openDialog();
+    expect(screen.getByLabelText("Schema")).toBeDisabled();
+    expect(screen.getByLabelText("Schema").closest("div")).toHaveTextContent(/rewrite the whole database/i);
+    expect(screen.getByLabelText("Table")).toBeDisabled();
+  });
+
+  it("offers SCHEMA when the target does name a schema", async () => {
+    const user = userEvent.setup();
+    renderWith(
+      <RestoreButton
+        artifact={{ ...artifact, restoreInto: { ...artifact.restoreInto!, schemas: ["billing"] } }}
+        role="operator"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    expect(screen.getByLabelText("Schema")).toBeEnabled();
+  });
+
+  it("refuses to start when the target the artifact was written for is gone", async () => {
+    const user = userEvent.setup();
+    renderWith(<RestoreButton artifact={{ ...artifact, restoreInto: null }} role="operator" />);
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/nowhere to restore into/i);
+    expect(screen.getByRole("button", { name: "Start restore" })).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/no longer exists/i);
+  });
+
+  it("blocks restore over an existing database until its real name is retyped exactly", async () => {
     const user = await openDialog();
     await user.click(screen.getByLabelText("Database"));
-    await user.type(screen.getByLabelText("Target database"), "shop");
 
     const submit = screen.getByRole("button", { name: "Start restore" });
     expect(submit).toBeEnabled();
@@ -160,7 +200,6 @@ describe("RestoreDialog", () => {
 
     const user = await openDialog();
     await user.click(screen.getByLabelText("Database"));
-    await user.type(screen.getByLabelText("Target database"), "shop");
 
     await user.click(screen.getByRole("button", { name: "Start restore" }));
 
