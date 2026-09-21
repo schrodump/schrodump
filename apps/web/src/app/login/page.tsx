@@ -12,10 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { useT } from "@/i18n/provider";
 import { signIn } from "@/lib/auth-client";
+import { loginErrorMessage } from "@/lib/login-error";
 
-// Email, password, one button. The error says as little as it can on purpose: it must not tell a
-// stranger whether an address exists here. There is no self-signup and no forgot-password link,
-// because account recovery runs through the CLI on the host (docs/install.md).
+// Email, password, one button. The credential error says as little as it can on purpose: it must
+// not tell a stranger whether an address exists here. There is no self-signup and no
+// forgot-password link, because account recovery runs through the CLI on the host
+// (docs/install.md).
 export default function LoginPage() {
   const t = useT();
   const router = useRouter();
@@ -31,7 +33,7 @@ export default function LoginPage() {
     const result = await signIn.email({ email, password });
     setLoading(false);
     if (result.error) {
-      setError(t("auth.login.error"));
+      setError(loginErrorMessage(result.error, window.location.origin, t));
       return;
     }
     router.push("/");
@@ -75,3 +77,4 @@ export default function LoginPage() {
     </AuthFrame>
   );
 }
+

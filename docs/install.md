@@ -66,17 +66,31 @@ credential will unwrap: the fingerprint is derived from the KEK alone, so it can
 fingerprint row that was itself replaced. Booting the server is that proof, and now you only have
 to do it once.
 
-Set a database password too:
+Set a database password too — in hex, not base64:
 
 ```sh
-openssl rand -base64 24   # -> DB_PASSWORD in .env
+openssl rand -hex 24      # -> DB_PASSWORD in .env
 ```
+
+Compose places this value unescaped inside `postgres://schrodump:<password>@db:5432/…`, and a
+base64 password contains `/` roughly 40% of the time. That slash ends the URL's authority early,
+Prisma reports `P1013: invalid port number`, and the first boot exits before a single request.
 
 ## 3. Start it
 
 ```sh
 docker compose up -d
 ```
+
+`.env.example` names `SCHRODUMP_IMAGE=schrodump/schrodump:next`, the newest release. Schrodump has
+not shipped a stable version yet, and `compose.yaml`'s own default, `latest`, only exists once one
+has — so leave that line in until then, and pin an exact version in production either way.
+
+A one-shot `scratch-init` service runs first, as root, creates the scratch directory on the host
+(`SCRATCH_HOST_PATH`, default `/var/lib/schrodump/scratch`) and hands it to the server's
+unprivileged user. It exits, and `docker compose ps -a` lists it as `Exited (0)` — that is its
+success state, not a crash. See [Scratch must be a host path](#scratch-must-be-a-host-path-not-a-named-volume)
+for why the directory matters.
 
 Three containers come up:
 
@@ -134,7 +148,10 @@ setup token issued — open the URL to create the first admin
 setupUrl: http://localhost:8080/setup?token=...
 ```
 
-Open it and create the administrator. The token is single-use and expires; once an administrator
+Open it — at exactly that address. Sign-in is refused from any origin other than `SCHRODUMP_URL`
+(its `localhost`/`127.0.0.1` twin is accepted too), so reaching the stack through the host's IP or a
+proxy name means setting `SCHRODUMP_URL` to that address first; the sign-in page names the mismatch
+if you forget. Create the administrator. The token is single-use and expires; once an administrator
 exists, `/setup` closes permanently and account recovery moves to the CLI.
 
 If you prefer to provision without touching the browser, set `SCHRODUMP_ADMIN_EMAIL` and
@@ -468,7 +485,9 @@ artifact reaches `VERIFIED`.
 Docker; a bind mount is not, so a directory created as root is one the server cannot write — and
 the failure is quiet in the worst way: STREAM backups keep succeeding while verify, restore, STAGED
 and every mongo job fail, because only those mount anything. The server refuses to boot rather than
-let that happen, and says what to run:
+let that happen. The shipped `compose.yaml` takes care of it with the one-shot `scratch-init`
+service, which runs as root before the server and chowns the directory to the server's user. If you
+run the image some other way (Kubernetes, a hand-written unit), do the same yourself:
 
 ```sh
 sudo mkdir -p /var/lib/schrodump/scratch
@@ -476,8 +495,9 @@ sudo chown -R 100 /var/lib/schrodump/scratch
 ```
 
 If you point `SCRATCH_HOST_PATH` somewhere else, it must be a path the Docker daemon can see, it
-must be mounted at that same path inside the container, and it must be owned by uid 100. It holds
-dumps in clear while a job runs — put it on an encrypted filesystem.
+must be mounted at that same path inside the container, and it must be owned by uid 100 (again,
+`scratch-init` does this for any path you set). It holds dumps in clear while a job runs — put it
+on an encrypted filesystem.
 
 ### MongoDB targets need a narrow credential
 

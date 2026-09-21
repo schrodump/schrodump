@@ -95,6 +95,10 @@ export const en = {
   "auth.login.password": "Password",
   "auth.login.submit": "Sign in",
   "auth.login.error": "Invalid email or password",
+  "auth.login.error.origin":
+    "Schrodump refused this address. You opened it at {origin}, which is not the address it is configured for (SCHRODUMP_URL). Open it at that address, or set SCHRODUMP_URL to this one and restart.",
+  "auth.login.error.rateLimited": "Too many sign-in attempts from this address. Wait a few minutes and try again.",
+  "auth.login.error.server": "The server did not answer. Check that the stack is running (docker compose ps) and try again.",
 
   "setup.title": "Create the first administrator",
   "setup.description": "This link is single-use and expires. Set the initial admin account.",

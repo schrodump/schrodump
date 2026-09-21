@@ -218,6 +218,13 @@ screens that follow:
   it off, the staged mode is withheld with its reason and a full-restore verify is warned as one
   that would only ever end "could not run". A channel that is recording failures offers "Disable
   instead" before "Delete": deleting it throws away the only evidence deliveries were not arriving.
+- **Sign-in says which refusal it got, except for a credential.** `loginErrorMessage`
+  (`lib/login-error.ts`) keeps "Invalid email or password" for a refused credential — it must not
+  tell a stranger whether an address exists — and names everything else: `INVALID_ORIGIN` (the page
+  was opened at an address that is not `SCHRODUMP_URL`, with that address in the sentence), a rate
+  limit, a server that did not answer. Every one of them used to read as a wrong password, and the
+  origin one is the likeliest failure on a first install. The server also accepts the loopback twin
+  of a loopback `SCHRODUMP_URL` (`loopbackTwinOrigins` in `apps/server/src/auth/auth.ts`).
 - **The out-of-app screens and settings.** Sign-in, first-run setup and the bootstrap-password
   wall share `AuthFrame`: the mark, a title, one sentence, the form, nothing else — the server
   refuses everything else in those states, and a control that would only produce an error is
