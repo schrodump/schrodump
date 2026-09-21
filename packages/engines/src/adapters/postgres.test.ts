@@ -186,6 +186,34 @@ describe("postgresAdapter.buildRestore", () => {
     ]);
     expect(descriptor.env.PGPASSWORD).toBe("s3cret");
   });
+
+  it("confines a SCHEMA restore with -n for each named schema", () => {
+    const descriptor = postgresAdapter.buildRestore({
+      ...restoreInput,
+      target: "SCHEMA",
+      scope: { databases: ["app"], schemas: ["billing", "audit"], collections: [] },
+      sourcePath: "/var/lib/schrodump/restore-source",
+    });
+    expect(descriptor.command).toEqual([
+      "pg_restore", "-h", "db.internal", "-p", "5432", "-U", "backup", "-d", "app",
+      "--clean", "--if-exists", "--exit-on-error", "-n", "billing", "-n", "audit",
+      "/var/lib/schrodump/restore-source",
+    ]);
+  });
+
+  // The widening that was live: with no schema named there was no -n, and --clean rewrote every
+  // schema in the database under a job that said SUCCEEDED. Reproduced on a composed stack. The
+  // only widening available is "everything", which is the opposite of what a SCHEMA restore asks.
+  it("refuses a SCHEMA restore that names no schema, rather than rewriting the whole database", () => {
+    expect(() =>
+      postgresAdapter.buildRestore({
+        ...restoreInput,
+        target: "SCHEMA",
+        scope: { databases: ["app"], schemas: [], collections: [] },
+        sourcePath: "/var/lib/schrodump/restore-source",
+      }),
+    ).toThrow(/POSTGRES_RESTORE_SCHEMA_REQUIRED|must name at least one schema/);
+  });
 });
 
 describe("postgresAdapter.buildVerifySandbox", () => {

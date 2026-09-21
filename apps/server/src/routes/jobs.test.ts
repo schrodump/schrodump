@@ -25,6 +25,7 @@ const service: JobsService = {
         destinationId: "d1",
         targetName: null,
         policyName: null,
+        restoreInto: null,
         state: "UNOBSERVED",
         verifiedLevel: null,
         verifiedDegraded: false,

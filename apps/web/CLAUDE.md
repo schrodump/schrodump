@@ -29,8 +29,17 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   `engine`, the destination's `bucket`/`prefix`/`sealMode`, the policy's `target`/`destination`.
   What a resource points at is the first thing an operator needs to read on it — removing the field
   trades an explanation for a mystery.
-- **Restore has friction on purpose.** Scopes the engine does not support are disabled with the
-  reason (matrix in `lib/domain.ts`); overwriting an existing database requires typing the database
+- **Restore has friction on purpose, and says where it writes.** The server restores into the
+  producing policy's target and nowhere else, so the dialog shows exactly that — `restoreInto` on
+  the artifact (target, `host:port`, database), derived server-side from the same scope parser the
+  worker uses. It used to name only the artifact and collect a free-text "target database" the
+  request never carried: an operator could type a scratch name, tick overwrite, retype it, and
+  overwrite production. Overwriting now requires retyping the name of the database that will
+  actually be overwritten. Every scope that cannot run is disabled with its reason through
+  `restoreScopeBlocker` (`lib/domain.ts`): the engine matrix, a multi-database mysql script, a
+  target that names no database, and — the widening that was live — SCHEMA/COLLECTION when the
+  target names none (a SCHEMA restore with no schema ran `pg_restore --clean` over the whole
+  database; the server now refuses it) and TABLE always, since the target model has no tables to
   name. A viewer does not see the button — and the server refuses anyway (the UI is the second
   lock, not the only one). A `STAGED` artifact **does** restore now that the directory pipeline
   landed (the server unpacks the tar before handing the directory to `pg_restore`/`myloader`), so

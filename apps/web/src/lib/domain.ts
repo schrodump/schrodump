@@ -114,6 +114,41 @@ export function canConfineRestore(artifact: {
   return artifact.dumpIsMultiDatabase === false;
 }
 
+// Why a restore scope is withheld for THIS artifact, or null when it can run. The engine matrix and
+// canConfineRestore were the only gates, and SCHEMA was open for postgres although nothing could
+// name the schema: the target form never saves one, the restore request carries only the scope
+// kind, and the server read an empty list, emitted no -n and ran pg_restore --clean over the whole
+// database while this dialog promised "one schema". The server now refuses that; this is the mirror,
+// so the option says why instead of being offered and failing. TABLE is withheld outright — the
+// target model has no tables to name.
+export type RestoreScopeBlocker =
+  | "unsupported"
+  | "notConfinable"
+  | "noTarget"
+  | "needsDatabase"
+  | "needsSchema"
+  | "needsTable"
+  | "needsCollection";
+
+export function restoreScopeBlocker(
+  artifact: {
+    engine: EngineKind;
+    dumpIsMultiDatabase: boolean | null;
+    restoreInto: { database: string | null; schemas: string[]; collections: string[] } | null;
+  },
+  target: RestoreTarget,
+): RestoreScopeBlocker | null {
+  if (!RESTORE_TARGETS_BY_ENGINE[artifact.engine].includes(target)) return "unsupported";
+  if (artifact.restoreInto === null) return "noTarget";
+  if (target === "FULL_CLUSTER") return null;
+  if (!canConfineRestore(artifact)) return "notConfinable";
+  if (artifact.restoreInto.database === null) return "needsDatabase";
+  if (target === "SCHEMA" && artifact.restoreInto.schemas.length === 0) return "needsSchema";
+  if (target === "TABLE") return "needsTable";
+  if (target === "COLLECTION" && artifact.restoreInto.collections.length === 0) return "needsCollection";
+  return null;
+}
+
 // Why the server answers with a code and not a message: driver errors embed the credential they
 // failed with. The wording lives in the translation files.
 export const PROBE_FAILURE_CODES = [

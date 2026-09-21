@@ -21,6 +21,7 @@ const base: Artifact = {
   destinationId: "destination-1",
   targetName: null,
   policyName: null,
+  restoreInto: null,
   state: "VERIFIED",
   verifiedLevel: null,
   verifiedDegraded: false,

@@ -10,6 +10,20 @@ import { badRequest } from "./errors.js";
 // The API shape of an artifact. Mirrors the DB row but with BigInt sizes narrowed to number, and
 // without internal columns (organizationId, updatedAt). Fastify cannot serialize BigInt, so the
 // raw row must never reach the response — see toArtifactRecord in wiring.ts.
+export interface RestoreInto {
+  host: string;
+  port: number;
+  // The database a DATABASE (or SCHEMA) restore writes: the target's scoped database, or for an
+  // unscoped postgres target the maintenance database it connects through. null when no single
+  // database is named (an unscoped mysql/mariadb or mongodb target), which is exactly when the
+  // server has nothing to confine a sub-cluster restore to.
+  database: string | null;
+  // What a SCHEMA or COLLECTION restore would be confined to. Empty means the target names none,
+  // and the server refuses that restore rather than widening it to the whole database.
+  schemas: string[];
+  collections: string[];
+}
+
 export interface ArtifactRecord {
   id: string;
   jobId: string;
@@ -20,6 +34,14 @@ export interface ArtifactRecord {
   // with the bucket key, a storage path, because nothing else on it said what the artifact was.
   targetName: string | null;
   policyName: string | null;
+  // Where a restore of this artifact writes. The restore request names a scope and nothing else:
+  // the worker always restores into the producing policy's target, connecting through the database
+  // that target is scoped to. The dialog used to name the artifact and never the destination, and
+  // collected a "target database" it then threw away — so an operator could type a scratch name,
+  // tick overwrite, retype it, and overwrite production. This is the destination the worker will
+  // actually use, derived from the same scope parser, so the two cannot disagree. `null` when the
+  // policy or its target is gone: the restore has nowhere to go and the worker refuses it.
+  restoreInto: RestoreInto | null;
   state: string;
   // How the artifact reached that state: the verify level that actually ran, and whether it was a
   // downgrade from what the policy asked. Exposed because `state` alone cannot separate a green

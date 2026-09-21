@@ -30,9 +30,9 @@ import type { PolicyRecord, PolicyStore } from "./policies.js";
 import { generateAgeKeyPair, recipientFingerprint } from "../crypto/artifact.js";
 import type { EncryptionKeyRoutesDeps } from "./encryption-keys.js";
 import { LIST_PAGE_SIZE } from "./jobs.js";
-import type { ArtifactRecord, JobsService } from "./jobs.js";
+import type { ArtifactRecord, JobsService, RestoreInto } from "./jobs.js";
 import { driverForDestination } from "../jobs/destination-driver.js";
-import { globalsObjectKey, restoreTargetOf } from "../jobs/restore-executor.js";
+import { globalsObjectKey, restoreScopeOf, restoreTargetOf } from "../jobs/restore-executor.js";
 import type { RestoreTarget } from "../jobs/restore.js";
 
 export function prismaDestinationStore(
@@ -277,7 +277,12 @@ export function toArtifactRecord(row: {
   updatedAt: Date;
   // Loaded through ARTIFACT_SUBJECT_INCLUDE. Optional so a caller that did not ask for the subject
   // still maps; absent or null answers null, never a placeholder.
-  job?: { policy: { name: string; target: { name: string } | null } | null } | null;
+  job?: {
+    policy: {
+      name: string;
+      target: { name: string; host?: string; port?: number; scope?: unknown } | null;
+    } | null;
+  } | null;
 }): ArtifactRecord {
   return {
     id: row.id,
@@ -285,6 +290,7 @@ export function toArtifactRecord(row: {
     destinationId: row.destinationId,
     targetName: row.job?.policy?.target?.name ?? null,
     policyName: row.job?.policy?.name ?? null,
+    restoreInto: restoreIntoOf(row.engine, row.job?.policy?.target ?? null),
     state: row.state,
     // Passed through as recorded: verifiedLevel is null until a verify reaches a verdict, and a
     // green with verifiedDegraded true is a checksum the operator asked full restore for — the row
@@ -318,6 +324,33 @@ export function toArtifactRecord(row: {
   };
 }
 
+// Mirrors worker-wiring's restore path: it restores into the producing policy's target and connects
+// through probeDatabaseFor(engine, scope.databases) — the first scoped database, else "postgres" for
+// postgres. For mysql/mariadb/mongodb an unscoped target names no single database, and the dialog must
+// say so rather than invent one. A scope that does not parse answers null, like a missing target:
+// the worker refuses that restore ("malformed scope"), so there is no destination to show.
+export function restoreIntoOf(
+  engine: string,
+  target: { host?: string; port?: number; scope?: unknown } | null,
+): RestoreInto | null {
+  if (target === null || target.host === undefined || target.port === undefined) return null;
+  let scope;
+  try {
+    scope = restoreScopeOf(target.scope);
+  } catch {
+    return null;
+  }
+  const first = scope.databases[0];
+  const database = first !== undefined && first.length > 0 ? first : engine === "postgres" ? "postgres" : null;
+  return {
+    host: target.host,
+    port: target.port,
+    database,
+    schemas: scope.schemas,
+    collections: scope.collections,
+  };
+}
+
 // A single JobsService bound to the raw prisma; each method scopes by the passed organizationId.
 // The two routes a job takes to the database it is about. `policy` covers BACKUP and RETENTION,
 // which belong to one; `verifyArtifact` covers VERIFY and RESTORE, which act on an artifact and
@@ -342,7 +375,18 @@ export const JOB_SUBJECT_INCLUDE = {
 // policy's target says what was backed up. Declared once, like JOB_SUBJECT_INCLUDE, so the query
 // and the mapper cannot drift into disagreeing about which relations were loaded.
 export const ARTIFACT_SUBJECT_INCLUDE = {
-  job: { select: { policy: { select: { name: true, target: { select: { name: true } } } } } },
+  job: {
+    select: {
+      policy: {
+        select: {
+          name: true,
+          // host/port/scope are what restoreIntoOf needs to say where a restore would write. The
+          // credential columns are deliberately not selected.
+          target: { select: { name: true, host: true, port: true, scope: true } },
+        },
+      },
+    },
+  },
 } as const;
 
 // Nulls are meaningful and are NOT collapsed to a placeholder: a manual backup genuinely has no

@@ -53,6 +53,54 @@ describe("toArtifactRecord", () => {
     expect(record.policyName).toBe("nightly-eu");
   });
 
+  // The restore dialog named the artifact and never the destination, and collected a "target
+  // database" it then threw away: the worker restores into the producing policy's target, always.
+  // restoreInto is that destination, so the dialog can say where a restore will write.
+  it("says where a restore of it would write: the producing target's host, port and database", () => {
+    const record = toArtifactRecord({
+      ...row,
+      job: {
+        policy: {
+          name: "nightly-eu",
+          target: {
+            name: "payments-us",
+            host: "db.internal",
+            port: 5432,
+            scope: { databases: ["payments"], schemas: ["billing"], collections: [] },
+          },
+        },
+      },
+    });
+    expect(record.restoreInto).toEqual({
+      host: "db.internal",
+      port: 5432,
+      database: "payments",
+      schemas: ["billing"],
+      collections: [],
+    });
+  });
+
+  it("names the maintenance database an unscoped postgres target restores through, and none for mysql", () => {
+    const target = { name: "t", host: "h", port: 1, scope: { databases: [], schemas: [], collections: [] } };
+    expect(toArtifactRecord({ ...row, job: { policy: { name: "p", target } } }).restoreInto?.database).toBe(
+      "postgres",
+    );
+    expect(
+      toArtifactRecord({ ...row, engine: "mysql", job: { policy: { name: "p", target } } }).restoreInto?.database,
+    ).toBe(null);
+  });
+
+  it("has nowhere to restore into when the target is gone or its scope does not parse", () => {
+    expect(toArtifactRecord(row).restoreInto).toBe(null);
+    expect(toArtifactRecord({ ...row, job: { policy: null } }).restoreInto).toBe(null);
+    expect(
+      toArtifactRecord({
+        ...row,
+        job: { policy: { name: "p", target: { name: "t", host: "h", port: 1, scope: { databases: "x" } } } },
+      }).restoreInto,
+    ).toBe(null);
+  });
+
   it("answers null, not a placeholder, when the policy is gone or the relation was not loaded", () => {
     expect(toArtifactRecord(row).targetName).toBe(null);
     expect(toArtifactRecord({ ...row, job: { policy: null } }).targetName).toBe(null);

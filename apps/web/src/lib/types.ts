@@ -17,6 +17,18 @@ import type {
 
 export type { JobKind, JobState } from "@/lib/domain";
 
+// Where a restore of an artifact writes: the producing policy's target, which is the only place the
+// server restores into. See RestoreInto in apps/server/src/routes/jobs.ts.
+export interface RestoreInto {
+  host: string;
+  port: number;
+  // The database a DATABASE or SCHEMA restore writes; null when the target names no single one.
+  database: string | null;
+  // What a SCHEMA / COLLECTION restore would be confined to. Empty: the server refuses that scope.
+  schemas: string[];
+  collections: string[];
+}
+
 export interface Artifact {
   id: string;
   jobId: string;
@@ -25,6 +37,8 @@ export interface Artifact {
   // job that wrote it. Null when the policy is gone: rendered as absence, never as a placeholder.
   targetName: string | null;
   policyName: string | null;
+  // Where a restore would write. Null when the policy or its target is gone — nowhere to go.
+  restoreInto: RestoreInto | null;
   state: ArtifactState;
   // How that state was reached: the verify level that actually ran, and whether it was a downgrade
   // from what the policy asked. `state` alone cannot tell a green proven by a real restore from one
