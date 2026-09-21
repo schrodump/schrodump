@@ -5,7 +5,7 @@
 // need S3 / a reachable target). Every store is built from scopedPrisma, so every query is
 // automatically filtered by organizationId.
 
-import type { ArtifactState, JobKind, JobState, PrismaClient } from "@prisma/client";
+import { Prisma, type ArtifactState, type JobKind, type JobState, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { definedOnly } from "../data/patch.js";
 import type { Auth } from "../auth/auth.js";
@@ -284,7 +284,12 @@ export function toArtifactRecord(row: {
       target: { name: string; host?: string; port?: number; scope?: unknown } | null;
     } | null;
   } | null;
-}): ArtifactRecord {
+},
+// The key ids this server holds an identity for. Optional so a caller that did not ask still maps,
+// and absent reads as "can decrypt": the restore route refuses a sealed artifact regardless, so an
+// unknown here costs an operator one refused request, never a restore the server would not run.
+decryptableKeyIds?: ReadonlySet<string>,
+): ArtifactRecord {
   return {
     id: row.id,
     jobId: row.jobId,
@@ -322,6 +327,11 @@ export function toArtifactRecord(row: {
     checksum: row.checksum,
     compression: row.compression,
     keyIds: row.keyIds,
+    // Whether this instance can open the artifact at all. False for one written to a SEALED
+    // destination, which is encrypted to the escrow key alone — the one identity this server never
+    // stores. The UI withholds restore with that reason; the worker refuses it anyway.
+    serverCanDecrypt:
+      decryptableKeyIds === undefined || row.keyIds.some((keyId) => decryptableKeyIds.has(keyId)),
     dependsOn: row.dependsOn,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -530,7 +540,7 @@ export function createJobsService(
     // number would be a lie.
     listArtifacts: async (organizationId) => {
       const db = scopedPrisma(prisma, organizationId);
-      const [rows, total, grouped, byLevel, byDestination, oldest] = await Promise.all([
+      const [rows, total, grouped, byLevel, byDestination, oldest, decryptable] = await Promise.all([
         db.artifact.findMany({
           orderBy: { createdAt: "desc" },
           take: LIST_PAGE_SIZE,
@@ -552,7 +562,14 @@ export function createJobsService(
             job: { select: { policy: { select: { target: { select: { name: true } } } } } },
           },
         }),
+        // Which keys this server can actually open — those whose identity it holds. Only the id is
+        // selected: the wrapped identity itself has no business in a list query.
+        db.encryptionKey.findMany({
+          where: { encryptedIdentity: { not: Prisma.DbNull } },
+          select: { keyId: true },
+        }),
       ]);
+      const decryptableKeyIds = new Set(decryptable.map((key) => key.keyId));
       const counts = { VERIFIED: 0, UNOBSERVED: 0, FAILED: 0 };
       for (const group of grouped) counts[group.state] = group._count._all;
       const verifiedByLevel = { FULL_RESTORE: 0, CHECKSUM: 0 };
@@ -562,7 +579,7 @@ export function createJobsService(
         }
       }
       return {
-        items: rows.map(toArtifactRecord),
+        items: rows.map((row) => toArtifactRecord(row, decryptableKeyIds)),
         total,
         counts,
         verifiedByLevel,

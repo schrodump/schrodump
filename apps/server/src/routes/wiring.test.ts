@@ -91,6 +91,17 @@ describe("toArtifactRecord", () => {
     ).toBe(null);
   });
 
+  // "Sealed" now means the escrow key alone, whose identity this server never stores. The record
+  // says whether THIS instance can open an artifact, per artifact — one written to a sealed
+  // destination before the fix was sealed to the operational key too, and is still openable.
+  it("says whether this server can decrypt the artifact, from the keys it holds identities for", () => {
+    const sealed = { ...row, keyIds: ["esc"] };
+    const both = { ...row, keyIds: ["op", "esc"] };
+    const held = new Set(["op"]);
+    expect(toArtifactRecord(sealed, held).serverCanDecrypt).toBe(false);
+    expect(toArtifactRecord(both, held).serverCanDecrypt).toBe(true);
+  });
+
   it("has nowhere to restore into when the target is gone or its scope does not parse", () => {
     expect(toArtifactRecord(row).restoreInto).toBe(null);
     expect(toArtifactRecord({ ...row, job: { policy: null } }).restoreInto).toBe(null);
@@ -262,6 +273,7 @@ describe("createJobsService list bounds", () => {
     const base = {
       backupJob: model("BackupJob"),
       artifact: model("Artifact"),
+      encryptionKey: model("EncryptionKey"),
       $extends: (ext: { query: { $allModels: { $allOperations: (op: Op) => Promise<unknown> } } }) => {
         wrap = ext.query.$allModels.$allOperations;
         return base;

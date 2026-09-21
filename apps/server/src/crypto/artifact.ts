@@ -62,6 +62,31 @@ export function resolveRecipients(keys: EncryptionKeyRecord[]): {
   };
 }
 
+// A SEALED destination's artifacts are encrypted to the escrow recipient alone. The escrow identity
+// is never stored on this server — provisioning and rotation return it once and persist only the
+// public recipient — so an instance can write such an artifact and never read it back. That is the
+// custody separation "sealed" names, and until this existed it named nothing: every artifact went
+// to the operational key too, whose identity sits KEK-wrapped in the metadata database, so a sealed
+// destination held artifacts a compromised instance could open, and only lost restore-verification
+// for it. Verify stays possible (the checksum is over the stored bytes, never the plaintext);
+// restore runs outside Schrodump with the escrow identity, which is the whole point.
+export function resolveSealedRecipients(keys: EncryptionKeyRecord[]): {
+  recipients: string[];
+  keyIds: string[];
+} {
+  const escrow = keys.find((key) => key.state === "active" && key.type === "escrow");
+  if (escrow === undefined) throw new Error("no active escrow encryption key");
+  return { recipients: [escrow.publicRecipient], keyIds: [escrow.keyId] };
+}
+
+// Which of the two a backup seals to, decided by the destination it writes to.
+export function recipientsForSealMode(
+  sealMode: string,
+  keys: EncryptionKeyRecord[],
+): { recipients: string[]; keyIds: string[] } {
+  return sealMode === "sealed" ? resolveSealedRecipients(keys) : resolveRecipients(keys);
+}
+
 // Restore resolves the decryption key from the MANIFEST's keyIds, never from global config. It
 // returns a key the server can actually decrypt with (operational), or null when the artifact is
 // sealed and the operator must supply an identity in memory.

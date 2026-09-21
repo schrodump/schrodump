@@ -43,6 +43,7 @@ const service: JobsService = {
         checksum: "abc",
         compression: "zstd",
         keyIds: ["age1..."],
+        serverCanDecrypt: true,
         dependsOn: [],
         createdAt: new Date("2026-07-01T00:00:00.000Z"),
         updatedAt: new Date("2026-07-01T00:00:00.000Z"),

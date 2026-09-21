@@ -43,6 +43,7 @@ const targetDescription: Record<RestoreTarget, MessageKey> = {
 // The reason a scope is withheld sits on its row. "unsupported" is the engine's; every other one is
 // this artifact's or its target's, and says so — an operator told "not supported" would stop looking.
 const blockerReason: Record<Exclude<RestoreScopeBlocker, "unsupported">, MessageKey> = {
+  sealed: "restore.sealedScope",
   notConfinable: "restore.notConfinable",
   noTarget: "restore.noTarget",
   needsDatabase: "restore.needsDatabase",
@@ -84,7 +85,9 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
   const canSubmit = reachable && (scoped ? !overExisting || nameMatches : !overExisting || acknowledged);
   const blocked = canSubmit
     ? null
-    : into === null
+    : !artifact.serverCanDecrypt
+      ? t("restore.blocked.sealed")
+      : into === null
       ? t("restore.blocked.noTarget")
       : scoped
         ? t("restore.blocked.name")
@@ -190,6 +193,13 @@ export function RestoreDialog({ artifact, onClose }: { artifact: Artifact; onClo
             );
           })}
         </fieldset>
+
+        {/* A sealed artifact cannot be opened here at all — say so first, and how to restore it. */}
+        {!artifact.serverCanDecrypt ? (
+          <Panel tone="lock" role="alert" data-testid="restore-sealed" className="p-3.5">
+            <p className="text-[12.5px]">{t("restore.sealed")}</p>
+          </Panel>
+        ) : null}
 
         {/* Where the restore writes. The server has exactly one answer — the producing policy's
             target — and this is it, read from the same scope the worker restores through. */}
