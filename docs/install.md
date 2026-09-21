@@ -186,6 +186,7 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 | `DB_PASSWORD`                      | yes      | Password for Schrodump's own metadata database                                                                                   |
 | `SCHRODUMP_KEK`                    | yes      | Key-encryption key. See step 2                                                                                                   |
 | `SCHRODUMP_URL`                    | no       | Public URL, used to build the setup link                                                                                         |
+| `SCHRODUMP_TZ`                     | no       | IANA time zone every policy's cron is read in (default `UTC`). One per deployment; an unknown name stops the boot. See below      |
 | `PORT`                             | no       | Host port for the web UI (default 8080)                                                                                          |
 | `SCRATCH_MAX_BYTES`                | no       | Ceiling for the scratch volume (default 100 GiB)                                                                                 |
 | `SCHRODUMP_STAGED_THRESHOLD_BYTES` | no       | Dumps estimated above this run STAGED. Unset by default, and read the note below before setting it                               |
@@ -208,6 +209,15 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 > target that is unscoped or selects several databases: a staged mysql dump (`mydumper`) copies
 > exactly one database, so such a target is streamed whatever the policy asks, and the job's reason
 > says so.
+
+> **On `SCHRODUMP_TZ`.** A cron expression names a wall-clock time, so it only means something on
+> a named clock. The container's clock is UTC, and it is not the one to change: the zone is
+> applied where a cron is read — by the scheduler, by the notification cadence, and when a policy
+> is saved. Set it to the zone your maintenance windows are planned in (`America/Sao_Paulo`,
+> `Europe/Berlin`); a policy row then reads `every day at 02:00 America/Sao_Paulo` and shows the
+> next run on the viewer's own clock. Changing it moves every policy's schedule at once, on the
+> next restart — and the first tick after it dispatches each policy's most recent window on the
+> new clock if that window has no job yet, exactly as it does for a policy just created.
 
 ### Email notifications to an internal relay
 

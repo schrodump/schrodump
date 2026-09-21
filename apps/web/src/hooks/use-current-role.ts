@@ -14,6 +14,9 @@ import type { Role } from "@/lib/domain";
 interface Me {
   role: Role;
   mustChangePassword: boolean;
+  // SCHRODUMP_TZ: the zone the scheduler reads every cron in. On /me because every role needs it
+  // and the policy form needs it before any policy exists.
+  timeZone: string;
 }
 
 function useMe() {
@@ -33,4 +36,12 @@ export function useCurrentRole(): Role {
 export function useMustChangePassword(): boolean {
   const { data } = useMe();
   return data?.mustChangePassword ?? false;
+}
+
+// The instance's zone, or null until the server has said. Deliberately no default: guessing UTC
+// or the browser's zone is the exact mistake this replaces, so a caller renders no clock time
+// until it knows whose clock it is.
+export function useInstanceTimeZone(): string | null {
+  const { data } = useMe();
+  return data?.timeZone ?? null;
 }

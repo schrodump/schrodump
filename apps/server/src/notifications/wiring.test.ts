@@ -70,6 +70,7 @@ function depsWith(prisma: ReturnType<typeof fakePrisma>, fetchImpl: typeof fetch
     smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
     log: { info: () => undefined, error: () => undefined },
     minEvaluationGapMs: 900_000,
+    timeZone: "UTC",
   };
 }
 
@@ -148,10 +149,81 @@ describe("VERIFICATION_BEHIND — the anchor has to be allowed to age", () => {
         smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
         log: { info: () => undefined, error: () => undefined },
         minEvaluationGapMs: 900_000,
+        timeZone: "UTC",
       });
       clock += 30_000;
     }
 
     expect(sent.some((body) => body.includes("VERIFICATION_BEHIND"))).toBe(true);
+  });
+});
+
+// POLICY_QUIET measures each policy against its own cadence, read from its cron — and that read
+// used to be unguarded. One stored "0 0 30 2 *" threw out of the pass and no organization was
+// evaluated at all, on the very tick the scheduler stopped running that policy.
+describe("a policy whose cron cannot be read", () => {
+  function fleet(policies: Array<{ id: string; name: string; cron: string }>, lastSucceededAt: Date) {
+    const opened: Array<{ trigger: string; key: string }> = [];
+    const client = {
+      organization: { findMany: () => Promise.resolve([{ id: "org-1" }]) },
+      notificationChannel: {
+        findMany: () => Promise.resolve([WEBHOOK_ROW]),
+        update: () => Promise.resolve(WEBHOOK_ROW),
+      },
+      artifact: { count: () => Promise.resolve(0), findMany: () => Promise.resolve([]) },
+      backupPolicy: { findMany: () => Promise.resolve(policies) },
+      backupJob: { findFirst: () => Promise.resolve({ finishedAt: lastSucceededAt }) },
+      notificationSnapshot: { findUnique: () => Promise.resolve(null), upsert: () => Promise.resolve({}) },
+      notificationState: {
+        findMany: () => Promise.resolve([]),
+        create: ({ data }: { data: { trigger: string; key: string } }) => {
+          opened.push({ trigger: data.trigger, key: data.key });
+          return Promise.resolve({});
+        },
+        deleteMany: () => Promise.resolve({ count: 0 }),
+      },
+    };
+    return { prisma: { updates: [], client } as unknown as ReturnType<typeof fakePrisma>, opened };
+  }
+
+  const delivering = vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch;
+
+  it("does not end the pass: it reads as quiet, and the policy beside it is still measured", async () => {
+    // Both succeeded an hour ago: well inside a daily policy's deadline, long past the deadline of
+    // a policy the scheduler will never run again.
+    const { prisma, opened } = fleet(
+      [
+        { id: "feb-30", name: "never", cron: "0 0 30 2 *" },
+        { id: "daily", name: "nightly", cron: "0 2 * * *" },
+      ],
+      new Date(NOW.getTime() - 60 * 60 * 1000),
+    );
+    const logged: Array<Record<string, unknown>> = [];
+
+    await runNotifications({
+      ...depsWith(prisma, delivering),
+      log: { info: () => undefined, error: (o) => logged.push(o) },
+    });
+
+    expect(opened).toEqual([{ trigger: "POLICY_QUIET", key: "feb-30" }]);
+    expect(logged).toEqual([expect.objectContaining({ policyId: "feb-30" })]);
+  });
+
+  // The cadence is measured on the instance's clock, like the scheduler's windows. Across the
+  // spring-forward in New York, "every day at 12:00" is 23 hours apart there and 24 on UTC's
+  // clock, so a success 47 hours ago is past the two-interval deadline in one zone and inside it in
+  // the other.
+  it("measures the cadence in the instance zone", async () => {
+    const now = new Date("2026-03-08T16:30:00.000Z"); // 12:30 EDT, the day the clocks went forward
+    const lastSucceededAt = new Date(now.getTime() - 47 * 60 * 60 * 1000);
+    const policies = [{ id: "noon", name: "noon", cron: "0 12 * * *" }];
+
+    const newYork = fleet(policies, lastSucceededAt);
+    await runNotifications({ ...depsWith(newYork.prisma, delivering), now: () => now, timeZone: "America/New_York" });
+    expect(newYork.opened).toEqual([{ trigger: "POLICY_QUIET", key: "noon" }]);
+
+    const utc = fleet(policies, lastSucceededAt);
+    await runNotifications({ ...depsWith(utc.prisma, delivering), now: () => now, timeZone: "UTC" });
+    expect(utc.opened).toEqual([]);
   });
 });

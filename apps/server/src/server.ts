@@ -20,6 +20,7 @@ import { runNotifications } from "./notifications/wiring.js";
 import { createWorkerStore, createJobExecutor, sanitizeReason } from "./jobs/worker-wiring.js";
 import { pgAdvisoryLock, withAdvisoryLock } from "./scheduler/advisory-lock.js";
 import { dispatchDueJobs, recoverOrphanedJobs } from "./scheduler/scheduler.js";
+import { runTickPasses } from "./scheduler/tick.js";
 import { cronEvaluator, prismaSchedulerStore } from "./scheduler/wiring.js";
 import { betterAuthResolver, createAuth, parseTrustedProxies } from "./auth/auth.js";
 import { bootstrap } from "./bootstrap/bootstrap.js";
@@ -184,13 +185,15 @@ export async function main(): Promise<void> {
       shutdownGraceMs: env.SCHRODUMP_SHUTDOWN_GRACE_MS,
     }),
     kek,
+    timeZone: env.SCHRODUMP_TZ,
   });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
 
   // Which build is serving. The first thing anyone needs during an incident, and the log is where
   // they already are — /health stays version-free on purpose (see version.ts).
-  app.log.info({ version: serverVersion() }, "schrodump server listening");
+  // The zone too: it decides when every policy fires, and it is set once per deployment.
+  app.log.info({ version: serverVersion(), timeZone: env.SCHRODUMP_TZ }, "schrodump server listening");
 
   // --- worker boot ---
   const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
@@ -246,46 +249,60 @@ export async function main(): Promise<void> {
   const SCHEDULER_LOCK_KEY = 0x5343_4852_444d_5032n; // "SCHRDMP2"
   const schedulerDeps = {
     store: schedulerStore,
-    cron: cronEvaluator(),
+    cron: cronEvaluator(env.SCHRODUMP_TZ),
     now: () => new Date(),
     newCorrelationId,
+    log: logger,
   };
   const schedulerHandle = startLoop({
     intervalMs: env.SCHRODUMP_SCHEDULER_TICK_MS,
     tick: () =>
-      withAdvisoryLock(lock, SCHEDULER_LOCK_KEY, async () => {
-        await dispatchDueJobs(schedulerDeps);
-        // Same tick, same single-flight lock: notifications read committed state after the fact and
-        // are not in any job's path, so a failure here can never fail a backup. Caught separately
-        // so a broken notifier cannot stop the scheduler from dispatching.
-        await runNotifications({
-          prisma,
-          kek,
-          audit: credentialAudit,
-          now: () => new Date(),
-          fetch,
-          smtp,
-          log: logger,
-          minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
-        }).catch((err) => {
-          logger.error({ err }, "notification pass failed");
-        });
-        // Same tick and the same reasoning: the outbox is committed state, read after the fact and
-        // never in a job's path. Separate from the evaluator above because it is not alerting —
-        // evaluate.ts decides what the FLEET is asking; this ships what a channel subscribed to.
-        await runJobEventNotifications({
-          prisma,
-          kek,
-          audit: credentialAudit,
-          now: () => new Date(),
-          fetch,
-          smtp,
-          log: logger,
-        }).catch((err) => {
-          logger.error({ err }, "job event pass failed");
-        });
-      }).catch((err) => {
-        logger.error({ err }, "scheduler dispatch tick failed");
+      withAdvisoryLock(lock, SCHEDULER_LOCK_KEY, () =>
+        // Each pass is its own attempt (see tick.ts): a dispatch that throws used to end this
+        // callback before either notification pass ran.
+        runTickPasses(
+          [
+            { failure: "scheduler dispatch failed", run: () => dispatchDueJobs(schedulerDeps) },
+            // Same tick, same single-flight lock: notifications read committed state after the fact
+            // and are not in any job's path, so a failure here can never fail a backup.
+            {
+              failure: "notification pass failed",
+              run: () =>
+                runNotifications({
+                  prisma,
+                  kek,
+                  audit: credentialAudit,
+                  now: () => new Date(),
+                  fetch,
+                  smtp,
+                  log: logger,
+                  minEvaluationGapMs: env.SCHRODUMP_NOTIFY_MIN_GAP_MS,
+                  timeZone: env.SCHRODUMP_TZ,
+                }),
+            },
+            // Same tick and the same reasoning: the outbox is committed state, read after the fact
+            // and never in a job's path. Separate from the evaluator above because it is not
+            // alerting — evaluate.ts decides what the FLEET is asking; this ships what a channel
+            // subscribed to.
+            {
+              failure: "job event pass failed",
+              run: () =>
+                runJobEventNotifications({
+                  prisma,
+                  kek,
+                  audit: credentialAudit,
+                  now: () => new Date(),
+                  fetch,
+                  smtp,
+                  log: logger,
+                }),
+            },
+          ],
+          logger,
+        ),
+      ).catch((err) => {
+        // Only the lock itself can land here now — every pass catches its own.
+        logger.error({ err }, "scheduler tick failed");
       }),
   });
 

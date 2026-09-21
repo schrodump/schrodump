@@ -172,6 +172,10 @@ export interface Policy {
   parallelism: number;
   compression: CompressionAlgorithm;
   enabled: boolean;
+  // When the scheduler next dispatches it, computed by the server on the instance's clock (the
+  // zone GET /me names) and rendered on the viewer's. null when the policy is disabled, or when
+  // its cron is one the scheduler cannot read — it is skipped on every tick, and the row says so.
+  nextRunAt: string | null;
 }
 
 // countByState used to live here, deriving the dashboard's counters from the fetched array. It is

@@ -220,10 +220,18 @@ screens that follow:
   `ui/form-bits.tsx` (`FormHeader`, `FieldLabel`, `SaveBar`): the primary action carries the
   first thing to fix, the locked fields in edit stay on screen with the reason (`Panel` tone
   `lock`), and every refusal is the server's own sentence under "Refused by the server". The
-  policy row reads its cron (`lib/cron.ts`: five fields, lists, ranges, steps; `readCron` names
-  only the shapes that have an honest sentence, `nextRun` walks the local clock) and says when it
-  fires next, or that it will not and why — a disabled policy has no next run, an unreadable
-  expression says so in caution and blocks Save. `scratch.configured` comes from `/instance`: with
+  policy row reads its cron on the **instance's** clock — `SCHRODUMP_TZ`, carried by `GET /me`
+  (`useInstanceTimeZone`) — and names it ("every day at 2:00 AM UTC", or "in UTC" for a shape with
+  no sentence). When it fires next is the server's `nextRunAt`, rendered on the viewer's clock and
+  marked "your time" when the two clocks read it differently; a disabled policy has no next run,
+  and a `null` on an enabled one is a cron the scheduler cannot read, said in caution. The row
+  used to compute that itself on the browser's clock while the scheduler ran on UTC: a São Paulo
+  operator read "next tomorrow 02:00" for a job that ran at 23:00. `lib/cron.ts` (five fields,
+  lists, ranges, steps; `readCron` names only the shapes that have an honest sentence) refuses a
+  day of month no listed month has — 30 February, 31 April — exactly as the server's 400 on `cron`
+  does, so Save is blocked on the unreadable path; `nextRun(expr, from, timeZone)` is only the
+  form's live preview, walking the zone's wall clock through `formatToParts`. Until the zone is
+  known, neither names a clock time. `scratch.configured` comes from `/instance`: with
   it off, the staged mode is withheld with its reason and a full-restore verify is warned as one
   that would only ever end "could not run". A channel that is recording failures offers "Disable
   instead" before "Delete": deleting it throws away the only evidence deliveries were not arriving.
@@ -290,6 +298,10 @@ Every fetch is same-origin with `credentials: "include"`. The value is baked at 
   a 02:00 job as 05:00 — the quiet mismatch that makes a person distrust the whole screen. Freshness
   ("verified 3 days ago") uses `formatRelative`; it answers the question the dashboard is really
   asking better than an absolute stamp.
+- **A cron is the one wall-clock time that is not the viewer's.** It names a time on the instance's
+  clock (`SCHRODUMP_TZ`), so its reading says that zone out loud, and the instant it next fires
+  comes from the server and renders like any other timestamp. Converting the expression to the
+  viewer's zone would be wrong on the day either zone changes its offset.
 
 ## Test-connection and RBAC
 
