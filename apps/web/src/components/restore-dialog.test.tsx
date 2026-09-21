@@ -35,6 +35,7 @@ const artifact: Artifact = {
   checksum: "deadbeef",
   compression: "zstd",
   keyIds: ["age1operational"],
+  serverCanDecrypt: true,
   dependsOn: [],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
@@ -141,6 +142,20 @@ describe("RestoreDialog", () => {
     );
     await user.click(screen.getByRole("button", { name: "Restore" }));
     expect(screen.getByLabelText("Schema")).toBeEnabled();
+  });
+
+  // Sealed means the escrow key alone, which this server never holds. There is nothing here that can
+  // open the artifact, so every scope is withheld and the dialog says how to restore it instead.
+  it("withholds every scope for a sealed artifact and says how to restore it outside Schrodump", async () => {
+    const user = userEvent.setup();
+    renderWith(<RestoreButton artifact={{ ...artifact, serverCanDecrypt: false }} role="operator" />);
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    expect(screen.getByTestId("restore-sealed")).toHaveTextContent(/Restoring a sealed artefact/);
+    for (const scope of ["Full cluster", "Database", "Schema", "Table", "Collection"]) {
+      expect(screen.getByLabelText(scope)).toBeDisabled();
+    }
+    expect(screen.getByRole("button", { name: "Start restore" })).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/escrow identity/i);
   });
 
   it("refuses to start when the target the artifact was written for is gone", async () => {

@@ -89,6 +89,9 @@ export interface ArtifactRecord {
   checksum: string;
   compression: string;
   keyIds: string[];
+  // Whether this server holds an identity for any of `keyIds`. False for an artifact on a SEALED
+  // destination (escrow-only): this instance wrote it and cannot read it, which is the point.
+  serverCanDecrypt: boolean;
   dependsOn: string[];
   createdAt: Date;
   // Last time the row changed — in practice the last verify that reached a verdict (it writes the

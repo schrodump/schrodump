@@ -291,8 +291,20 @@ A destination can be marked **operational** or **sealed**.
 
 - **Operational** — Schrodump holds the operational key. It can decrypt artefacts, which is what
   lets `FULL_RESTORE` verification actually restore the dump and check it.
-- **Sealed** — Schrodump holds only public recipients. It can write artefacts and never read
-  them. Decryption requires an identity the operator supplies in memory at restore time.
+- **Sealed** — artefacts are encrypted to the **escrow** recipient alone. Schrodump never stores
+  the escrow identity (it is shown once at provisioning or rotation and kept by you), so it can
+  write these artefacts and never read them. Schrodump does not restore them: a restore runs outside
+  it, with the escrow identity — `scripts/rehearse-recovery.sh` is the procedure, and it uses
+  nothing from Schrodump on purpose. The interface withholds the restore on a sealed artefact with
+  that reason.
+
+> **Until the pre-launch audit, sealed was not sealed.** Every artefact was encrypted to the
+> operational key as well, whose identity Schrodump holds KEK-wrapped in its own database, so a
+> compromised instance could open a sealed destination's artefacts; the setting only cost them
+> their restore-verification. Artefacts written to a sealed destination before that fix are still
+> sealed to both keys and still openable by this instance — each artefact's `keyIds` in its
+> manifest says which it is, and the catalogue shows it as restorable. Re-take them if the
+> separation matters for them.
 
 Sealed mode is the honest answer to "what if Schrodump itself is compromised". An attacker with
 full control of a sealed instance can destroy your ability to take new backups; they cannot read
@@ -304,8 +316,10 @@ the ones already written.
 > destination, verification is no longer answering the question the project exists to answer, and
 > you should be restoring from it manually on a schedule you set.
 
-Every artefact is encrypted to **two** recipients: the operational key and an escrow key. One
-lost key is not one lost backup.
+Every artefact on an operational destination is encrypted to **two** recipients: the operational
+key and an escrow key, so one lost key is not one lost backup. On a sealed destination it is the
+escrow key alone — which makes that identity the only copy of the ability to read those
+artefacts. Keep it as carefully as the KEK.
 
 ## Executors
 

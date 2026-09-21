@@ -137,15 +137,41 @@ Restore is deliberately harder to trigger than backup.
 - **Only operators and administrators can restore.** A viewer does not see the control, and the
   server rejects the request regardless of what the browser sends. The interface hiding a button
   is a convenience; the server refusing the call is the control.
-- **Scopes are constrained by the engine.** PostgreSQL can restore a cluster, a database, a schema
-  or a table; MySQL and MariaDB have no schema level; MongoDB restores collections rather than
-  schemas. Scopes the engine cannot do are shown disabled with the reason, instead of being
-  offered and failing later.
-- **Restoring over an existing database requires typing its name.** The friction is the point.
-  Restore is one of the few operations that destroys data faster than any incident, and it is
-  usually run by someone under pressure at an hour they would rather be asleep.
+- **It says where it writes.** A restore goes into the target the artefact's policy backs up —
+  there is no other destination — and the dialog names it: the target, `host:port` and the
+  database.
+- **Scopes are constrained by the engine, and by what the target names.** PostgreSQL can restore a
+  cluster, a database, a schema or a table; MySQL and MariaDB have no schema level; MongoDB
+  restores collections rather than schemas. A schema, table or collection restore also needs the
+  target to name one — without it there is nothing to confine the restore to, and it would rewrite
+  the whole database — so those are shown disabled with the reason, and the server refuses them,
+  instead of being offered and widening.
+- **Restoring over an existing database requires retyping its name** — the name of the database
+  that will actually be overwritten, as the dialog shows it. The friction is the point. Restore is
+  one of the few operations that destroys data faster than any incident, and it is usually run by
+  someone under pressure at an hour they would rather be asleep.
 
 Every restore is recorded: who, what artefact, which scope, when.
+
+### Restoring a sealed artefact
+
+An artefact on a **sealed** destination is encrypted to the escrow key alone, and Schrodump never
+holds the escrow identity — so it cannot restore it, by design, and the interface says so instead
+of offering the button. The restore is done with standard tools, outside Schrodump:
+
+```sh
+aws s3 cp s3://<bucket>/<bucketKey> artifact.bin          # the key is on the artefact's row
+age -d -i escrow.key artifact.bin | gunzip > dump
+# PostgreSQL: roles first (globals.bin, beside artifact.bin), then the dump
+#   age -d -i escrow.key globals.bin | gunzip | psql <conninfo>
+#   pg_restore -d <conninfo> --clean --if-exists dump
+# MySQL / MariaDB:  mysql <connection options> < dump
+# MongoDB:          mongorestore --uri <uri> --archive=dump
+```
+
+A STAGED artefact decrypts to a tar of the dump directory; untar it and point `pg_restore` or
+`myloader` at the directory. `scripts/rehearse-recovery.sh` does the PostgreSQL half of this
+end to end for the metadata self-backup, and is a working example of the same steps.
 
 ## Deleting an artefact
 

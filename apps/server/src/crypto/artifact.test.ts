@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
+  decryptStream,
+  encryptStream,
   generateAgeKeyPair,
   recipientFingerprint,
+  recipientsForSealMode,
   resolveDecryptionKeyId,
   resolveRecipients,
+  resolveSealedRecipients,
   type EncryptionKeyRecord,
 } from "./artifact.js";
 
@@ -25,6 +30,56 @@ describe("resolveRecipients", () => {
 
   it("throws when there is no active escrow key", () => {
     expect(() => resolveRecipients(keys.filter((key) => key.type !== "escrow"))).toThrow();
+  });
+});
+
+// "Sealed" promised an instance that can write artifacts it cannot read, and delivered one that
+// sealed to the operational key too — whose identity the server holds. These prove the promise on
+// real age encryption, not on a list of strings.
+describe("resolveSealedRecipients", () => {
+  it("seals to the active escrow recipient alone", () => {
+    const keys: EncryptionKeyRecord[] = [
+      { keyId: "op", type: "operational", publicRecipient: "age1op", state: "active" },
+      { keyId: "esc", type: "escrow", publicRecipient: "age1escrow", state: "active" },
+      { keyId: "old-esc", type: "escrow", publicRecipient: "age1oldescrow", state: "retired" },
+    ];
+    expect(resolveSealedRecipients(keys)).toEqual({ recipients: ["age1escrow"], keyIds: ["esc"] });
+  });
+
+  it("refuses rather than seal to nothing when there is no active escrow key", () => {
+    expect(() =>
+      resolveSealedRecipients([{ keyId: "op", type: "operational", publicRecipient: "age1op", state: "active" }]),
+    ).toThrow(/escrow/);
+  });
+
+  it("picks by the destination's seal mode", () => {
+    const keys: EncryptionKeyRecord[] = [
+      { keyId: "op", type: "operational", publicRecipient: "age1op", state: "active" },
+      { keyId: "esc", type: "escrow", publicRecipient: "age1escrow", state: "active" },
+    ];
+    expect(recipientsForSealMode("sealed", keys).keyIds).toEqual(["esc"]);
+    expect(recipientsForSealMode("operational", keys).keyIds).toEqual(["op", "esc"]);
+  });
+
+  it("writes an artifact the operational identity cannot open and the escrow identity can", async () => {
+    const operational = await generateAgeKeyPair();
+    const escrow = await generateAgeKeyPair();
+    const { recipients } = recipientsForSealMode("sealed", [
+      { keyId: "op", type: "operational", publicRecipient: operational.recipient, state: "active" },
+      { keyId: "esc", type: "escrow", publicRecipient: escrow.recipient, state: "active" },
+    ]);
+    const collect = async (stream: Readable): Promise<Buffer> => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
+    };
+    const ciphertext = await collect(await encryptStream(Readable.from([Buffer.from("the dump")]), recipients));
+
+    const opened = await collect(await decryptStream(Readable.from([ciphertext]), escrow.identity));
+    expect(opened.toString()).toBe("the dump");
+    await expect(
+      (async () => collect(await decryptStream(Readable.from([ciphertext]), operational.identity)))(),
+    ).rejects.toThrow();
   });
 });
 

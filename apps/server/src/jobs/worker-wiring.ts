@@ -32,8 +32,8 @@ import type {
 import { createDockerRunner, type RunMount } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
 import {
+  recipientsForSealMode,
   resolveDecryptionKeyId,
-  resolveRecipients,
   type EncryptionKeyRecord,
 } from "../crypto/artifact.js";
 import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
@@ -651,6 +651,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       select: {
         targetId: true,
         destinationId: true,
+        // Decides who the artifact is sealed to: a sealed destination gets the escrow key alone.
+        destination: { select: { sealMode: true } },
         verifyLevel: true,
         parallelism: true,
         keepLast: true,
@@ -783,7 +785,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
         const keys = await prisma.encryptionKey.findMany({
           where: { organizationId: job.organizationId },
         });
-        return resolveRecipients(keys.map(toKeyRecord));
+        return recipientsForSealMode(policy.destination.sealMode, keys.map(toKeyRecord));
       },
       buildDumpDescriptor: buildDumpDescriptorFor({
         adapter,

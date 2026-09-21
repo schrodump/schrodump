@@ -69,6 +69,9 @@ export interface Artifact {
   checksum: string;
   compression: CompressionAlgorithm;
   keyIds: string[];
+  // Whether this server can open it at all — false for an artifact on a SEALED destination, which is
+  // encrypted to the escrow key alone. Restore is withheld with that reason.
+  serverCanDecrypt: boolean;
   dependsOn: string[];
   createdAt: string;
   // Last time the row changed — the last verify to reach a verdict. Rendered as "verified N ago".

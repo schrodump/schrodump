@@ -123,6 +123,7 @@ export function canConfineRestore(artifact: {
 // target model has no tables to name.
 export type RestoreScopeBlocker =
   | "unsupported"
+  | "sealed"
   | "notConfinable"
   | "noTarget"
   | "needsDatabase"
@@ -135,10 +136,14 @@ export function restoreScopeBlocker(
     engine: EngineKind;
     dumpIsMultiDatabase: boolean | null;
     restoreInto: { database: string | null; schemas: string[]; collections: string[] } | null;
+    serverCanDecrypt: boolean;
   },
   target: RestoreTarget,
 ): RestoreScopeBlocker | null {
   if (!RESTORE_TARGETS_BY_ENGINE[artifact.engine].includes(target)) return "unsupported";
+  // A sealed artifact is encrypted to the escrow key alone, which this server never holds. Every
+  // scope is withheld: there is nothing here that can open it, and that is what sealed is for.
+  if (!artifact.serverCanDecrypt) return "sealed";
   if (artifact.restoreInto === null) return "noTarget";
   if (target === "FULL_CLUSTER") return null;
   if (!canConfineRestore(artifact)) return "notConfinable";

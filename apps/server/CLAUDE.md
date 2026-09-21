@@ -234,8 +234,14 @@ the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_
    first boot; boot fails if it diverges. That is why swapping the KEK against an existing database
    refuses to boot rather than producing artifacts nobody can open.
 3. **Artifacts** — `age` **in-process** through the `age-encryption` library (`Encrypter` on
-   backup, `Decrypter` on restore; keygen from the same library), always 2 recipients (operational
-   + escrow). There is **no `age` executor**: encrypting inside a container required stdin over a
+   backup, `Decrypter` on restore; keygen from the same library), 2 recipients (operational +
+   escrow) — except on a **sealed** destination, which gets the escrow recipient alone
+   (`recipientsForSealMode`, `crypto/artifact.ts`). The server never stores the escrow identity, so a
+   sealed artifact is one this instance can write and never read: verify is checksum-only (the hash
+   is over the stored bytes), restore is refused ("no server-held identity") and runs outside
+   Schrodump, and `GET /artifacts` says so per artifact (`serverCanDecrypt`, from the manifest's
+   `keyIds` against the keys this server holds an identity for). Sealed used to mean nothing but a
+   verify downgrade: every artifact was sealed to the operational key too. There is **no `age` executor**: encrypting inside a container required stdin over a
    hijacked attach, whose demux corrupted the stream. Pipeline: dump → compression → encryption
    (never invert it). Both stream helpers live in `crypto/artifact.ts`.
 
