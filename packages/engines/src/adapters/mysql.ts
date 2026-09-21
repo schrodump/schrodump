@@ -3,6 +3,8 @@
 
 import {
   EngineDescriptorError,
+  TLS_CA_PATH,
+  tlsModeOf,
   type EngineAdapter,
   type ExecutionDescriptor,
   type TargetConnection,
@@ -24,9 +26,30 @@ function connEnv(connection: TargetConnection): Record<string, string> {
   return { MYSQL_PWD: connection.password };
 }
 
-function tlsArgs(family: SqlFamily, tls: boolean): string[] {
-  if (family === "mariadb") return tls ? ["--ssl"] : [];
-  if (tls) return ["--ssl-mode=REQUIRED"];
+// The client flags for each TLS mode (targetTlsOf, descriptor.ts). The probe reads the same mode
+// (probe/mysql.ts), so it connects the way these tools will.
+//
+// verify-full is one decision per family, verified against real servers behind a throwaway CA — a
+// wrong CA and a host the certificate does not name both refused, the right pair accepted, and a
+// server offering no TLS refused rather than fallen back from:
+//   mysql    `--ssl-mode=VERIFY_IDENTITY --ssl-ca=<path>`
+//   mariadb  `--ssl --ssl-ca=<path> --ssl-verify-server-cert` (the mariadb client has no ssl-mode)
+//
+// require stays what it was. For mysql `--ssl-mode=REQUIRED` encrypts, verifies nothing and refuses a
+// server without TLS. The mariadb client has no way to say "required but unverified": `--ssl` on a
+// 10.x client encrypts when the server offers TLS and silently goes plaintext when it does not
+// (measured against mariadb:10.11), while 11.4+ clients verify by default and refuse plaintext. The
+// probe that runs first — against the same server, at the same moment — refuses a server that offers
+// no TLS, so a backup never reaches this client against one; docs/security.md records the rest.
+function tlsArgs(family: SqlFamily, connection: TargetConnection): string[] {
+  const mode = tlsModeOf(connection);
+  if (mode === "verify-full") {
+    return family === "mariadb"
+      ? ["--ssl", `--ssl-ca=${TLS_CA_PATH}`, "--ssl-verify-server-cert"]
+      : ["--ssl-mode=VERIFY_IDENTITY", `--ssl-ca=${TLS_CA_PATH}`];
+  }
+  if (family === "mariadb") return mode === "require" ? ["--ssl"] : [];
+  if (mode === "require") return ["--ssl-mode=REQUIRED"];
   // MySQL 8's default caching_sha2_password plugin refuses to transmit the password over an INSECURE
   // connection (--ssl-mode=DISABLED) unless the client fetches the server's RSA public key to encrypt
   // it. Without --get-server-public-key the mysql/mysqldump client aborts the FIRST time it
@@ -38,6 +61,43 @@ function tlsArgs(family: SqlFamily, tls: boolean): string[] {
   // secure channel, so the flag is neither needed nor emitted. mariadb-dump/mariadb have no such option
   // (MariaDB defaults to mysql_native_password), so it is strictly mysql-family.
   return ["--ssl-mode=DISABLED", "--get-server-public-key"];
+}
+
+// mydumper and myloader (schrodump/mydumper:1, MariaDB Connector/C) honour exactly two of the three
+// TLS modes. Measured against mysql 8.0 and mariadb 11.8 servers, and against a mysql with TLS
+// switched off:
+//   verify-full  `--ssl-mode=VERIFY_IDENTITY --ca=<path>` — a wrong CA and a host the certificate
+//                does not name are refused, and a server offering no TLS is refused too.
+//   require      NOT honoured. `--ssl-mode=REQUIRED` (and `--ssl`) completed a whole dump against the
+//                TLS-off server in plaintext: the connector treats both as "use TLS if offered". A
+//                tool that falls back is not a tool that requires, so a STAGED dump of such a target
+//                would carry the data — and the login — in the clear the day the server stops
+//                offering TLS.
+//   disable      no flags, as before.
+const MYDUMPER_TLS_REFUSAL =
+  "mydumper and myloader cannot require TLS without verifying the server's certificate — they " +
+  "fall back to plaintext when the server offers none";
+
+function stagedTlsRefusalFor(connection: TargetConnection): string | null {
+  return tlsModeOf(connection) === "require" ? MYDUMPER_TLS_REFUSAL : null;
+}
+
+// Throws rather than returning flags for `require`. A backup routes such a target to STREAM before it
+// gets here (stagedTlsRefusal), so for a dump reaching this is a wiring mistake; a STAGED artifact
+// restored into a TLS target without a CA reaches it legitimately, and has no other tool to use. The
+// only flags available either way are the ones that fall back to plaintext.
+function mydumperTlsArgs(connection: TargetConnection): string[] {
+  const refusal = stagedTlsRefusalFor(connection);
+  if (refusal !== null) {
+    throw new EngineDescriptorError(
+      "MYSQL_STAGED_TLS_UNVERIFIED",
+      `${refusal}. A TLS target without a CA certificate is never dumped or restored through them: ` +
+        "add the server's CA certificate to the target, which they do honour.",
+    );
+  }
+  return tlsModeOf(connection) === "verify-full"
+    ? ["--ssl-mode=VERIFY_IDENTITY", `--ca=${TLS_CA_PATH}`]
+    : [];
 }
 
 // mariadb:11+ dropped the `mysql`/`mysqldump` -> mariadb compat symlinks that mariadb:10.x still
@@ -79,6 +139,8 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
   return {
     kind: family,
 
+    stagedTlsRefusal: stagedTlsRefusalFor,
+
     imageFor(serverVersionNum) {
       const major = Math.floor(serverVersionNum / 10000);
       const minor = Math.floor((serverVersionNum % 10000) / 100);
@@ -118,6 +180,7 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
           command: [
             "mydumper",
             ...connArgs(connection),
+            ...mydumperTlsArgs(connection),
             "-B",
             database,
             "-o",
@@ -142,7 +205,7 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
           dumpBinary(family),
           "--single-transaction",
           ...connArgs(connection),
-          ...tlsArgs(family, connection.tls),
+          ...tlsArgs(family, connection),
           ...databaseArgs,
         ],
         env: connEnv(connection),
@@ -199,6 +262,7 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
           command: [
             "myloader",
             ...connArgs(connection),
+            ...mydumperTlsArgs(connection),
             "--drop-table=DROP",
             "-B",
             connection.database,
@@ -238,12 +302,12 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
       // --exit-on-error closes (see postgres.ts buildRestore).
       //
       // Only non-secret values are interpolated into the shell string: host/port/user (connArgs),
-      // the TLS flag, connection.database, and our own constant sourcePath — each single-quoted
+      // the TLS flags, connection.database, and our own constant sourcePath — each single-quoted
       // (shQuote). The password is never in argv or the shell string; it stays in MYSQL_PWD (env).
       const shellArgs = [
         clientBinary(family),
         ...connArgs(connection),
-        ...tlsArgs(family, connection.tls),
+        ...tlsArgs(family, connection),
         connection.database,
       ];
       const shellCommand =

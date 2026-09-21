@@ -3,6 +3,8 @@
 
 import {
   EngineDescriptorError,
+  TLS_CA_PATH,
+  tlsModeOf,
   type EngineAdapter,
   type TargetConnection,
   type VerifySandbox,
@@ -29,6 +31,19 @@ function mongoConnArgs(connection: TargetConnection): string[] {
     "--authenticationDatabase",
     connection.database,
   ];
+}
+
+// The tools' flags for each TLS mode. The spelling is `--ssl`, not `--tls`: the database tools the
+// official images ship (100.17 in mongo:8, and mongo:7's) answer `--tls` with "unknown option `tls`"
+// and exit before connecting — which is what this adapter emitted, so no mongo target with TLS on
+// could ever be dumped or restored. `--ssl` verifies the chain against the image's system store and
+// checks the host name; `--sslCAFile` replaces that store with the target's own CA. Both measured
+// against a requireTLS mongod behind a throwaway CA: the right CA accepted, a wrong one and a host
+// the certificate does not name refused. The probe verifies the same way (probe/mongodb.ts).
+function mongoTlsArgs(connection: TargetConnection): string[] {
+  const mode = tlsModeOf(connection);
+  if (mode === "disable") return [];
+  return mode === "verify-full" ? ["--ssl", `--sslCAFile=${TLS_CA_PATH}`] : ["--ssl"];
 }
 
 function mongoEnv(connection: TargetConnection): Record<string, string> {
@@ -90,7 +105,7 @@ export const mongodbAdapter: EngineAdapter = {
         ...mongoConnArgs(connection),
         "--config",
         MONGO_CONFIG_PATH,
-        ...(connection.tls ? ["--tls"] : []),
+        ...mongoTlsArgs(connection),
         "--archive",
         ...oplogArgs,
         ...scopeArgs,
@@ -165,7 +180,7 @@ export const mongodbAdapter: EngineAdapter = {
       ...mongoConnArgs(connection),
       "--config",
       MONGO_CONFIG_PATH,
-      ...(connection.tls ? ["--tls"] : []),
+      ...mongoTlsArgs(connection),
       // --drop drops the collections mongorestore is about to restore. Scoped by the --nsInclude
       // args above, so a DATABASE or COLLECTION restore drops only inside the requested namespace;
       // unscoped for FULL_CLUSTER, where the archive is the scope. Never emit one without the

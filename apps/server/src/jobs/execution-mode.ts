@@ -32,6 +32,15 @@ export interface ExecutionModeInput {
   // VERIFIED. A multi-database selection kept only its first database the same way. A default here
   // is how the next caller would reintroduce it.
   singleDatabaseStagingScope: readonly string[] | null;
+  // Why the engine's STAGED tool cannot connect to this target the way its TLS asks, or null when it
+  // can — the adapter's stagedTlsRefusal, because it is a property of the tool, not of the mode.
+  // mydumper/myloader fall back to plaintext under `--ssl-mode=REQUIRED` (measured), so a mysql or
+  // mariadb target with TLS on and no CA certificate would be staged over a channel that is not
+  // guaranteed to be encrypted, while the same target streamed through mysqldump is refused plaintext.
+  //
+  // Required, not optional, for the reason maxParallelism is: nothing asked this question, and a
+  // default here is how the next caller would stage such a target again.
+  stagedTlsRefusal: string | null;
 }
 
 export interface ExecutionModeDecision {
@@ -51,6 +60,8 @@ export interface ExecutionModeDecision {
 // Whenever 1 or 2 would pick STAGED for a single-database stager whose target does not name
 // exactly one database, the answer is STREAM + warning instead: the stream dump copies every
 // database in scope, and the staged one would copy one of them — or the system schema — silently.
+// Whenever 1 or 2 would pick STAGED for a target the staged tool cannot connect to as its TLS asks,
+// the answer is STREAM + warning instead: the stream tool honours every TLS mode.
 // STAGED writes a DIRECTORY dump and the artifact pipeline moves a single stream. The bridge is
 // buildArchiveStaging: after the dump, a second run tars the staging directory to stdout and THAT
 // becomes the artifact. Before that bridge existed, a STAGED backup uploaded an empty stream while
@@ -70,6 +81,8 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
     if (input.scratchConfigured) {
       const refusal = stagingScopeRefusal(input.singleDatabaseStagingScope);
       if (refusal !== null) return { mode: "STREAM", parallelism: 1, warnings: [refusal] };
+      const tlsRefusal = stagedTlsFallback(input.stagedTlsRefusal);
+      if (tlsRefusal !== null) return tlsRefusal;
       // Clamped, not refused: the backup should still run. But the operator has to learn that the
       // number they chose is not the number being used, or the ceiling is invisible until someone
       // wonders why a dump is no faster at 64 than at 8.
@@ -97,7 +110,7 @@ export function resolveExecutionMode(input: ExecutionModeInput): ExecutionModeDe
   if (threshold !== undefined && input.estimatedBytes > threshold) {
     const refusal = stagingScopeRefusal(input.singleDatabaseStagingScope);
     if (refusal !== null) return { mode: "STREAM", parallelism: 1, warnings: [refusal] };
-    return { mode: "STAGED", parallelism: 1, warnings: [] };
+    return stagedTlsFallback(input.stagedTlsRefusal) ?? { mode: "STAGED", parallelism: 1, warnings: [] };
   }
   return { mode: "STREAM", parallelism: 1, warnings: [] };
 }
@@ -111,4 +124,14 @@ function stagingScopeRefusal(scope: readonly string[] | null): string | null {
   if (scope.length === 1 && first !== undefined && first.length > 0) return null;
   const what = scope.length <= 1 ? "is unscoped" : `selects ${String(scope.length)} databases`;
   return `staged unavailable: mydumper dumps a single database and this target ${what} — streamed instead`;
+}
+
+// STREAM with the adapter's reason, or null when the staged tool can honour the target's TLS.
+function stagedTlsFallback(refusal: string | null): ExecutionModeDecision | null {
+  if (refusal === null) return null;
+  return {
+    mode: "STREAM",
+    parallelism: 1,
+    warnings: [`staged unavailable: ${refusal}, and this TLS target has no CA certificate — streamed instead`],
+  };
 }

@@ -142,24 +142,27 @@ describe("mongodbAdapter.buildRestore", () => {
     expect(descriptor.outputKind).toBe("directory");
   });
 
-  it("includes --tls when connection.tls is true", () => {
+  // `--ssl`, never `--tls`: the database tools answer `--tls` with "unknown option" and exit, which
+  // is what this test used to pin. The three modes are covered in tls.test.ts.
+  it("includes --ssl when connection.tls is true", () => {
     const descriptor = mongodbAdapter.buildRestore(
       restoreInput({
         connection: { ...CONN, tls: true },
         sourcePath: "/var/lib/schrodump/restore-source",
       }),
     );
-    expect(descriptor.command).toContain("--tls");
+    expect(descriptor.command).toContain("--ssl");
+    expect(descriptor.command).not.toContain("--tls");
   });
 
-  it("omits --tls when connection.tls is false", () => {
+  it("omits --ssl when connection.tls is false", () => {
     const descriptor = mongodbAdapter.buildRestore(
       restoreInput({
         connection: { ...CONN, tls: false },
         sourcePath: "/var/lib/schrodump/restore-source",
       }),
     );
-    expect(descriptor.command).not.toContain("--tls");
+    expect(descriptor.command).not.toContain("--ssl");
   });
 
   it("keeps the password in env, never in the command", () => {

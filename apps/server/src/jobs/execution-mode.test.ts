@@ -12,6 +12,7 @@ const base: ExecutionModeInput = {
   stagedCapable: true,
   maxParallelism: 8,
   singleDatabaseStagingScope: null,
+  stagedTlsRefusal: null,
 };
 
 describe("resolveExecutionMode", () => {
@@ -58,6 +59,7 @@ describe("resolveExecutionMode", () => {
         stagedCapable: base.stagedCapable,
         maxParallelism: base.maxParallelism,
         singleDatabaseStagingScope: base.singleDatabaseStagingScope,
+        stagedTlsRefusal: base.stagedTlsRefusal,
         estimatedBytes: 1_000_000_000_000,
       }).mode,
     ).toBe("STREAM");
@@ -194,5 +196,40 @@ describe("resolveExecutionMode — a single-database stager", () => {
 
     expect(decision.mode).toBe("STAGED");
     expect(decision.parallelism).toBe(4);
+  });
+});
+
+// mydumper and myloader fall back to plaintext under --ssl-mode=REQUIRED (measured against
+// schrodump/mydumper:1), so a mysql/mariadb target with TLS on and no CA must never be staged. The
+// refusal text comes from the adapter; what is asserted here is that it wins over BOTH ways into
+// STAGED, and says so, and that a target without one is untouched.
+describe("resolveExecutionMode — a staged tool that cannot honour the target's TLS", () => {
+  const refusal =
+    "mydumper and myloader cannot require TLS without verifying the server's certificate — they " +
+    "fall back to plaintext when the server offers none";
+
+  it("streams an explicit parallelism request instead, with the reason", () => {
+    const decision = resolveExecutionMode({ ...base, requestedParallelism: 4, stagedTlsRefusal: refusal });
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.parallelism).toBe(1);
+    expect(decision.warnings).toEqual([
+      `staged unavailable: ${refusal}, and this TLS target has no CA certificate — streamed instead`,
+    ]);
+  });
+
+  it("streams a size-routed dump instead, with the reason", () => {
+    const decision = resolveExecutionMode({ ...base, estimatedBytes: 5000, stagedTlsRefusal: refusal });
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.warnings[0]).toMatch(/fall back to plaintext/);
+  });
+
+  it("stages exactly as before when the tool can honour it", () => {
+    expect(resolveExecutionMode({ ...base, requestedParallelism: 4 }).mode).toBe("STAGED");
+    expect(resolveExecutionMode({ ...base, estimatedBytes: 5000 }).mode).toBe("STAGED");
+  });
+
+  it("says nothing about TLS when STAGED was never going to be chosen", () => {
+    const decision = resolveExecutionMode({ ...base, stagedTlsRefusal: refusal });
+    expect(decision).toEqual({ mode: "STREAM", parallelism: 1, warnings: [] });
   });
 });

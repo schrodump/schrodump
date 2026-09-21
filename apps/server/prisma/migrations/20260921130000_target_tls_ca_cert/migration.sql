@@ -1,0 +1,11 @@
+-- The target's CA certificate (PEM), which is what turns `tls` from "encrypted" into "encrypted and
+-- the server proved who it is". Until it existed, `tls` was a boolean the probe read as "verify
+-- against Node's bundled CAs" and pg_dump read as "encrypt, verify nothing" — so every managed
+-- database (RDS, Cloud SQL, Supabase, anything self-signed) failed test-connection and every backup,
+-- and where a connection did succeed the dump was open to anyone in the middle.
+--
+-- Plain TEXT, not an envelope like encryptedCredential: a CA certificate is public, and storing it
+-- as though it were a secret would suggest a protection it does not need. NULL backfills every
+-- existing target to "TLS required, certificate unverified" for postgres and mysql/mariadb, which is
+-- what their tools always did.
+ALTER TABLE "DatabaseTarget" ADD COLUMN "tlsCaCert" TEXT;

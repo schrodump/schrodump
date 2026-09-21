@@ -1,14 +1,32 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { MongoClient } from "mongodb";
+import { MongoClient, type MongoClientOptions } from "mongodb";
+import { targetTlsOf } from "../descriptor.js";
 import { versionToNum, type DatabaseSize, type ProbeConnection, type ProbeResult } from "./types.js";
+
+// The driver's half of each TLS mode, matched to the tool flags (adapters/mongodb mongoTlsArgs).
+// Unlike postgres and mysql, `require` still verifies — against Node's bundled CAs here and the
+// image's system store in mongodump — because that is the tools' own default and there is no
+// unverified mode to match. A CA replaces the bundled list rather than adding to it, exactly as
+// `--sslCAFile` does, so "verified against that CA" means that CA and nothing else.
+export function mongoTls(conn: ProbeConnection): Pick<MongoClientOptions, "tls" | "ca"> {
+  const tls = targetTlsOf(conn);
+  switch (tls.mode) {
+    case "disable":
+      return { tls: false };
+    case "require":
+      return { tls: true };
+    case "verify-full":
+      return { tls: true, ca: tls.caCert };
+  }
+}
 
 export async function probeMongodb(conn: ProbeConnection): Promise<ProbeResult> {
   const client = new MongoClient(`mongodb://${conn.host}:${conn.port}`, {
     auth: { username: conn.username, password: conn.password },
     authSource: conn.database,
-    tls: conn.tls,
+    ...mongoTls(conn),
     serverSelectionTimeoutMS: conn.connectTimeoutMs,
     connectTimeoutMS: conn.connectTimeoutMs,
   });

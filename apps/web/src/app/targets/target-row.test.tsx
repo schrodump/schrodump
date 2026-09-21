@@ -21,6 +21,7 @@ const base: Target = {
   port: 5432,
   username: "backup",
   tls: false,
+  tlsCaCert: null,
   scope: { databases: ["acme_finance"], schemas: [], collections: [] },
   createdAt: "2026-01-01T00:00:00.000Z",
   lastProbeAt: null,
@@ -44,6 +45,34 @@ describe("TargetRow", () => {
   it("shows the scope it backs up", () => {
     wrap(<TargetRow target={base} />);
     expect(screen.getByText("Scope: acme_finance")).toBeInTheDocument();
+  });
+
+  // "TLS on" alone read as verified when, for postgres and mysql without a CA, nothing checks who
+  // answers — so the row says which of the modes it is.
+  it("says how the connection is secured, and that TLS without a CA is unverified", () => {
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    wrap(<TargetRow target={{ ...base, tls: true }} />);
+    expect(screen.getByText("PostgreSQL · db.internal:5432 · TLS unverified")).toBeInTheDocument();
+    wrap(<TargetRow target={{ ...base, id: "t2", tls: true, tlsCaCert: pem }} />);
+    expect(screen.getByText("PostgreSQL · db.internal:5432 · TLS verified · CA")).toBeInTheDocument();
+    wrap(<TargetRow target={{ ...base, id: "t3", engine: "mongodb", port: 27017, tls: true }} />);
+    expect(screen.getByText("MongoDB · db.internal:27017 · TLS verified · system store")).toBeInTheDocument();
+    wrap(<TargetRow target={{ ...base, id: "t4" }} />);
+    expect(screen.getByText("PostgreSQL · db.internal:5432 · TLS off")).toBeInTheDocument();
+  });
+
+  // The list shows the probe's reason on a refused row; it must stop telling people to look at the
+  // TLS switch, whose "fix" is turning TLS off.
+  it("gives a TLS refusal as a certificate problem, not a switch to flip", () => {
+    wrap(
+      <TargetRow
+        target={{ ...base, tls: true, lastProbeAt: "2026-01-01T00:00:00.000Z", lastProbeOk: false, lastProbeFailure: "TLS_FAILED" }}
+      />,
+    );
+    expect(
+      screen.getByText("The TLS handshake failed, or the server's certificate could not be verified."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Require TLS setting/)).toBeNull();
   });
 
   it("says 'whole instance' when nothing is scoped, never a blank", () => {

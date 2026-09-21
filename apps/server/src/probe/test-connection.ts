@@ -52,6 +52,10 @@ export interface ProbeTarget {
   readonly username: string;
   readonly password: string;
   readonly tls: boolean;
+  // The target's CA certificate (PEM), or null. With `tls` it decides the mode the probe connects in
+  // (targetTlsOf, engines descriptor.ts) — the same reading every dump and restore tool gets, so a
+  // probe that passes is a backup that can connect.
+  readonly tlsCaCert: string | null;
   // From the target's scope. Used only by the SQL engines, where it names the database to connect
   // to; for MongoDB the probe treats it as the auth source, which is a different thing entirely.
   readonly databases: readonly string[];
@@ -86,18 +90,32 @@ interface ErrorShape {
   readonly message: string;
 }
 
+// How far down a `cause` chain a code is looked for. The MongoDB driver wraps the socket failure
+// twice: a certificate the store did not trust arrives as MongoServerSelectionError, whose cause is a
+// MongoNetworkError with no code, whose cause is Node's TLS error carrying SELF_SIGNED_CERT_IN_CHAIN
+// (measured against a requireTLS mongod). Reading one level found nothing, and the name fallback
+// below then called a certificate problem a TIMEOUT.
+const CAUSE_DEPTH = 3;
+
+function codeOf(record: { code?: unknown; codeName?: unknown }): string {
+  if (typeof record.code === "string") return record.code;
+  if (typeof record.code === "number") return String(record.code);
+  if (typeof record.codeName === "string") return record.codeName;
+  return "";
+}
+
 function shapeOf(error: unknown): ErrorShape {
   if (typeof error !== "object" || error === null) return { code: "", name: "", message: "" };
   const record = error as { code?: unknown; codeName?: unknown; name?: unknown; message?: unknown; cause?: unknown };
 
-  let code = "";
-  if (typeof record.code === "string") code = record.code;
-  else if (typeof record.code === "number") code = String(record.code);
-  else if (typeof record.codeName === "string") code = record.codeName;
-  // The MongoDB driver wraps the socket failure; the useful code can sit on the cause.
-  else if (typeof record.cause === "object" && record.cause !== null) {
-    const cause = record.cause as { code?: unknown };
-    if (typeof cause.code === "string") code = cause.code;
+  let code = codeOf(record);
+  // The drivers wrap the socket failure; the useful code can sit on a cause.
+  let cause = record.cause;
+  for (let depth = 0; code === "" && depth < CAUSE_DEPTH; depth++) {
+    if (typeof cause !== "object" || cause === null) break;
+    const next = cause as { code?: unknown; codeName?: unknown; cause?: unknown };
+    code = codeOf(next);
+    cause = next.cause;
   }
 
   return {
@@ -105,6 +123,61 @@ function shapeOf(error: unknown): ErrorShape {
     name: typeof record.name === "string" ? record.name.toUpperCase() : "",
     message: typeof record.message === "string" ? record.message.toLowerCase() : "",
   };
+}
+
+// The certificate could not be verified, by the code Node's TLS layer gives each reason. These are
+// what a server behind a provider or private CA answers when no CA — or the wrong one — was supplied,
+// and they came back UNKNOWN: an operator told "the driver gave no code this recognises" instead of
+// "paste the provider's CA". Listed by code, never matched by message.
+const CERTIFICATE_CODES = [
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+  "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+  "CERT_SIGNATURE_FAILURE",
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+  "ERROR_IN_CERT_NOT_AFTER_FIELD",
+  "CERT_REVOKED",
+  "CERT_UNTRUSTED",
+  "CERT_REJECTED",
+  "INVALID_CA",
+  "INVALID_PURPOSE",
+  "PATH_LENGTH_EXCEEDED",
+  "CERT_CHAIN_TOO_LONG",
+  "HOSTNAME_MISMATCH",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+];
+
+// Everything else that means TLS did not come up, by code:
+//   EPROTO, ERR_SSL_*   a handshake the other end would not complete (ERR_SSL_WRONG_VERSION_NUMBER
+//                       is TLS spoken to a plaintext port); OpenSSL names each alert this way.
+//   ERR_OSSL_*          the CA material itself could not be read.
+//   HANDSHAKE_SSL_ERROR mysql2's wrapper for any failed TLS upgrade — it replaces Node's code with
+//                       this one, so a certificate refusal arrives here and nowhere else (measured).
+//   HANDSHAKE_NO_SSL_SUPPORT  mysql2: TLS required, the server offers none.
+//   ER_SECURE_TRANSPORT_REQUIRED, 3159  mysql: TLS off, the server requires it.
+//   08P01               postgres protocol violation, what a TLS mismatch looks like there.
+const TLS_CODES = [
+  "EPROTO",
+  "08P01",
+  "HANDSHAKE_SSL_ERROR",
+  "HANDSHAKE_NO_SSL_SUPPORT",
+  "ER_SECURE_TRANSPORT_REQUIRED",
+  "3159",
+];
+const TLS_CODE_PREFIXES = ["ERR_SSL_", "ERR_OSSL_"];
+
+function isTlsCode(code: string): boolean {
+  return (
+    CERTIFICATE_CODES.includes(code) ||
+    TLS_CODES.includes(code) ||
+    TLS_CODE_PREFIXES.some((prefix) => code.startsWith(prefix))
+  );
 }
 
 // Reads code first because codes are stable identifiers the drivers document, then the error's
@@ -120,6 +193,11 @@ export function classify(error: unknown): ProbeFailureCode {
   if (["ECONNREFUSED", "ENOTFOUND", "EHOSTUNREACH", "ENETUNREACH", "EAI_AGAIN"].includes(code)) {
     return "UNREACHABLE";
   }
+  if (isTlsCode(code)) return "TLS_FAILED";
+  // 28000 is also how postgres refuses a connection that pg_hba.conf only accepts over TLS
+  // (`hostssl`): TLS off against a server that requires it. The code alone cannot tell that from a
+  // rejected role; the refusal says "no encryption", and the tie-break reads that, never emits it.
+  if (code === "28000" && message.includes("no encryption")) return "TLS_FAILED";
   // 28P01 invalid_password and 28000 invalid_authorization_specification (PostgreSQL);
   // 1045 ER_ACCESS_DENIED_ERROR (MySQL/MariaDB); 18 AuthenticationFailed (MongoDB).
   if (["28P01", "28000", "ER_ACCESS_DENIED_ERROR", "1045", "18", "AUTHENTICATIONFAILED"].includes(code)) {
@@ -129,9 +207,6 @@ export function classify(error: unknown): ProbeFailureCode {
   // from AUTH_FAILED and a different fix: the credential is right, the grant is missing.
   if (["13", "UNAUTHORIZED", "42501", "ER_SPECIFIC_ACCESS_DENIED_ERROR", "1227"].includes(code)) {
     return "INSUFFICIENT_PRIVILEGES";
-  }
-  if (["EPROTO", "ERR_SSL_WRONG_VERSION_NUMBER", "ERR_TLS_CERT_ALTNAME_INVALID", "08P01"].includes(code)) {
-    return "TLS_FAILED";
   }
   if (["ETIMEDOUT", "ETIMEOUT", "PROTOCOL_SEQUENCE_TIMEOUT"].includes(code)) return "TIMEOUT";
 
@@ -169,6 +244,7 @@ export async function testTargetConnection(
     username: target.username,
     password: target.password,
     tls: target.tls,
+    ...(target.tlsCaCert !== null ? { tlsCaCert: target.tlsCaCert } : {}),
     connectTimeoutMs: CONNECT_TIMEOUT_MS,
   };
 

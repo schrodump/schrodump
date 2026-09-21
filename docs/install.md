@@ -581,6 +581,38 @@ Executors join the network named by `EXECUTOR_NETWORK`. If your databases run in
 same host, attach them to that network. If they are elsewhere, make sure the host can route to
 them — the executor inherits the host's connectivity, not the server container's.
 
+### Managed databases: paste the provider's CA
+
+"Require TLS" on its own **encrypts without verifying** the server's certificate for PostgreSQL,
+MySQL and MariaDB (MongoDB verifies against the system trust store). Paste the CA certificate that
+signed the server's certificate into the target's **CA certificate** field and every connection —
+the test, each backup, each restore — verifies the chain against it and checks the host name.
+[security.md](security.md#the-connection-to-your-database-and-what-each-tls-mode-verifies) states
+exactly what each mode checks. Run **Discover** after pasting: it connects with the CA, so a wrong
+one is caught before anything is saved.
+
+| Provider                     | What to paste                                                                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AWS RDS / Aurora             | The bundle for the instance's region, `https://truststore.pki.rds.amazonaws.com/<region>/<region>-bundle.pem` (about 4.5 KB). The global bundle works too — 108 certificates, ~165 KB, under the 256 KiB cap. |
+| Google Cloud SQL             | The instance's server CA: Cloud SQL → the instance → **Connections → Security → Download server CA certificate** (`server-ca.pem`), or `gcloud sql instances describe <instance> --format='value(serverCaCert.cert)'`. |
+| Supabase                     | Project Settings → Database → **SSL Configuration → Download certificate** (`prod-ca-2021.crt`).                                                                                            |
+| DigitalOcean Managed         | The cluster's **Connection details → Download CA certificate** (`ca-certificate.crt`).                                                                                                      |
+| Aiven                        | The service overview's **CA certificate** (`ca.pem`).                                                                                                                                       |
+| Self-signed / your own CA    | The CA certificate — not the server's certificate unless it is self-signed, and **never its private key** (the API refuses one).                                                          |
+
+Use the **host name on the certificate** (the provider's endpoint), not an IP address: verification
+checks the name, and a certificate rarely names an address.
+
+Three things follow from pasting one:
+
+- **Scratch is required.** The tools read the CA from a file bind-mounted from
+  `SCHRODUMP_SCRATCH_PATH` (the default compose file sets it).
+- **Turning TLS off is not the fix for a TLS failure.** Where the provider enforces TLS (RDS
+  PostgreSQL 15+ sets `rds.force_ssl`) it is refused anyway, and where it is not, the password and
+  every dump cross the network in the clear.
+- **A staged MySQL/MariaDB policy needs the CA to stay staged.** Without one, a TLS target streams:
+  `mydumper` cannot require TLS without verifying it.
+
 ### Scratch
 
 `STAGED` backups write the dump to the scratch directory before uploading it. **While a job runs, that

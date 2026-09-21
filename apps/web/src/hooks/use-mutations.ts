@@ -51,6 +51,9 @@ export function useDiscoverDatabases() {
       username: string;
       password: string;
       tls: boolean;
+      // Discovery runs over the connection the backup will use, CA included, so a pasted CA is
+      // proved before anything is saved.
+      tlsCaCert: string | null;
     }) => api.post<DiscoverResult>("/targets/discover", body),
   });
 }

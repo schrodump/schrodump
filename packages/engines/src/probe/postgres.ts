@@ -1,8 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { checkServerIdentity, type ConnectionOptions } from "node:tls";
 import { Client } from "pg";
+import { targetTlsOf } from "../descriptor.js";
 import type { DatabaseSize, ProbeConnection, ProbeResult } from "./types.js";
+
+// The driver's half of each TLS mode, matched to what pg_dump is told (PGSSLMODE, adapters/postgres).
+//
+// `require` does not verify, because `sslmode=require` does not. This used to be
+// `{ rejectUnauthorized: true }` — verification against Node's bundled CAs, with no way to add one —
+// so every managed postgres (RDS, Cloud SQL, Supabase, anything self-signed) failed here, and with it
+// every backup, while pg_dump itself would have connected and verified nothing.
+//
+// `verify-full` checks the name against `conn.host` explicitly. pg layers TLS on a socket it already
+// connected and passes no host to tls.connect — only a servername, and none for an IP — so Node
+// falls back to checking the certificate against "localhost" for an IP-literal host (measured).
+// Pinning the check to the configured host is what libpq's verify-full does too.
+export function postgresSsl(conn: ProbeConnection): false | ConnectionOptions {
+  const tls = targetTlsOf(conn);
+  switch (tls.mode) {
+    case "disable":
+      return false;
+    case "require":
+      return { rejectUnauthorized: false };
+    case "verify-full":
+      return {
+        ca: tls.caCert,
+        rejectUnauthorized: true,
+        checkServerIdentity: (_servername, cert) => checkServerIdentity(conn.host, cert),
+      };
+  }
+}
 
 export async function probePostgres(conn: ProbeConnection): Promise<ProbeResult> {
   const client = new Client({
@@ -11,7 +40,7 @@ export async function probePostgres(conn: ProbeConnection): Promise<ProbeResult>
     database: conn.database,
     user: conn.username,
     password: conn.password,
-    ssl: conn.tls ? { rejectUnauthorized: true } : false,
+    ssl: postgresSsl(conn),
     connectionTimeoutMillis: conn.connectTimeoutMs,
     statement_timeout: conn.connectTimeoutMs,
   });

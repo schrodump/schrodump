@@ -18,7 +18,14 @@ import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
 import { parseConnectionUrl, type ParseFailureReason } from "@/lib/connection-url";
-import { ENGINE_KINDS, scopeProblemCode, type EngineKind } from "@/lib/domain";
+import {
+  caCertProblemOf,
+  ENGINE_KINDS,
+  scopeProblemCode,
+  tlsReadingOf,
+  type EngineKind,
+  type TlsReading,
+} from "@/lib/domain";
 import { formatBytes } from "@/lib/format";
 import type { DiscoverResult, Target } from "@/lib/types";
 
@@ -74,6 +81,19 @@ const scopeIntro: Record<ScopeKind, MessageKey> = {
   mysql: "targets.scope.intro.mysql",
   mongodb: "targets.scope.intro.mongodb",
 };
+// What the TLS settings currently on screen mean — said under the checkbox, so "Require TLS" never
+// again reads as verified when for postgres and mysql it is not.
+const tlsModeHelp: Record<TlsReading, MessageKey> = {
+  off: "targets.tls.mode.off",
+  unverified: "targets.tls.mode.unverified",
+  system: "targets.tls.mode.system",
+  ca: "targets.tls.mode.ca",
+};
+
+// In edit mode the stored CA is kept, replaced or removed — three answers, which is what the PATCH
+// can say (absent, a PEM, null). The CA is public, so unlike the password it is read back and reused
+// for discovery; "replace" with nothing typed keeps it, the way an empty password field does.
+type CaAction = "keep" | "replace" | "remove";
 
 // scope comes from a Json column, so an array is what the API contract promises rather than what
 // the runtime guarantees. Guard rather than assume: seeding this field wrong would silently rewrite
@@ -120,6 +140,11 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
   const [username, setUsername] = useState(target?.username ?? "");
   const [password, setPassword] = useState("");
   const [tls, setTls] = useState(target?.tls ?? true);
+  const storedCa = target?.tlsCaCert ?? null;
+  const [caDraft, setCaDraft] = useState("");
+  const [caAction, setCaAction] = useState<CaAction>(storedCa !== null ? "keep" : "replace");
+  // Set when a pasted URL asked for verification it cannot carry the CA for.
+  const [urlWantsCa, setUrlWantsCa] = useState(false);
   // The scope is a selection over what the server was found to hold — never typed. The free-text
   // field this replaced said "empty means all", which for postgres was false: empty meant the
   // maintenance database, and on a real deployment that backed up nothing while reporting success.
@@ -128,6 +153,9 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
   // Which connection the list came from. A list from one server offered against another is the
   // quiet way to save a scope that does not exist; the signature makes the mismatch visible.
   const [discoveredFor, setDiscoveredFor] = useState<string | null>(null);
+  // How the discovery that produced the verdict was secured — the verdict describes THAT connection,
+  // not whatever the TLS fields say now.
+  const [discoveredTls, setDiscoveredTls] = useState<TlsReading>("off");
   const [invalid, setInvalid] = useState(false);
   const [connectionUrl, setConnectionUrl] = useState("");
   const [urlError, setUrlError] = useState<ParseFailureReason | null>(null);
@@ -142,6 +170,20 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
   const multi = kind === "mysql";
   const hostPort = `${host.length > 0 ? host : "host"}:${port > 0 ? String(port) : "?"}`;
   const savedScope = editing && discovered === null ? scopeDatabasesOf(target) : [];
+
+  // The CA this form would connect with — for discovery now, and for every backup once saved. Only
+  // with TLS on: the server refuses a CA sent with TLS off, and one kept on the row while TLS is off
+  // is inert there too.
+  const typedCa = caDraft.trim().length > 0 ? caDraft : null;
+  const effectiveCa: string | null = !tls
+    ? null
+    : caAction === "remove"
+      ? null
+      : caAction === "keep"
+        ? storedCa
+        : (typedCa ?? storedCa);
+  const tlsReading = tlsReadingOf(engine, tls, effectiveCa !== null);
+  const caProblem = tls && typedCa !== null && caAction === "replace" ? caCertProblemOf(typedCa) : null;
 
   // Any change to the connection invalidates a pick made against the old one: the signature marks
   // the list stale and the selection goes back to nothing (the saved scope, when editing, is what
@@ -167,6 +209,7 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
     if (value.username.length > 0) setUsername(value.username);
     if (value.password.length > 0) setPassword(value.password);
     if (value.tls !== null) setTls(value.tls);
+    setUrlWantsCa(value.tlsVerify);
     setSelected(value.databases);
     setUrlError(null);
     setUrlNote(
@@ -190,6 +233,16 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
         return;
       }
       setInvalid(false);
+      // The CA travels only when it changes — a PEM to replace it, null to remove it, nothing to keep
+      // it — and never with TLS off, which the server refuses and which leaves a stored CA inert.
+      const caPatch =
+        !tls
+          ? {}
+          : caAction === "remove" && storedCa !== null
+            ? { tlsCaCert: null }
+            : caAction === "replace" && typedCa !== null
+              ? { tlsCaCert: typedCa }
+              : {};
       // An empty password field means "leave the stored credential alone" — the only way to fix a
       // host when the UI can never read the secret back to re-submit it. "" would be a 400.
       update.mutate(
@@ -197,6 +250,7 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
           id: target.id,
           body: {
             ...parsed.data,
+            ...caPatch,
             scope: { databases: selected, schemas: [], collections: [] },
             ...(password.length > 0 ? { password } : {}),
           },
@@ -213,7 +267,11 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
     }
     setInvalid(false);
     create.mutate(
-      { ...parsed.data, scope: { databases: selected, schemas: [], collections: [] } },
+      {
+        ...parsed.data,
+        tlsCaCert: effectiveCa,
+        scope: { databases: selected, schemas: [], collections: [] },
+      },
       { onSuccess: onDone },
     );
   }
@@ -226,12 +284,15 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
   const canDiscover = credsReady && !discover.isPending;
   function runDiscovery() {
     const forSignature = signature;
+    const forTls = tlsReading;
+    // With the CA the backup will use, so a discovery that connects has also proved the CA.
     discover.mutate(
-      { engine, host, port, username, password, tls },
+      { engine, host, port, username, password, tls, tlsCaCert: effectiveCa },
       {
         onSuccess: (result) => {
           setDiscovered(result);
           setDiscoveredFor(forSignature);
+          setDiscoveredTls(forTls);
           // The URL's pending name is resolved either way now: kept if the server holds it,
           // dropped if not. The note that said "pending" would be stale from here on.
           setUrlNote(null);
@@ -271,7 +332,9 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
           ? t("targets.save.blocked.username")
           : !editing && password.length === 0
             ? t("targets.save.blocked.password")
-            : kind === "postgres" && live !== null && selected.length !== 1
+            : caProblem !== null
+              ? t(`targets.save.blocked.tlsCa.${caProblem}`)
+              : kind === "postgres" && live !== null && selected.length !== 1
               ? t("targets.save.blocked.pickOne")
               : kind === "postgres" && live === null && !(editing && savedScope.length === 1)
                 ? t("targets.save.blocked.discover")
@@ -451,10 +514,69 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
                 {t(editing ? "targets.password.helpConfigured" : "targets.password.help")}
               </p>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} />
-              {t("targets.tls")}
-            </label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={tls} onChange={(e) => setTls(e.target.checked)} />
+                {t("targets.tls")}
+              </label>
+              <p
+                data-tls-mode={tlsReading}
+                className={cn(
+                  "text-[12px] text-pretty",
+                  tlsReading === "off" || tlsReading === "unverified" ? "text-caution" : "text-muted-foreground",
+                )}
+              >
+                {t(tlsModeHelp[tlsReading], { hostPort })}
+              </p>
+            </div>
+            {tls ? (
+              <div className="space-y-1.5">
+                <FieldLabel htmlFor="tls-ca">{t("targets.tlsCa.label")}</FieldLabel>
+                {editing && storedCa !== null && caAction !== "replace" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted-foreground">
+                      {caAction === "remove" ? t("targets.tlsCa.removing") : t("targets.tlsCa.configured")}
+                    </span>
+                    {caAction === "remove" ? (
+                      <Button type="button" variant="quiet" size="sm" onClick={() => setCaAction("keep")}>
+                        {t("targets.tlsCa.undo")}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button type="button" variant="quiet" size="sm" onClick={() => setCaAction("replace")}>
+                          {t("targets.tlsCa.replace")}
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setCaAction("remove")}>
+                          {t("targets.tlsCa.remove")}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <textarea
+                    id="tls-ca"
+                    rows={4}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                    className="w-full rounded-control border border-border bg-background px-3 py-2 font-mono text-[11.5px] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-accent-soft"
+                    value={caDraft}
+                    onChange={(e) => setCaDraft(e.target.value)}
+                  />
+                )}
+                <p className="text-[12px] text-muted-foreground text-pretty">
+                  {editing && storedCa !== null && caAction === "replace"
+                    ? t("targets.tlsCa.replaceNote")
+                    : t("targets.tlsCa.help")}
+                </p>
+                {urlWantsCa && effectiveCa === null ? (
+                  <p className="text-[12px] text-caution text-pretty">{t("targets.url.verifyNeedsCa")}</p>
+                ) : null}
+                {kind === "mysql" && tlsReading === "unverified" ? (
+                  <p className="text-[12px] text-muted-foreground text-pretty">{t("targets.tlsCa.stagedNote")}</p>
+                ) : null}
+              </div>
+            ) : null}
           </Panel>
         </div>
 
@@ -472,7 +594,7 @@ export function TargetForm({ onDone, target }: { onDone: () => void; target?: Ta
           </div>
 
           {discovered !== null && !stale ? (
-            <VerdictPanel result={discovered} hostPort={hostPort} user={username} tls={tls} />
+            <VerdictPanel result={discovered} hostPort={hostPort} user={username} tls={discoveredTls} />
           ) : null}
           {discover.isError ? <ErrorState message={discover.error.message} /> : null}
 

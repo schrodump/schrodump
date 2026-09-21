@@ -17,6 +17,7 @@ import { retentionIsConfigured, type RetentionPolicy } from "@schrodump/core/ret
 import { resolveAdapter } from "@schrodump/engines/registry";
 import {
   EngineDescriptorError,
+  targetTlsOf,
   type DumpScope,
   type EngineAdapter,
   type TargetConnection,
@@ -51,7 +52,14 @@ import {
   restoreScopeOf,
   describeToolFailure,
   runRestorePipeline,
+  type RestorePipelineDeps,
 } from "./restore-executor.js";
+import {
+  stageTlsCaForBackup,
+  TLS_CA_SCRATCH_REQUIRED_REASON,
+  writeTlsCaFile,
+  type TlsCaFile,
+} from "./tls-ca-file.js";
 import { createRetentionPorts } from "./retention-wiring.js";
 import { retentionSummary, runRetention as runRetentionCycle } from "./retention.js";
 import { createRestorePorts, type RestoreWiringDeps } from "./restore-wiring.js";
@@ -474,6 +482,12 @@ export interface BackupContextInputs {
   requestedParallelism: number;
   stagedThresholdBytes: number | undefined;
   scratchConfigured: boolean;
+  // Required, not defaulted: whether the engine's STAGED tool can connect the way this target's TLS
+  // asks is the adapter's to say (stagedTlsRefusal), judged against the connection the dump will
+  // use. Without them nothing asked, and a mysql target with TLS and no CA was staged through a
+  // mydumper that falls back to plaintext.
+  adapter: Pick<EngineAdapter, "stagedTlsRefusal">;
+  connection: TargetConnection;
 }
 
 // The context runBackupJob routes the execution mode from. A named function for the reason
@@ -500,6 +514,7 @@ export function backupContextFor(inputs: BackupContextInputs): BackupContext {
       : {}),
     scratchConfigured: inputs.scratchConfigured,
     singleDatabaseStagingScope: stagesOneNamedDatabase ? inputs.scopedDatabases : null,
+    stagedTlsRefusal: inputs.adapter.stagedTlsRefusal?.(inputs.connection) ?? null,
   };
 }
 
@@ -528,6 +543,54 @@ export function rolePasswordsCapturedFor(
   facts: TargetFacts,
 ): boolean | undefined {
   return engine === "postgres" ? facts.canReadRolePasswords : undefined;
+}
+
+// A target row's TLS in the shape the probe and the descriptors both take: the CA only when there
+// is one. One function for every connection built from a row — backup, restore, the restore's own
+// probe — so none of them can be the one that forgot the CA and connected unverified.
+export function tlsOf(row: { tls: boolean; tlsCaCert: string | null }): {
+  tls: boolean;
+  tlsCaCert?: string;
+} {
+  return { tls: row.tls, ...(row.tlsCaCert !== null ? { tlsCaCert: row.tlsCaCert } : {}) };
+}
+
+// A verified target needs the scratch volume: the CA reaches the executor as a bind-mounted file,
+// and a RunMount.source has to be a path the Docker daemon can resolve. null when the backup can go
+// ahead — no CA to mount, or somewhere to mount it from.
+export function tlsCaScratchProblem(
+  connection: TargetConnection,
+  scratchRoot: string | undefined,
+): string | null {
+  return targetTlsOf(connection).mode === "verify-full" && scratchRoot === undefined
+    ? TLS_CA_SCRATCH_REQUIRED_REASON
+    : null;
+}
+
+// What a RESTORE executor needs mounted to connect: mongo's `--config` password file, and the
+// target's CA when its TLS is verified — both materialized into the pipeline's own staging
+// reservation (so they sit on the swept volume and need no second slot) and removed before it is
+// released. Nothing at all for a postgres or mysql target whose TLS is off or unverified. Spread
+// into RestorePipelineDeps, since an absent key and "nothing to mount" are the same answer there.
+export function withConnectionMounts(
+  engine: EngineKind,
+  connection: TargetConnection,
+): Pick<RestorePipelineDeps, "provideExtraMounts"> {
+  const tls = targetTlsOf(connection);
+  if (engine !== "mongodb" && tls.mode !== "verify-full") return {};
+  return {
+    provideExtraMounts: async (dir: string) => {
+      const files: Array<{ mount: RunMount; cleanup(): Promise<void> }> = [];
+      if (engine === "mongodb") files.push(await writeMongoConfig(dir, connection.password));
+      if (tls.mode === "verify-full") files.push(await writeTlsCaFile(dir, tls.caCert));
+      return {
+        mounts: files.map((file) => file.mount),
+        cleanup: async () => {
+          for (const file of files) await file.cleanup();
+        },
+      };
+    },
+  };
 }
 
 export function originDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string {
@@ -705,7 +768,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       database: connectDatabase,
       username: target.username,
       password,
-      tls: target.tls,
+      ...tlsOf(target),
       connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
     });
     const backupProbe = toBackupProbe(richProbe);
@@ -717,8 +780,17 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       database: connectDatabase,
       username: target.username,
       password,
-      tls: target.tls,
+      ...tlsOf(target),
     };
+
+    // The CA certificate reaches the dump tools only as a file mounted at TLS_CA_PATH, so a verified
+    // target needs the scratch volume the way a mongo target does — refused here, legibly, before
+    // anything is written or any executor starts.
+    const caProblem = tlsCaScratchProblem(connection, deps.env.SCHRODUMP_SCRATCH_PATH);
+    if (caProblem !== null) {
+      await failJob(job.id, caProblem);
+      return { ok: false, artifactId: null, verifyLevel: "NONE", retentionConfigured: false };
+    }
 
     // Mongo's password reaches mongodump ONLY through a bind-mounted `--config` file (never argv);
     // every other engine passes it via env and mounts nothing. That file is a cleartext credential,
@@ -752,6 +824,23 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       }
     }
 
+    // The CA file, for a verified target of any engine. Removed in the same finally as the mongo
+    // config; a failure to write it releases what was already materialized.
+    let caFile: TlsCaFile | null = null;
+    const connectionTls = targetTlsOf(connection);
+    if (connectionTls.mode === "verify-full" && deps.env.SCHRODUMP_SCRATCH_PATH !== undefined) {
+      try {
+        caFile = await stageTlsCaForBackup(
+          deps.env.SCHRODUMP_SCRATCH_PATH,
+          job.id,
+          connectionTls.caCert,
+        );
+      } catch (err) {
+        if (releaseMongoConfig !== null) await releaseMongoConfig();
+        throw err;
+      }
+    }
+
     const startedAt = Date.now();
     const stagingPathFor = (): string | undefined =>
       deps.env.SCHRODUMP_SCRATCH_PATH !== undefined
@@ -769,6 +858,8 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       timeoutMs: DUMP_TIMEOUT_MS,
       // Only mongodb sets this; the mount carries the `--config` password file into mongodump.
       ...(mongoConfigMount !== undefined ? { configMount: mongoConfigMount } : {}),
+      // Any engine, when the target's TLS is verified: the CA at TLS_CA_PATH, read-only.
+      ...(caFile !== null ? { tlsCaMount: caFile.mount } : {}),
       // Where a STAGED dump writes its directory. Mounted into the dump container by
       // createBackupPorts at this same path — the descriptor's -f/-d argument is only meaningful
       // if the daemon can resolve it too.
@@ -884,6 +975,10 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
           requestedParallelism: policy.parallelism,
           stagedThresholdBytes: deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES,
           scratchConfigured: scratch !== null,
+          // The adapter states its staged tool's TLS limits against this connection: mydumper cannot
+          // require TLS without verifying it, so such a target streams instead.
+          adapter,
+          connection,
         }),
         ports,
       );
@@ -901,8 +996,12 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       };
     } finally {
       // Remove the mongo `--config` credential file (and release its reservation) whether the dump
-      // succeeded or threw; a no-op for the other engines.
-      if (releaseMongoConfig !== null) await releaseMongoConfig();
+      // succeeded or threw; a no-op for the other engines. Then the CA file, if there was one.
+      try {
+        if (releaseMongoConfig !== null) await releaseMongoConfig();
+      } finally {
+        if (caFile !== null) await caFile.cleanup();
+      }
     }
   };
 
@@ -1168,15 +1267,9 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                 // config authenticates the `verify` root user against admin. runRestorePipeline
                 // materializes it INSIDE its try and sweeps it before releasing the dir, so a
                 // materialization throw still releases the reservation (never a leaked semaphore slot).
-                // Other engines carry the password in env → no mount.
-                ...(engine === "mongodb"
-                  ? {
-                      provideExtraMounts: async (dir: string) => {
-                        const configFile = await writeMongoConfig(dir, conn.password);
-                        return { mounts: [configFile.mount], cleanup: configFile.cleanup };
-                      },
-                    }
-                  : {}),
+                // Other engines carry the password in env → no mount. The sandbox runs TLS off, so
+                // there is never a CA to mount here.
+                ...withConnectionMounts(engine, conn),
               });
 
               // Restore landed. Assert a usable schema: count the restored user tables. Collect the
@@ -1376,7 +1469,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       database: connectDatabase,
       username: originTarget.username,
       password,
-      tls: originTarget.tls,
+      ...tlsOf(originTarget),
     });
 
     const wiringDeps: RestoreWiringDeps = {
@@ -1426,7 +1519,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             database: connectDatabase,
             username: originTarget.username,
             password,
-            tls: originTarget.tls,
+            ...tlsOf(originTarget),
             connectTimeoutMs: PROBE_CONNECT_TIMEOUT_MS,
           });
         } catch {
@@ -1516,17 +1609,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
                   executionMode: artifact.executionMode,
                   sourcePath,
                 }),
-          // Mongo restore reads its password from the mounted `--config` file (off argv); the pipeline
-          // materializes it into the reserved staging dir (same swept volume as the dump) and removes
-          // it before releasing that dir. Other engines carry the password in env → no mount.
-          ...(engine === "mongodb"
-            ? {
-                provideExtraMounts: async (dir: string) => {
-                  const configFile = await writeMongoConfig(dir, connection.password);
-                  return { mounts: [configFile.mount], cleanup: configFile.cleanup };
-                },
-              }
-            : {}),
+          // Mongo restore reads its password from the mounted `--config` file (off argv), and a
+          // verified target of any engine needs its CA mounted; the pipeline materializes both into
+          // the reserved staging dir (same swept volume as the dump) and removes them before
+          // releasing that dir. A postgres/mysql target with TLS off or unverified mounts nothing.
+          ...withConnectionMounts(engine, connection),
           reserveStaging: async () => {
             // I1: reserve the per-job scratch DIRECTORY (ScratchManager.gc() reclaims it if a hard
             // kill skips the finally cleanup; a bare root file would be skipped by gc). It holds the

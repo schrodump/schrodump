@@ -168,6 +168,48 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   probe". It exists so the form can offer the scope as a choice over what the server actually
   holds instead of a typed name.
 
+## Target TLS: three modes, one reading (`DatabaseTarget.tlsCaCert`)
+
+- **`tls` was a boolean the probe and the tools read differently.** The probe verified strictly
+  against Node's bundled CAs with no way to add one; `pg_dump` ran `sslmode=require` and the mysql
+  clients `REQUIRED`, verifying nothing. So every managed database (RDS, Cloud SQL, Supabase, anything
+  self-signed) failed test-connection — and every backup, which probes first — while a server that
+  did connect was dumped over a channel open to anyone in the middle. The mongo tools were worse:
+  the adapter emitted `--tls`, which mongodump/mongorestore 100.x reject as an unknown option, so no
+  mongo target with TLS on (the default) could ever be dumped.
+- **Now `tls` + `tlsCaCert` are read by ONE function, `targetTlsOf` (engines `descriptor.ts`),** for
+  the probe and every descriptor alike: off / require (encrypted; unverified for postgres and
+  mysql/mariadb, system trust store for mongo) / verify-full (the target's CA, host name checked).
+  Every connection built from a row goes through `tlsOf` (`jobs/worker-wiring.ts`) — backup, restore,
+  the restore's own probe, test-connection (`routes/wiring.ts`) and `/targets/discover` — so none of
+  them can be the one that forgot the CA.
+- **The CA is public and stored in clear** — a TEXT column, returned by GET. The API (`routes/
+  targets.ts`, `parseTlsCaCert`) keeps only what node:crypto parses as certificates, refuses any
+  other PEM block (a pasted private key is the likely mistake, and this column goes to every viewer),
+  caps it at 256 KiB (the RDS global bundle is 165,408 bytes) and refuses a CA sent with `tls: false`
+  — on PATCH judged against the row's own `tls` when the patch does not set it. PATCH: absent keeps,
+  a PEM replaces, `null` clears. A CA kept on a row whose TLS was switched off is inert.
+- **The tools read the CA from a file**, bind-mounted read-only at `TLS_CA_PATH`. For a restore it is
+  materialized into the pipeline's own staging reservation beside mongo's `--config`
+  (`withConnectionMounts`). For a backup it gets a directory of its own, `<scratch>/<jobId>.tls-ca`
+  (`jobs/tls-ca-file.ts`), NOT a reservation: a STAGED dump takes the job's reservation itself,
+  `pg_dump -Fd` refuses a non-empty staging directory, the archive step would tar the CA into the
+  artifact, and a second reservation deadlocks the job against itself at
+  `SCHRODUMP_MAX_CONCURRENT_STAGED=1`. It is mounted into every run that connects (the dump and the
+  postgres globals dump), never the archive step. A CA with no scratch configured fails the backup
+  first (`TLS_CA_SCRATCH_REQUIRED_REASON`), like mongo.
+- **A mysql/mariadb TLS target without a CA is never staged.** mydumper/myloader fall back to
+  plaintext under `--ssl-mode=REQUIRED` (measured). The adapter's `stagedTlsRefusal` is a required
+  input of `resolveExecutionMode`, which streams such a target and writes why as the SUCCEEDED job's
+  reason; the staged descriptors refuse on the same answer as the second lock.
+- **Every certificate-verification code classifies as `TLS_FAILED`** (`probe/test-connection.ts`),
+  by code — `SELF_SIGNED_CERT_IN_CHAIN`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, `CERT_HAS_EXPIRED`,
+  `ERR_TLS_CERT_ALTNAME_INVALID`, mysql2's `HANDSHAKE_SSL_ERROR`, `ERR_SSL_*`… — and the code is
+  looked for down the `cause` chain, where the mongo driver keeps it two levels deep. They came back
+  UNKNOWN (or TIMEOUT, for mongo), and the UI told the operator to check the TLS switch. The compose
+  smoke's step 22 proves it end to end: a postgres that accepts only TLS, a throwaway CA, VERIFIED by
+  restore, a wrong CA refused as `TLS_FAILED`, and a CA-less target still backing up.
+
 ## Env (what the server actually reads)
 
 `env.ts` validates with Zod. Beyond `DATABASE_URL`, `PORT`, `SCHRODUMP_KEK`, `SCHRODUMP_URL`,

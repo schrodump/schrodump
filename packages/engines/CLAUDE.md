@@ -18,8 +18,32 @@ directory.
 
 - **Never** in `command` — argv is visible to any process on the host. It goes in `env`
   (`PGPASSWORD`, `MYSQL_PWD`) or in a mounted config file (mongo, via `--config`).
-- Probe: `tls: true` (require) by default; disabling TLS is an **explicit** option on the target,
-  never a silent fallback. A connection timeout is mandatory in every probe.
+- TLS is on by default; disabling it is an **explicit** option on the target, never a silent
+  fallback. A connection timeout is mandatory in every probe.
+
+## TLS — three modes, read once (`targetTlsOf`, `descriptor.ts`)
+
+- `tls` + `tlsCaCert` on `TargetConnection`/`ProbeConnection` mean exactly one of: **disable**;
+  **require** — encrypted, and for postgres and mysql/mariadb the certificate NOT verified (mongo's
+  tools verify against the system store here, their default); **verify-full** — the chain against
+  the target's CA and the host name checked. The probes and every adapter call `targetTlsOf`/
+  `tlsModeOf` and nothing else, because the defect this replaced was the probe and the tools
+  disagreeing: the probe verified against Node's bundled CAs, pg_dump verified nothing.
+- **Descriptors never carry the PEM** — they name `TLS_CA_PATH` (`PGSSLROOTCERT`, `--ssl-ca`, `--ca`,
+  `--sslCAFile`) and the composer mounts the file there, like `MONGO_CONFIG_PATH`. Named without the
+  mount, the tool fails on a missing file: the right direction to fail in.
+- The spellings are measured, not assumed (a descriptor test cannot tell a flag the tool lacks from
+  one it has): libpq `PGSSLMODE=verify-full`; mysql `--ssl-mode=VERIFY_IDENTITY --ssl-ca`; mariadb
+  `--ssl --ssl-ca --ssl-verify-server-cert` (it has no ssl-mode); mongo tools **`--ssl`** and
+  `--sslCAFile` — `--tls` is an unknown option to database tools 100.x, and it is what this adapter
+  emitted until TLS was actually run.
+- **mydumper/myloader honour verify-full and not require**: `--ssl-mode=REQUIRED` falls back to
+  plaintext when the server offers no TLS. `stagedTlsRefusal` says so before the server picks a mode,
+  and the STAGED descriptors throw `MYSQL_STAGED_TLS_UNVERIFIED` rather than emit it.
+- The probe drivers need their own care: mysql2 checks the host name only with `verifyIdentity`,
+  and neither pg nor mysql2 hands tls.connect the host — for an IP-literal host Node checks the
+  certificate against `localhost` (measured). `probePostgres` pins `checkServerIdentity` to the
+  configured host; `probeMysql` checks the address after connecting (mysql2 allows no override).
 
 ## Probe — what is not obvious
 

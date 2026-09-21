@@ -17,6 +17,11 @@ export interface ParsedConnection {
   // null means the URL said nothing about TLS, so the form's default must stand. Turning TLS off
   // is an explicit, recorded choice — never a silent fallback.
   readonly tls: boolean | null;
+  // The URL asked for the server's certificate to be VERIFIED (sslmode=verify-full / verify-ca,
+  // ssl-mode=VERIFY_IDENTITY / VERIFY_CA, or a CA file named in it). It still only sets `tls`: the
+  // CA itself is a file on the operator's machine that a URL can point at but never carry, and a
+  // verified connection without it is exactly what the target cannot make. The form says so.
+  readonly tlsVerify: boolean;
   readonly databases: string[];
 }
 
@@ -45,6 +50,16 @@ const TLS_REQUIRED = new Set([
   "verify_ca",
   "verify_identity",
 ]);
+
+// The modes that verify, and the parameters that name a CA file (libpq, mysql, mongodb spellings).
+const TLS_VERIFY = new Set(["verify-ca", "verify-full", "verify_ca", "verify_identity"]);
+const CA_FILE_PARAMS = ["sslrootcert", "ssl-ca", "sslca", "tlsCAFile", "sslCAFile"];
+
+function readTlsVerify(params: URLSearchParams): boolean {
+  const mode = params.get("sslmode") ?? params.get("ssl-mode") ?? params.get("sslMode");
+  if (mode !== null && TLS_VERIFY.has(mode.toLowerCase())) return true;
+  return CA_FILE_PARAMS.some((name) => params.get(name) !== null);
+}
 
 function readTls(params: URLSearchParams): boolean | null {
   const mode = params.get("sslmode") ?? params.get("ssl-mode") ?? params.get("sslMode");
@@ -108,6 +123,7 @@ export function parseConnectionUrl(input: string): ParseResult {
       username: decodeURIComponent(url.username),
       password: decodeURIComponent(url.password),
       tls: readTls(url.searchParams),
+      tlsVerify: readTlsVerify(url.searchParams),
       databases: databasesOf(url.pathname),
     },
   };
