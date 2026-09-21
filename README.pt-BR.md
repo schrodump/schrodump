@@ -29,7 +29,7 @@ está em **um de três estados**, e a cor é conteúdo, não decoração:
 
 | Estado | | Significado |
 | --- | --- | --- |
-| 🟢 **VERIFIED** | verde | Algo abriu e conferiu. Restaura. |
+| 🟢 **VERIFIED** | verde | Algo abriu e conferiu. Por padrão, isso significa que foi restaurado num banco descartável; um verde só por checksum diz isso ao lado do selo. |
 | 🟡 **UNOBSERVED** | âmbar | Foi escrito; ninguém olhou dentro. Pode estar perfeito, ou vazio. **É o default.** |
 | 🔴 **FAILED** | vermelho | Foi conferido e não presta. |
 
@@ -38,7 +38,8 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 
 ## Recursos
 
-- **Restore verificado** — checksum, ou um restore completo num banco descartável, por política.
+- **Restore verificado** — por padrão todo backup é restaurado num banco descartável e conferido; um
+  checksum, mais barato, é uma escolha por política, e o selo diz de qual dos dois veio um verde.
 - **Agentless** — nada é instalado no host do seu banco. Os dumps rodam em contêineres efêmeros
   construídos a partir da major version do próprio alvo.
 - **Cifrado em repouso** — todo artefato é cifrado com [`age`](https://age-encryption.org) para dois

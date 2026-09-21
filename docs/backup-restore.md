@@ -164,8 +164,9 @@ retype-to-confirm friction.
 
 ## Practical advice
 
-- Turn `FULL_RESTORE` on for at least one policy per database, even if it is weekly. A checksum
-  proves the bytes survived; only a restore proves the data did.
+- Keep `FULL_RESTORE` on — it is the default for a new policy — for at least one policy per
+  database, even if it is weekly. A checksum proves the bytes survived; only a restore proves the
+  data did. Choosing `CHECKSUM` to save time is a trade you make knowingly, and the badge says so.
 - Watch the unobserved counter, not the job list. A green job list with a rising unobserved count
   is a system that is backing up and never checking.
 - Do a restore drill on a schedule, by hand, to a real target. Automated verification tells you

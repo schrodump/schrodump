@@ -157,6 +157,48 @@ describe("GET /policies says when each policy next runs, on the instance's clock
   });
 });
 
+describe("POST /policies", () => {
+  // The product's claim is that a backup is not trusted until a restore has verified it. The default
+  // was CHECKSUM — a hash of the bytes — which the roadmap records would have greened the 876-byte
+  // artifact and the extension-less dumps. A policy created without saying otherwise must restore.
+  it("defaults verifyLevel to FULL_RESTORE, not CHECKSUM", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const app = await appWith("operator", {
+      create: (data) => {
+        seen.push(data as unknown as Record<string, unknown>);
+        return Promise.resolve(RECORD);
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/policies",
+      payload: { name: "nightly", targetId: "t1", destinationId: "d1", cron: "0 3 * * *", keepLast: 7 },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(seen[0]?.verifyLevel).toBe("FULL_RESTORE");
+    await app.close();
+  });
+
+  it("keeps an explicit CHECKSUM or NONE as asked", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const app = await appWith("operator", {
+      create: (data) => {
+        seen.push(data as unknown as Record<string, unknown>);
+        return Promise.resolve(RECORD);
+      },
+    });
+    for (const verifyLevel of ["CHECKSUM", "NONE"]) {
+      await app.inject({
+        method: "POST",
+        url: "/policies",
+        payload: { name: "n", targetId: "t1", destinationId: "d1", cron: "0 3 * * *", keepLast: 1, verifyLevel },
+      });
+    }
+    expect(seen.map((data) => data.verifyLevel)).toEqual(["CHECKSUM", "NONE"]);
+    await app.close();
+  });
+});
+
 describe("PATCH /policies/:id", () => {
   // The everyday reasons this route has to exist: a cron typed wrong, a retention window that
   // turned out to be too short, and — the one with no workaround at all before this — stopping a

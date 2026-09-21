@@ -512,7 +512,7 @@ export const es: Record<MessageKey, string> = {
   "guided.step.canary": "Ejecutar el canary en ese destino",
   "guided.step.target": "Crear una base de datos objetivo",
   "guided.step.probe": "Probar la conexión con el objetivo",
-  "guided.step.policy": "Crear una política con verify activado",
+  "guided.step.policy": "Crea una política que verifica restaurando",
   "guided.open": "Abrir",
   "guided.done": "Hecho",
 

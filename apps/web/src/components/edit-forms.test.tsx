@@ -251,6 +251,28 @@ describe("PolicyForm previews on the instance's clock", () => {
   });
 });
 
+describe("PolicyForm's verify default", () => {
+  // The product's claim is that a backup is not trusted until a restore has verified it; the form
+  // used to start every new policy at CHECKSUM, a hash of the bytes.
+  it("starts a new policy at full restore where the deployment can run one", () => {
+    captureFetch();
+    renderWith(<PolicyForm onDone={() => undefined} scratchConfigured />);
+    expect(screen.getByLabelText("Verify level")).toHaveValue("FULL_RESTORE");
+  });
+
+  it("starts at checksum where a full restore could only end 'could not run'", () => {
+    captureFetch();
+    renderWith(<PolicyForm onDone={() => undefined} scratchConfigured={false} />);
+    expect(screen.getByLabelText("Verify level")).toHaveValue("CHECKSUM");
+  });
+
+  it("keeps an existing policy's level as it is", () => {
+    captureFetch();
+    renderWith(<PolicyForm onDone={() => undefined} scratchConfigured policy={POLICY} />);
+    expect(screen.getByLabelText("Verify level")).toHaveValue("CHECKSUM");
+  });
+});
+
 describe("DestinationForm says why Save is blocked", () => {
   it("names the first missing field, in the order the form is filled", async () => {
     captureFetch();

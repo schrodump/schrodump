@@ -43,14 +43,16 @@ const TARGET: Target = {
 
 // Keys and a verifying policy are present throughout: this suite is about the other two steps, and
 // the card hides itself once everything is done.
-function renderWith(over: { destinations?: Destination[]; targets?: Target[] } = {}) {
+function renderWith(
+  over: { destinations?: Destination[]; targets?: Target[]; policies?: Array<{ id: string; verifyLevel: string }> } = {},
+) {
   const bodies: Record<string, unknown> = {
     "/backend/encryption-keys": [
       { keyId: "esc", type: "escrow", state: "active", publicRecipient: "age1", serverCanDecrypt: false, createdAt: "" },
     ],
     "/backend/destinations": over.destinations ?? [DESTINATION],
     "/backend/targets": over.targets ?? [TARGET],
-    "/backend/policies": [{ id: "p1", verifyLevel: "FULL_RESTORE" }],
+    "/backend/policies": over.policies ?? [{ id: "p1", verifyLevel: "FULL_RESTORE" }],
   };
   vi.stubGlobal(
     "fetch",
@@ -152,3 +154,22 @@ describe("GuidedSetup — a refused check is not an unrun one", () => {
   });
 });
 
+
+describe("GuidedSetup — the last step is a policy that restores", () => {
+  // The card says only the last step "turns a backup from a question into an answer". A checksum
+  // answers whether the bytes survived, not whether the data restores, so it does not close it.
+  it("keeps the policy step open for a checksum-only policy", async () => {
+    renderWith({ policies: [{ id: "p1", verifyLevel: "CHECKSUM" }] });
+    await settled();
+    expect(screen.getByText(/verifies by restoring/i).closest("li")).not.toHaveAttribute("data-done", "true");
+  });
+
+  it("closes it for a full-restore policy", async () => {
+    renderWith({
+      destinations: [{ ...DESTINATION, lastCanaryOk: true, lastCanaryAt: "2026-09-03T00:00:00.000Z" }],
+      policies: [{ id: "p1", verifyLevel: "FULL_RESTORE" }],
+    });
+    await settled();
+    expect(screen.getByText(/verifies by restoring/i).closest("li")).toHaveAttribute("data-done", "true");
+  });
+});

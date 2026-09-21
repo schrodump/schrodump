@@ -90,7 +90,10 @@ export function buildApp(deps: AppDeps) {
     return Promise.resolve();
   });
   app.register((instance) => {
-    sessionRoutes(deps.resolver, { timeZone: deps.timeZone })(instance);
+    sessionRoutes(deps.resolver, {
+      timeZone: deps.timeZone,
+      scratchConfigured: () => deps.instanceConfig().scratchPath !== null,
+    })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {

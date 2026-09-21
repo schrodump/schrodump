@@ -34,7 +34,10 @@ export function GuidedSetup() {
   const hasKeys = (keys.data ?? []).some((key) => key.type === "escrow" && key.state === "active");
   const hasDestination = (destinations.data ?? []).length > 0;
   const hasTarget = (targets.data ?? []).length > 0;
-  const hasVerifyingPolicy = (policies.data ?? []).some((policy) => policy.verifyLevel !== "NONE");
+  // A restore-verifying policy, not merely a verifying one: the card's own promise is that the last
+  // step "turns a backup from a question into an answer", and a checksum only answers whether the
+  // bytes survived.
+  const hasVerifyingPolicy = (policies.data ?? []).some((policy) => policy.verifyLevel === "FULL_RESTORE");
   // `=== true`, not truthiness: null is "never run" and false is "ran and was refused", and
   // neither is a destination proven writable or a target proven reachable. Both used to be
   // permanently unticked prompts, because the outcome was returned to one browser and kept

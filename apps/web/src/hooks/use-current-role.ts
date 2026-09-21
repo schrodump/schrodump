@@ -17,6 +17,10 @@ interface Me {
   // SCHRODUMP_TZ: the zone the scheduler reads every cron in. On /me because every role needs it
   // and the policy form needs it before any policy exists.
   timeZone: string;
+  // Whether this deployment has scratch — what STAGED dumps and full-restore verifies need. It was
+  // readable only from the admin-only GET /instance, so an operator's policy form always read
+  // "no scratch". Optional so an older server simply leaves the question unanswered.
+  scratchConfigured?: boolean;
 }
 
 function useMe() {
@@ -44,4 +48,11 @@ export function useMustChangePassword(): boolean {
 export function useInstanceTimeZone(): string | null {
   const { data } = useMe();
   return data?.timeZone ?? null;
+}
+
+// null while /me loads or when the server does not say, so a caller can fall back rather than read
+// "unknown" as "no".
+export function useScratchConfigured(): boolean | null {
+  const { data } = useMe();
+  return data?.scratchConfigured ?? null;
 }
