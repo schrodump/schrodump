@@ -63,10 +63,14 @@ cp .env.example .env
 # Gere a key-encryption key e uma senha de banco, e coloque no .env.
 # ATENÇÃO: perder a KEK é perder todos os backups — guarde uma cópia fora deste host.
 openssl rand -base64 32   # -> SCHRODUMP_KEK
-openssl rand -base64 24   # -> DB_PASSWORD
+openssl rand -hex 24      # -> DB_PASSWORD
 
 docker compose up -d
 ```
+
+O `.env.example` roda a release mais recente (`SCHRODUMP_IMAGE=…:next`); em produção, fixe ali uma
+versão exata. O diretório de scratch é criado e entregue ao usuário do servidor por um serviço
+`scratch-init` de execução única, então não há nada para `mkdir` ou `chown` antes.
 
 No primeiro boot o Schrodump imprime um **link de setup de uso único** para criar o primeiro
 administrador:
@@ -75,8 +79,9 @@ administrador:
 docker compose logs schrodump | grep setupUrl
 ```
 
-Abra, crie o admin e siga o fluxo guiado: destino → canary → alvo → teste → política. Passo a passo
-completo em [docs/install.md](docs/install.md).
+Abra-o exatamente no endereço impresso — o login é recusado a partir de qualquer origem diferente
+de `SCHRODUMP_URL` —, crie o admin e siga o fluxo guiado: chaves de criptografia → destino → canary →
+alvo → teste → política. Passo a passo completo em [docs/install.md](docs/install.md).
 
 > **A porta é publicada apenas em loopback.** Alcançar o Schrodump de outra máquina exige um proxy
 > reverso terminando TLS na frente: o cookie de sessão carrega a autoridade inteira do operador, e

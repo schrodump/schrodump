@@ -97,6 +97,10 @@ export const es: Record<MessageKey, string> = {
   "auth.login.password": "Contraseña",
   "auth.login.submit": "Iniciar sesión",
   "auth.login.error": "Email o contraseña inválidos",
+  "auth.login.error.origin":
+    "Schrodump rechazó esta dirección. La abriste en {origin}, que no es la dirección configurada (SCHRODUMP_URL). Ábrela en esa dirección, o define SCHRODUMP_URL con esta y reinicia.",
+  "auth.login.error.rateLimited": "Demasiados intentos de inicio de sesión desde esta dirección. Espera unos minutos y vuelve a intentarlo.",
+  "auth.login.error.server": "El servidor no respondió. Comprueba que el stack está en marcha (docker compose ps) y vuelve a intentarlo.",
 
   "setup.title": "Crear el primer administrador",
   "setup.description": "Este enlace es de un solo uso y expira. Define la cuenta admin inicial.",

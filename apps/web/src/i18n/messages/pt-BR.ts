@@ -97,6 +97,10 @@ export const ptBR: Record<MessageKey, string> = {
   "auth.login.password": "Senha",
   "auth.login.submit": "Entrar",
   "auth.login.error": "Email ou senha inválidos",
+  "auth.login.error.origin":
+    "O Schrodump recusou este endereço. Você o abriu em {origin}, que não é o endereço configurado (SCHRODUMP_URL). Abra pelo endereço configurado, ou defina SCHRODUMP_URL com este e reinicie.",
+  "auth.login.error.rateLimited": "Muitas tentativas de entrar a partir deste endereço. Aguarde alguns minutos e tente de novo.",
+  "auth.login.error.server": "O servidor não respondeu. Confira se o stack está rodando (docker compose ps) e tente de novo.",
 
   "setup.title": "Criar o primeiro administrador",
   "setup.description": "Este link é de uso único e expira. Defina a conta admin inicial.",

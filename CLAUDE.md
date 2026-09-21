@@ -43,7 +43,7 @@ docs/               # install, security, backup-restore, lgpd, roadmap + superpo
 scripts/            # rehearse-recovery.sh (works WITHOUT Schrodump), check-kek.mjs (tests a
                     # KEK candidate without booting) + smoke-compose.sh (CI)
 .github/workflows/  # ci, security, release
-compose.yaml        # deployment stack (server + postgres + docker-socket-proxy)
+compose.yaml        # deployment stack (scratch-init + server + postgres + docker-socket-proxy)
 ```
 
 Each package and app has its **own `CLAUDE.md`**, and that file **takes precedence over this one**

@@ -29,6 +29,28 @@ export function parseTrustedProxies(raw: string | undefined): string[] {
     .filter((entry) => entry !== "");
 }
 
+// The other spelling of a loopback SCHRODUMP_URL. Better-Auth refuses a sign-in whose Origin is not
+// the base URL, and the page then only knows it failed — so an operator who opened
+// http://127.0.0.1:8080 while the stack was configured for http://localhost:8080 (the .env.example
+// default) typed the right password and was told it was wrong. Both names are this machine, on the
+// same port and scheme, so trusting the twin widens nothing an attacker can use. Any other hostname
+// still has to match exactly, and the page names the mismatch.
+export function loopbackTwinOrigins(baseURL: string): string[] {
+  let url: URL;
+  try {
+    url = new URL(baseURL);
+  } catch {
+    return [];
+  }
+  const twins: Record<string, string[]> = {
+    localhost: ["127.0.0.1", "[::1]"],
+    "127.0.0.1": ["localhost", "[::1]"],
+    "[::1]": ["localhost", "127.0.0.1"],
+  };
+  const port = url.port === "" ? "" : `:${url.port}`;
+  return (twins[url.hostname] ?? []).map((host) => `${url.protocol}//${host}${port}`);
+}
+
 export interface AuthOptions {
   secret: string;
   baseURL: string;
@@ -50,6 +72,7 @@ export function createAuth(prisma: PrismaClient, opts: AuthOptions) {
     },
     secret: opts.secret,
     baseURL: opts.baseURL,
+    trustedOrigins: loopbackTwinOrigins(opts.baseURL),
     rateLimit: {
       // Explicit rather than inherited. Better-Auth enables this only when NODE_ENV is production,
       // which makes the security posture depend on a variable set for unrelated reasons.

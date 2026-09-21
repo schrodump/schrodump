@@ -21,6 +21,8 @@ services:
         condition: service_healthy
       docker-proxy:
         condition: service_started
+      scratch-init:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://schrodump:${DB_PASSWORD:?set DB_PASSWORD in .env}@db:5432/schrodump
       SCHRODUMP_KEK: ${SCHRODUMP_KEK:?generate with 'openssl rand -base64 32' and keep a copy off this host}
@@ -81,6 +83,28 @@ services:
     networks:
       - internal
       - targets
+
+  # One-shot, as root, before the server: creates the scratch directory on the host and hands it to
+  # the user the server runs as. Docker creates a missing bind-mount source as root and never chowns
+  # it, and the server — unprivileged by design — refuses to boot on a scratch it cannot write
+  # (ScratchNotWritableError), because an unwritable scratch lets STREAM backups succeed while
+  # every verify, restore, STAGED and mongo job fails. That refusal is right; making the README's
+  # `docker compose up -d` walk into it was not: the fix lived in docs/install.md as a `sudo mkdir &&
+  # chown` step nobody following the quickstart ever reached, and the first boot restart-looped.
+  #
+  # Same image as the server, so nothing extra is pulled and `schrodump` resolves to the same uid.
+  # Only the directory itself is chowned, never its contents: a restart must not walk a scratch
+  # that may hold a dump, and whatever is inside was written by the server as that user anyway.
+  scratch-init:
+    image: ${SCHRODUMP_IMAGE:-schrodump/schrodump:latest}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-ec", 'mkdir -p "$$SCRATCH" && chown schrodump:schrodump "$$SCRATCH"']
+    environment:
+      SCRATCH: ${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}
+    volumes:
+      - ${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}:${SCRATCH_HOST_PATH:-/var/lib/schrodump/scratch}
+    network_mode: none
+    restart: "no"
 
   db:
     image: postgres:18-alpine

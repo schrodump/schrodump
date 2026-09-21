@@ -131,11 +131,19 @@ jobs:
             ghcr.io/schrodump/schrodump
             schrodump/schrodump
           # latest is never implicit; it is added below only for a stable version.
+          #
+          # `next` moves on EVERY release, candidate or stable, and it is what .env.example names
+          # while no stable version exists. The quickstart used to pull `latest` — a tag that only a
+          # plain X.Y.Z creates — so for as long as the project had shipped only candidates,
+          # `docker compose up -d` answered "not found" to everyone who followed the README. A
+          # floating name for "the newest release" keeps the quickstart working without editing
+          # three READMEs on every cut; production pins an exact version either way.
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
+            type=raw,value=next
 
       - name: Build and push
         id: build
@@ -215,6 +223,7 @@ jobs:
       - name: Changelog
         env:
           TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.image.outputs.version }}
           STABLE: ${{ needs.image.outputs.stable }}
           DIGEST: ${{ needs.image.outputs.digest }}
         run: |
@@ -256,6 +265,12 @@ jobs:
             echo
             echo
             echo "Image digest: \`${DIGEST}\`"
+            echo
+            echo "Install this exact version by naming it in \`.env\`:"
+            echo
+            echo '```'
+            echo "SCHRODUMP_IMAGE=schrodump/schrodump:${VERSION}"
+            echo '```'
             echo
             echo "Verify the signature before running it:"
             echo

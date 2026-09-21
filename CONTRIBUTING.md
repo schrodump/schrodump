@@ -185,15 +185,18 @@ for everyone but you — the same failure mode as the GHCR step below, from the 
 
 ### Installing a release candidate
 
-Because `latest` does not move, the shipped `compose.yaml` will not pull an `-rc.N` on its own.
-Name it in `.env`:
+`latest` does not move for a candidate, but `next` does: `release.yml` points it at every release,
+candidate or stable, and `.env.example` names it while no stable version exists — which is what
+makes the README quickstart work before v0.1.0. To try one candidate exactly, name it in `.env`:
 
 ```sh
 SCHRODUMP_IMAGE=schrodump/schrodump:1.2.3-rc.1
 ```
 
 That is the same variable production should use to pin an exact version, so the path is exercised
-by every CI run rather than only by whoever tries the candidate.
+by every CI run rather than only by whoever tries the candidate. **When the first stable version
+ships, change `.env.example` back to `latest`** (or to that version): `next` would otherwise carry
+quickstart users onto every later candidate.
 
 ### After the FIRST tag only
 
