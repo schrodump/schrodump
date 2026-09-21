@@ -40,7 +40,7 @@ import { readCredential, type CredentialAuditSink } from "../crypto/credential-a
 import { writeMongoConfig } from "../crypto/mongo-config.js";
 import type { Env } from "../env.js";
 import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
-import { runBackupJob, type ProbeResult } from "./backup.js";
+import { runBackupJob, type BackupContext, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
 import type { ExecutionMode } from "./execution-mode.js";
@@ -378,7 +378,13 @@ export function buildDumpDescriptorFor(
       serverVersionNum: probe.serverVersionNum,
       executionMode: mode,
       parallelism,
-      scope: dumpScopeFor(inputs.engine, probe.scope, inputs.scopedDatabases, inputs.scopedSchemas),
+      scope: dumpScopeFor(
+        inputs.engine,
+        probe.scope,
+        inputs.scopedDatabases,
+        inputs.scopedSchemas,
+        mode,
+      ),
       facts: inputs.facts,
       ...(stagingPath !== undefined ? { stagingPath } : {}),
     });
@@ -437,17 +443,64 @@ function probeDatabaseFor(engine: EngineKind, scopedDatabases: string[]): string
 // the target row is a separate decision with its own consequences. What the target row DOES decide
 // for postgres is refusal — see postgresUnscopedAlternatives: when the operator named no database
 // and the server holds more than the one pg_dump would default to, the dump does not run.
+//
+// A STAGED mysql/mariadb dump is the exception, and the mode is a parameter for it alone. mydumper
+// is given `-B <db>` and copies exactly that one database, so its scope is the TARGET's selection,
+// never the probe's discovery — a root credential discovers `mysql` and `sys` beside the one
+// database the operator picked. The adapter refuses a STAGED scope that is not exactly one
+// database, and resolveExecutionMode reads this same selection (backupContextFor) so that it
+// never routes there with anything else: an unscoped or multi-database target streams instead.
 export function dumpScopeFor(
   engine: EngineKind,
   probeScope: DumpScope,
   targetDatabases: string[],
   targetSchemas: string[],
+  mode: ExecutionMode,
 ): DumpScope {
   if (engine === "mongodb") return { databases: targetDatabases, schemas: [], collections: [] };
   if (engine === "postgres") {
     return { databases: probeScope.databases, schemas: targetSchemas, collections: [] };
   }
+  if (mode === "STAGED") return { databases: targetDatabases, schemas: [], collections: [] };
   return probeScope;
+}
+
+export interface BackupContextInputs {
+  jobId: string;
+  organizationId: string;
+  engine: EngineKind;
+  // The target's own database selection, as parsed from its row — empty when it is unscoped.
+  scopedDatabases: string[];
+  requestedParallelism: number;
+  stagedThresholdBytes: number | undefined;
+  scratchConfigured: boolean;
+}
+
+// The context runBackupJob routes the execution mode from. A named function for the reason
+// buildDumpDescriptorFor is one: the executor is only ever constructed with a real runner and real
+// probes, so a routing rule decided inline there is a rule whose absence no test can notice.
+//
+// mysql/mariadb hand resolveExecutionMode the target's selection, because a STAGED dump of those
+// engines copies exactly one database by name (`mydumper -B`, see dumpScopeFor). An unscoped mysql
+// target with parallelism > 1 used to go STAGED and dump `mysql` — the system schema, the database
+// an unscoped target connects through — under a SUCCEEDED job. Every other engine passes null:
+// postgres stages the database its connection opens, as it streams it, and mongodb never stages.
+export function backupContextFor(inputs: BackupContextInputs): BackupContext {
+  const stagesOneNamedDatabase = inputs.engine === "mysql" || inputs.engine === "mariadb";
+  return {
+    jobId: inputs.jobId,
+    organizationId: inputs.organizationId,
+    requestedParallelism: inputs.requestedParallelism,
+    // SCHRODUMP_STAGED_THRESHOLD_BYTES, absent unless the operator set it. NOT
+    // SCHRODUMP_SCRATCH_MAX_BYTES, which is the volume's CEILING, not a routing threshold: using it
+    // meant size only ever selected STAGED for dumps larger than the whole scratch budget — never
+    // for the mid-sized ones staging exists to help, and precisely for the ones least likely to fit.
+    ...(inputs.stagedThresholdBytes !== undefined
+      ? { stagedThresholdBytes: inputs.stagedThresholdBytes }
+      : {}),
+    scratchConfigured: inputs.scratchConfigured,
+    singleDatabaseStagingScope: stagesOneNamedDatabase ? inputs.scopedDatabases : null,
+  };
 }
 
 // Whether the archive this dump is about to produce carries an oplog. mongodb's buildDump emits
@@ -782,7 +835,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
               dumpIsMultiDatabaseFor(
                 engine,
                 mode,
-                dumpScopeFor(engine, probe.scope, scopedDatabases, scopedSchemas).databases,
+                dumpScopeFor(engine, probe.scope, scopedDatabases, scopedSchemas, mode).databases,
               ) ?? null,
             sizeRawBytes: BigInt(upload.sizeRawBytes),
             sizeCompressedBytes: BigInt(upload.sizeCompressedBytes),
@@ -800,23 +853,22 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
 
     try {
       const outcome = await runBackupJob(
-        {
+        backupContextFor({
           jobId: job.id,
           organizationId: job.organizationId,
+          engine,
+          scopedDatabases,
           requestedParallelism: policy.parallelism,
-          // No dedicated staged-threshold knob in v1: the scratch budget doubles as the size above
-          // which a single-threaded dump prefers staging. Explicit parallelism still forces STAGED.
-          // NOT SCHRODUMP_SCRATCH_MAX_BYTES, which is the volume's CEILING, not a routing
-          // threshold: using it meant size only ever selected STAGED for dumps larger than the whole
-          // scratch budget — never for the mid-sized ones staging exists to help, and precisely for
-          // the ones least likely to fit.
-          ...(deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES !== undefined
-            ? { stagedThresholdBytes: deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES }
-            : {}),
+          stagedThresholdBytes: deps.env.SCHRODUMP_STAGED_THRESHOLD_BYTES,
           scratchConfigured: scratch !== null,
-        },
+        }),
         ports,
       );
+      // Also on the job's reason (runBackupJob); logged here so a degraded mode can be found by
+      // job id without the database, next to the rest of that job's lines.
+      for (const warning of outcome.warnings) {
+        deps.log.warn({ jobId: job.id, engine, warning }, "backup execution mode degraded");
+      }
 
       return {
         ok: outcome.ok,

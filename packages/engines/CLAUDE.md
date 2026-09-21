@@ -52,6 +52,14 @@ resolve, so the caller passes the image its own adapter picked. A dedicated tar 
 another tag and another digest to pin, to run a command that is already there. Both descriptors
 carry an **empty env** — neither step has any reason to travel with a target's password.
 
+**A STAGED mysql/mariadb dump names exactly one database, or `buildDump` refuses it**
+(`MYSQL_STAGED_REQUIRES_ONE_DATABASE`). `mydumper -B` copies one database by name, and the
+descriptor used to read `-B connection.database` — for an unscoped target, `mysql`, the system
+schema the connection opens through. The dump exited 0 over no user data, and a multi-database
+scope kept only its first. `-B` now names `scope.databases[0]`, so what is checked is what is
+dumped. The routing that keeps production away from the refusal lives in `apps/server`
+(`resolveExecutionMode`'s `singleDatabaseStagingScope`); the refusal is for the caller that forgets.
+
 ## Executor images
 
 - postgres: `postgres:<major>-alpine` (13–18); `pg_dump` must be ≥ the server version.

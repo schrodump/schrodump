@@ -86,6 +86,23 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   carry a `citext` column so the gate sees an extension. Measured on postgres 18: a whole-database
   `-Fc` dump restores clean over an empty database and over a live one that already holds the
   extension (`--clean --if-exists` drops the dependent table before the extension).
+- **A mysql/mariadb dump is STAGED only when its target names exactly one database.** `mydumper -B`
+  copies one database by name, and the descriptor read `-B connection.database` — for an unscoped
+  target, `mysql`, the system schema `probeDatabaseFor` connects through. `parallelism > 1` (or the
+  size threshold) routed an unscoped target there: the job SUCCEEDED over no user data, and the
+  unscoped verify, downgraded to CHECKSUM by `resolveVerifyPlan`, made it VERIFIED. A
+  multi-database selection kept only its first. Two locks now. `resolveExecutionMode` takes
+  `singleDatabaseStagingScope` as a **required** input — `backupContextFor` passes the target's
+  selection for mysql/mariadb and null for the others — and streams, with a warning, any target that
+  does not name exactly one. The adapter refuses a STAGED scope that is not exactly one database,
+  and `dumpScopeFor` hands a STAGED mysql dump the target's selection rather than the probe's
+  discovery, because a root credential discovers `mysql` and `sys` beside the database picked (the
+  compose smoke's STAGED step is exactly that shape). The route still places no count on mysql
+  scopes: unscoped legitimately means every database, and STREAM is what copies that.
+- **An execution-mode degradation is written on the job.** `resolveExecutionMode`'s warnings
+  (parallelism clamped, no scratch, staged unavailable) were returned in the outcome and read by
+  nobody. `runBackupJob` now writes them as the SUCCEEDED job's `reason` — the ledger shows it as
+  what the run reported — and `createJobExecutor` logs each with the job id.
 
 ## Probe / test-connection (`probe/test-connection.ts`)
 
@@ -134,7 +151,8 @@ An absent scratch path ⇒ STREAM-only (no staged/parallel).
 > **`SCHRODUMP_STAGED_THRESHOLD_BYTES` has no default, and that is the decision.** STAGED is faster
 > on a large database, but it writes the clear-text dump to disk before uploading and requires the
 > scratch volume to be sized for it — so the mode is never chosen FOR the operator on the basis of
-> size. `parallelism > 1` on the policy is the explicit, per-policy path. Before this was fixed the
+> size. `parallelism > 1` on the policy is the explicit, per-policy path (for mysql/mariadb, only on
+> a target that names exactly one database — see the invariant). Before this was fixed the
 > threshold defaulted to `SCHRODUMP_SCRATCH_MAX_BYTES`, which is the **volume ceiling**, not a
 > routing threshold: the effect was to stage only dumps larger than the entire scratch budget.
 
@@ -483,9 +501,10 @@ an admin-creation link, and an old log line stops working after an hour.
   (the class `backup.ts` writes verbatim into `BackupJob.reason`) naming the databases left behind,
   and it fires before any container starts. When `postgres` is the only database it proceeds — that
   is where the data lives — and an explicit scope, including an explicit `postgres`, is never
-  second-guessed. mysql/mariadb are not affected: their dump receives every database the probe
-  found. `sizeRawBytes` is now the bytes the dump actually produced; the estimate keeps its two
-  real jobs, STAGED routing and the scratch reservation, which are decisions taken *before* the dump.
+  second-guessed. A mysql/mariadb STREAM dump is not affected: it receives every database the probe
+  found (STAGED is — see the invariant above). `sizeRawBytes` is now the bytes the dump actually
+  produced; the estimate keeps its two real jobs, STAGED routing and the scratch reservation, which
+  are decisions taken *before* the dump.
   That guard is the **second** lock. The first is `scopeProblem` (`routes/targets.ts`), applied on
   create and on any PATCH that touches the scope (engine read off the row): postgres must name
   exactly one database, mongodb at most one, mysql/mariadb anything. And the form no longer has a

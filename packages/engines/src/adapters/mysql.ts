@@ -95,13 +95,31 @@ function createSqlFamilyAdapter(family: SqlFamily): EngineAdapter {
             "a STAGED mysql/mariadb dump requires stagingPath",
           );
         }
+        // mydumper copies exactly the ONE database `-B` names, so a STAGED dump is honest only for
+        // a scope of exactly one. This read `-B connection.database`, and for an unscoped target
+        // the connection is opened through `mysql` — the system schema. The dump exited 0, the job
+        // SUCCEEDED over an artifact holding no user data, and a multi-database scope kept only its
+        // first database the same way. apps/server no longer routes either case here; this refusal
+        // is what stops the next caller that does, and `-B` names the scope rather than the
+        // connection so that what is checked is what is dumped.
+        const [database, ...others] = input.scope.databases;
+        if (database === undefined || database.length === 0 || others.length > 0) {
+          throw new EngineDescriptorError(
+            "MYSQL_STAGED_REQUIRES_ONE_DATABASE",
+            "a STAGED mysql/mariadb dump copies exactly one database (mydumper -B), and this scope " +
+              (others.length > 0
+                ? `names ${String(others.length + 1)}: ${input.scope.databases.join(", ")}`
+                : "names none") +
+              " — stream it, or scope the target to a single database",
+          );
+        }
         return {
           image: MYDUMPER_IMAGE,
           command: [
             "mydumper",
             ...connArgs(connection),
             "-B",
-            connection.database,
+            database,
             "-o",
             input.stagingPath,
             "-t",
