@@ -17,6 +17,26 @@ Docker execution and scratch management. Takes precedence over the root `CLAUDE.
   when `StatusCode === 0`.
 - **No `AutoRemove`**: remove the container by hand in the `finally`, after reading the exit code
   and stderr.
+- **Removal takes the container's anonymous volumes** (`CONTAINER_REMOVE_OPTIONS`, `{ force: true,
+  v: true }`) — executors and sandboxes alike, on success, failure, timeout and abort. The stock
+  engine images (`postgres:<major>-alpine`, `mysql:8.0`, `mariadb:11`, `mongo:8`) declare a
+  `VOLUME` for their data directory and nothing is mounted over it, so Docker creates an
+  **anonymous volume** with every container, and `force` alone stops the container and **keeps**
+  the volume. For a FULL_RESTORE verify that volume **is the restored database, in clear**: on a
+  live stack three verifies left three dangling volumes, each a complete PostgreSQL data directory
+  (`pg_wal`, `postgresql.conf`, `postmaster.pid`), under `/var/lib/docker/volumes`, kept forever —
+  the host filling by one whole database per verify, and every backup encrypted before it left the
+  host also existing unencrypted on it, against `ARCHITECTURE.md` §4 and the scratch model below.
+  Dump executors from the same images left an empty one per run. The option is applied in **one** place
+  (`removeWithVolumes`, inside `DockerodeEngine`), and `StartedContainer`/`StartedService.remove()`
+  take no options, so no call site can drop it. A container that was created but failed to start is
+  reaped **inside** the engine (`start` and `startService` both), because `run()` and
+  `withEphemeralService()` only hold a handle on the return path — until this fix an executor in
+  that state was not removed at all. `v` removes anonymous volumes only: the scratch bind mount and
+  any named volume are never touched. `FakeEngine` cannot see removal options — the same blind spot
+  the log driver hid in — so `docker.test.ts` drives the real engine against a `FakeDaemon` and
+  asserts the literal `{ force: true, v: true }` (asserting against the exported constant would stay
+  green with `v` deleted from it).
 - **Network** always explicit (`RunOptions.network`), never inherited. A non-existent network is a
   clear error, never a run on the default network.
 - **Timeout** mandatory: on expiry, kill the container and propagate a typed error. A user
@@ -85,8 +105,11 @@ talks to the socket **directly** — the proxy was never in the loop being teste
 
 `socket-proxy.integration.test.ts` now closes that: it reads the proxy's environment out of
 `compose.yaml`, starts a proxy configured exactly that way, and drives pull → networks → create →
-start → inspect → exec → remove through it with dockerode. Adding a new Docker call here means
-adding it to that test and, if the allow-list refuses it, to `compose.yaml` and `docs/security.md`.
+start → inspect → exec → remove through it with dockerode. The remove sends the runner's own
+`CONTAINER_REMOVE_OPTIONS` and is awaited, not left to the `finally` — that cleanup swallows its
+error, and a cleanup that eats a `403` proves nothing. Adding a new Docker call here, or a new option
+on an existing one, means adding it to that test and, if the allow-list refuses it, to
+`compose.yaml` and `docs/security.md`.
 
 Note what the proxy is and is not: it removes endpoints this package never calls, which reduces
 accidental surface. It is **not** containment — `CONTAINERS` plus `POST` accepts a create carrying
@@ -111,6 +134,13 @@ reproduces the cut against a short timeout and asserts the shipped config disabl
 > itself, so there is no way to encrypt inline. Mitigation: a dedicated volume, `0700`, deletion
 > in the `finally`, and **an encrypted filesystem on the host** — that last one is the operator's
 > responsibility and has to be in the deployment documentation.
+
+> **Scratch is not the only cleartext a job puts on the host.** A FULL_RESTORE verify restores into
+> a sandbox whose data directory is the image's anonymous volume, under Docker's data root — not
+> under scratch, and in `STREAM` mode as much as in `STAGED`. It lives exactly as long as the
+> sandbox container, which is why removal passes `v: true` (above). Residual risk, the same shape as
+> scratch's: a `SIGKILL` before teardown leaves the sandbox **running**, volume and all, and nothing
+> sweeps containers today (there is no label to find them by). See `docs/security.md`.
 
 > **Graceful `SIGTERM`:** the server installs the handler (`jobs/shutdown.ts`), not the runner. On
 > the signal it stops claiming new jobs, aborts the shared `AbortSignal` — which makes the

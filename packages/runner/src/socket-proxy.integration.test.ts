@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Docker from "dockerode";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CONTAINER_REMOVE_OPTIONS } from "./docker.js";
 
 const enabled = process.env.SCHRODUMP_TEST_INTEGRATION === "1";
 const PROXY_IMAGE = "tecnativa/docker-socket-proxy:v0.4.2";
@@ -125,8 +126,13 @@ describe.skipIf(!enabled)("the deployment's socket proxy permits what the runner
       });
       const inspected = await exec.inspect();
       expect(inspected.ExitCode).toBe(0);
+
+      // Remove, with the options the runner sends — `v` included, because the sandbox's anonymous
+      // volume holds the restored database. Awaited here rather than left to the finally: the
+      // finally is cleanup and swallows its error, and a cleanup that eats a 403 proves nothing.
+      await container.remove({ ...CONTAINER_REMOVE_OPTIONS });
     } finally {
-      await container.remove({ force: true }).catch(() => undefined);
+      await container.remove({ ...CONTAINER_REMOVE_OPTIONS }).catch(() => undefined);
     }
   }, 300_000);
 });
