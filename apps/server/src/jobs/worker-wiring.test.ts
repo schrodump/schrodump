@@ -11,8 +11,13 @@ import {
   type TargetFacts,
 } from "@schrodump/engines/descriptor";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
+import type { EngineKind } from "@schrodump/core/types";
+import { resolveAdapter } from "@schrodump/engines/registry";
 import { loadEnv } from "../env.js";
+import { runBackupJob, type BackupPorts, type ProbeResult } from "./backup.js";
+import type { ExecutionMode } from "./execution-mode.js";
 import {
+  backupContextFor,
   buildDumpDescriptorFor,
   createJobExecutor,
   createWorkerStore,
@@ -511,7 +516,7 @@ describe("dumpScopeFor", () => {
   const probeFound = { databases: ["admin", "config", "local", "shop"], schemas: [], collections: [] };
 
   it("gives mongodb an EMPTY scope for an unscoped target, which is what --oplog requires", () => {
-    expect(dumpScopeFor("mongodb", probeFound, [], [])).toEqual({
+    expect(dumpScopeFor("mongodb", probeFound, [], [], "STREAM")).toEqual({
       databases: [],
       schemas: [],
       collections: [],
@@ -519,17 +524,37 @@ describe("dumpScopeFor", () => {
   });
 
   it("still narrows mongodb to a scoped target", () => {
-    expect(dumpScopeFor("mongodb", probeFound, ["shop"], [])).toEqual({
+    expect(dumpScopeFor("mongodb", probeFound, ["shop"], [], "STREAM")).toEqual({
       databases: ["shop"],
       schemas: [],
       collections: [],
     });
   });
 
+  // mydumper copies the one database `-B` names. A root credential discovers `mysql` and `sys`
+  // beside the database the operator picked, so the probe cannot be what a STAGED dump is told.
+  it("hands a STAGED mysql/mariadb dump the target's selection, never the probe's discovery", () => {
+    const rootFound = { databases: ["mysql", "shop", "sys"], schemas: [], collections: [] };
+    for (const engine of ["mysql", "mariadb"] as const) {
+      expect(dumpScopeFor(engine, rootFound, ["shop"], [], "STAGED")).toEqual({
+        databases: ["shop"],
+        schemas: [],
+        collections: [],
+      });
+      // Unscoped stays unscoped, so the adapter refuses it instead of guessing a database.
+      expect(dumpScopeFor(engine, rootFound, [], [], "STAGED").databases).toEqual([]);
+    }
+  });
+
+  it("does not narrow a STAGED postgres dump, which copies the database its connection opens", () => {
+    const discovered = { databases: ["app"], schemas: ["public"], collections: [] };
+    expect(dumpScopeFor("postgres", discovered, ["app"], [], "STAGED").databases).toEqual(["app"]);
+  });
+
   it("leaves mysql/mariadb reading the probe, where scope is discovery rather than intent", () => {
     for (const engine of ["mysql", "mariadb"] as const) {
-      expect(dumpScopeFor(engine, probeFound, [], [])).toBe(probeFound);
-      expect(dumpScopeFor(engine, probeFound, ["ignored"], ["ignored"])).toBe(probeFound);
+      expect(dumpScopeFor(engine, probeFound, [], [], "STREAM")).toBe(probeFound);
+      expect(dumpScopeFor(engine, probeFound, ["ignored"], ["ignored"], "STREAM")).toBe(probeFound);
     }
   });
 
@@ -538,7 +563,7 @@ describe("dumpScopeFor", () => {
   // using citext FAILED with `type "public.citext" does not exist`, under SUCCEEDED backups.
   it("never lets the probe's discovered schemas scope a postgres dump", () => {
     const discovered = { databases: ["app"], schemas: ["public", "audit"], collections: [] };
-    expect(dumpScopeFor("postgres", discovered, ["app"], [])).toEqual({
+    expect(dumpScopeFor("postgres", discovered, ["app"], [], "STREAM")).toEqual({
       databases: ["app"],
       schemas: [],
       collections: [],
@@ -547,7 +572,7 @@ describe("dumpScopeFor", () => {
 
   it("still honours a schema scope the operator set on the target — intent, not discovery", () => {
     const discovered = { databases: ["app"], schemas: ["public", "audit"], collections: [] };
-    expect(dumpScopeFor("postgres", discovered, ["app"], ["audit"]).schemas).toEqual(["audit"]);
+    expect(dumpScopeFor("postgres", discovered, ["app"], ["audit"], "STREAM").schemas).toEqual(["audit"]);
   });
 });
 
@@ -754,5 +779,171 @@ describe("buildDumpDescriptorFor", () => {
     build("STREAM", 1, probe(["shop", "billing", "mysql"]));
 
     expect(calls).toHaveLength(1);
+  });
+});
+
+// The seam the defect lived in: the target's selection -> the execution mode -> the descriptor.
+// An unscoped mysql target with parallelism > 1 went STAGED, and mydumper was handed `-B mysql` —
+// the system schema an unscoped target connects through. The job SUCCEEDED over an artifact holding
+// no user data, and its verify (unscoped, so downgraded to CHECKSUM) made it VERIFIED.
+describe("backupContextFor — routing a backup by what its target selects", () => {
+  // A root credential: the probe discovers the system schemas beside the operator's databases.
+  const ROOT_PROBE: ProbeResult = {
+    serverVersionNum: 80036,
+    scope: { databases: ["billing", "mysql", "shop", "sys"], schemas: [], collections: [] },
+    estimatedBytes: 1_000_000,
+  };
+  const facts: TargetFacts = { isReplicaSet: false, hasMyisam: false };
+
+  // runBackupJob over fake ports, with the REAL adapter building the descriptor the executor would
+  // run — so what is asserted is the command, not only the mode it was built for.
+  async function backUp(engine: EngineKind, scopedDatabases: string[], requestedParallelism: number) {
+    const connectDatabase = scopedDatabases[0] ?? (engine === "postgres" ? "postgres" : "mysql");
+    const buildDescriptor = buildDumpDescriptorFor({
+      adapter: resolveAdapter(engine),
+      engine,
+      connection: {
+        host: "db",
+        port: 3306,
+        database: connectDatabase,
+        username: "root",
+        password: "pw",
+        tls: false,
+      },
+      scopedDatabases,
+      scopedSchemas: [],
+      facts,
+      stagingPathFor: () => "/scratch/job-1",
+    });
+    const executed: { mode: ExecutionMode; parallelism: number; command: string[] }[] = [];
+    const reasons: string[] = [];
+    let reserved = false;
+    const ports: BackupPorts = {
+      setState: (state, reason) => {
+        if (state !== "RUNNING") reasons.push(`${state}:${reason ?? ""}`);
+        return Promise.resolve();
+      },
+      // A postgres server version for postgres, or its adapter refuses the image before anything.
+      probe: () =>
+        Promise.resolve(engine === "postgres" ? { ...ROOT_PROBE, serverVersionNum: 170_011 } : ROOT_PROBE),
+      capabilities: () => ({ stagedCapable: true, maxParallelism: 8, requiresSeparateGlobalsDump: false }),
+      reserveScratch: () => {
+        reserved = true;
+        return Promise.resolve({ release: () => Promise.resolve() });
+      },
+      resolveRecipients: () => Promise.resolve({ recipients: ["age1op"], keyIds: ["op"] }),
+      executeAndUpload: ({ mode, parallelism, probe }) => {
+        executed.push({ mode, parallelism, command: buildDescriptor(mode, parallelism, probe).command });
+        return Promise.resolve({
+          bucketKey: "k/artifact.bin",
+          manifestKey: "k/manifest.json",
+          sizeRawBytes: 10,
+          sizeCompressedBytes: 5,
+          checksumAlgorithm: "sha256",
+          checksum: "abc",
+        });
+      },
+      executeGlobals: () => Promise.resolve(),
+      writeManifest: () => Promise.resolve(),
+      persistArtifact: () => Promise.resolve("artifact-1"),
+    };
+
+    const outcome = await runBackupJob(
+      backupContextFor({
+        jobId: "job-1",
+        organizationId: "org-1",
+        engine,
+        scopedDatabases,
+        requestedParallelism,
+        stagedThresholdBytes: undefined,
+        scratchConfigured: true,
+      }),
+      ports,
+    );
+    return { outcome, executed, reasons, reserved };
+  }
+
+  it("streams an unscoped mysql target with parallelism 4, every database in one mysqldump", async () => {
+    const { outcome, executed, reasons, reserved } = await backUp("mysql", [], 4);
+
+    expect(outcome.ok).toBe(true);
+    expect(executed).toHaveLength(1);
+    expect(executed[0]).toMatchObject({ mode: "STREAM", parallelism: 1 });
+    expect(executed[0]!.command[0]).toBe("mysqldump");
+    expect(executed[0]!.command.slice(-5)).toEqual(["--databases", "billing", "mysql", "shop", "sys"]);
+    expect(reserved).toBe(false);
+    // And the job says why it did not stage.
+    expect(reasons).toEqual([
+      "SUCCEEDED:staged unavailable: mydumper dumps a single database and this target is unscoped — streamed instead",
+    ]);
+  });
+
+  it("streams a mysql target selecting two databases, rather than stage the first", async () => {
+    const { executed, reasons } = await backUp("mysql", ["shop", "billing"], 4);
+
+    expect(executed[0]).toMatchObject({ mode: "STREAM", parallelism: 1 });
+    expect(reasons[0]).toMatch(/selects 2 databases/);
+  });
+
+  it("still stages a mysql target selecting one database — mydumper -B that one, not the probe's list", async () => {
+    // The compose smoke's own shape: a root credential, a scope of one, parallelism > 1.
+    const { executed, reasons, reserved } = await backUp("mysql", ["shop"], 4);
+
+    expect(executed[0]).toMatchObject({ mode: "STAGED", parallelism: 4 });
+    expect(executed[0]!.command[0]).toBe("mydumper");
+    const at = executed[0]!.command.indexOf("-B");
+    expect(executed[0]!.command.slice(at, at + 2)).toEqual(["-B", "shop"]);
+    expect(reserved).toBe(true);
+    expect(reasons).toEqual(["SUCCEEDED:"]);
+  });
+
+  it("routes mariadb the same way, since it shares the adapter", async () => {
+    const { executed } = await backUp("mariadb", [], 4);
+    expect(executed[0]).toMatchObject({ mode: "STREAM", parallelism: 1 });
+  });
+
+  it("leaves postgres staging as before: it copies the database its connection opens", async () => {
+    const { executed } = await backUp("postgres", ["shop"], 4);
+    expect(executed[0]).toMatchObject({ mode: "STAGED", parallelism: 4 });
+  });
+
+  it("hands resolveExecutionMode the selection for mysql/mariadb and nothing for the others", () => {
+    const base = {
+      jobId: "job-1",
+      organizationId: "org-1",
+      requestedParallelism: 4,
+      stagedThresholdBytes: undefined,
+      scratchConfigured: true,
+    };
+    expect(backupContextFor({ ...base, engine: "mysql", scopedDatabases: [] }).singleDatabaseStagingScope).toEqual([]);
+    expect(
+      backupContextFor({ ...base, engine: "mariadb", scopedDatabases: ["shop"] }).singleDatabaseStagingScope,
+    ).toEqual(["shop"]);
+    for (const engine of ["postgres", "mongodb"] as const) {
+      expect(backupContextFor({ ...base, engine, scopedDatabases: ["shop"] }).singleDatabaseStagingScope).toBeNull();
+    }
+  });
+
+  // Defense in depth, through the wiring: should anything route an unscoped mysql target to STAGED
+  // again, the adapter refuses with a reason backup.ts writes verbatim, instead of dumping `mysql`.
+  it("refuses a STAGED unscoped mysql dump at the adapter if anything routes one there", () => {
+    const build = buildDumpDescriptorFor({
+      adapter: resolveAdapter("mysql"),
+      engine: "mysql",
+      connection: { host: "db", port: 3306, database: "mysql", username: "root", password: "pw", tls: false },
+      scopedDatabases: [],
+      scopedSchemas: [],
+      facts,
+      stagingPathFor: () => "/scratch/job-1",
+    });
+
+    let thrown: unknown;
+    try {
+      build("STAGED", 4, ROOT_PROBE);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(EngineDescriptorError);
+    expect((thrown as EngineDescriptorError).code).toBe("MYSQL_STAGED_REQUIRES_ONE_DATABASE");
   });
 });

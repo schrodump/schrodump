@@ -156,6 +156,55 @@ describe("mysqlAdapter.buildDump", () => {
       EngineDescriptorError,
     );
   });
+
+  // mydumper copies exactly the one database -B names. This read `-B connection.database`, and an
+  // unscoped target connects through `mysql`, the system schema: the dump exited 0 over no user
+  // data, and a multi-database scope kept only its first database the same way.
+  describe("STAGED names exactly one database", () => {
+    const staged = (databases: string[], connectionDatabase = "app"): DumpInput =>
+      dumpInput({
+        executionMode: "STAGED",
+        parallelism: 4,
+        stagingPath: "/scratch/out",
+        connection: { ...CONN, database: connectionDatabase },
+        scope: { databases, schemas: [], collections: [] },
+      });
+
+    function refusal(input: DumpInput): EngineDescriptorError {
+      try {
+        mysqlAdapter.buildDump(input);
+      } catch (error) {
+        if (error instanceof EngineDescriptorError) return error;
+        throw error;
+      }
+      throw new Error("expected buildDump to refuse");
+    }
+
+    it("refuses an empty scope rather than dumping the database the connection opens", () => {
+      const error = refusal(staged([], "mysql"));
+      expect(error.code).toBe("MYSQL_STAGED_REQUIRES_ONE_DATABASE");
+      expect(error.message).toMatch(/names none/);
+    });
+
+    it("refuses two databases rather than keeping the first, and names them", () => {
+      const error = refusal(staged(["shop", "billing"], "shop"));
+      expect(error.code).toBe("MYSQL_STAGED_REQUIRES_ONE_DATABASE");
+      expect(error.message).toMatch(/names 2: shop, billing/);
+    });
+
+    it("refuses a scope whose only entry is an empty name", () => {
+      expect(refusal(staged([""])).code).toBe("MYSQL_STAGED_REQUIRES_ONE_DATABASE");
+    });
+
+    it("dumps the scope's database, not the one the connection happens to open", () => {
+      const command = mysqlAdapter.buildDump(staged(["shop"], "mysql")).command;
+      expect(command.slice(command.indexOf("-B"), command.indexOf("-B") + 2)).toEqual(["-B", "shop"]);
+    });
+
+    it("holds for mariadb, which shares the adapter", () => {
+      expect(() => mariadbAdapter.buildDump(staged([], "mysql"))).toThrow(EngineDescriptorError);
+    });
+  });
 });
 
 describe("mariadbAdapter TLS flag", () => {

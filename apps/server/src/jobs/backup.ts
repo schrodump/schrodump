@@ -42,6 +42,8 @@ export interface BackupContext {
   // Absent means size never selects STAGED — see resolveExecutionMode's note.
   stagedThresholdBytes?: number;
   scratchConfigured: boolean;
+  // Required, and passed straight through — see resolveExecutionMode's note on it.
+  singleDatabaseStagingScope: readonly string[] | null;
 }
 
 export interface BackupPorts {
@@ -102,6 +104,7 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
         : {}),
       stagedCapable: caps.stagedCapable,
       maxParallelism: caps.maxParallelism,
+      singleDatabaseStagingScope: ctx.singleDatabaseStagingScope,
     });
     // Unreachable while STAGED is disabled (resolveExecutionMode explains why). Kept, not deleted:
     // the directory pipeline that re-enables STAGED needs exactly this reserve/release lifecycle.
@@ -128,7 +131,14 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
       recipients,
       upload,
     });
-    await ports.setState("SUCCEEDED");
+    // A degradation is written on the job it happened to. The warnings were returned in the outcome
+    // and read by nobody, so a policy asking for parallelism 4 over an unscoped mysql target would
+    // stream at 1 with no trace of why. The ledger already shows a SUCCEEDED job's reason as what
+    // the run reported.
+    await ports.setState(
+      "SUCCEEDED",
+      mode.warnings.length > 0 ? mode.warnings.join("; ") : undefined,
+    );
     return { ok: true, artifactId, mode: mode.mode, warnings: mode.warnings };
   } catch (error) {
     await ports.setState("FAILED", error instanceof Error ? error.message : "unknown error");

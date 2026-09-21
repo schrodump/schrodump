@@ -11,6 +11,7 @@ const base: ExecutionModeInput = {
   stagedThresholdBytes: 1000,
   stagedCapable: true,
   maxParallelism: 8,
+  singleDatabaseStagingScope: null,
 };
 
 describe("resolveExecutionMode", () => {
@@ -56,6 +57,7 @@ describe("resolveExecutionMode", () => {
         scratchConfigured: base.scratchConfigured,
         stagedCapable: base.stagedCapable,
         maxParallelism: base.maxParallelism,
+        singleDatabaseStagingScope: base.singleDatabaseStagingScope,
         estimatedBytes: 1_000_000_000_000,
       }).mode,
     ).toBe("STREAM");
@@ -118,5 +120,79 @@ describe("resolveExecutionMode — the engine's parallelism ceiling", () => {
     expect(decision.warnings).toEqual([
       "parallelism unavailable: this engine does not support staged parallel dumps",
     ]);
+  });
+});
+
+// mydumper is handed `-B <db>` and copies exactly that database. An unscoped mysql target connects
+// through `mysql`, the system schema, so parallelism > 1 used to STAGE `mysql` alone: the job
+// SUCCEEDED, the artifact held no user data, and the unscoped verify — downgraded to CHECKSUM —
+// made it VERIFIED. A multi-database selection kept only its first database the same way.
+describe("resolveExecutionMode — a single-database stager", () => {
+  const mysql = (scope: string[]): ExecutionModeInput => ({ ...base, singleDatabaseStagingScope: scope });
+
+  it("streams an unscoped target that asked for parallelism, and says why", () => {
+    const decision = resolveExecutionMode({ ...mysql([]), requestedParallelism: 4 });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.parallelism).toBe(1);
+    expect(decision.warnings).toEqual([
+      "staged unavailable: mydumper dumps a single database and this target is unscoped — streamed instead",
+    ]);
+  });
+
+  it("streams a target that selects two databases, rather than keep the first", () => {
+    const decision = resolveExecutionMode({ ...mysql(["shop", "billing"]), requestedParallelism: 4 });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.parallelism).toBe(1);
+    expect(decision.warnings).toEqual([
+      "staged unavailable: mydumper dumps a single database and this target selects 2 databases — streamed instead",
+    ]);
+  });
+
+  it("stages a target that selects exactly one database, at the parallelism it asked for", () => {
+    const decision = resolveExecutionMode({ ...mysql(["shop"]), requestedParallelism: 4 });
+
+    expect(decision.mode).toBe("STAGED");
+    expect(decision.parallelism).toBe(4);
+    expect(decision.warnings).toEqual([]);
+  });
+
+  it("holds on the size-threshold path too, which reaches STAGED without any parallelism", () => {
+    const decision = resolveExecutionMode({ ...mysql([]), estimatedBytes: 5000, stagedThresholdBytes: 1000 });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.warnings.join(" ")).toMatch(/unscoped/);
+    // And a single database still stages above the threshold.
+    expect(
+      resolveExecutionMode({ ...mysql(["shop"]), estimatedBytes: 5000, stagedThresholdBytes: 1000 }).mode,
+    ).toBe("STAGED");
+  });
+
+  it("reads a legacy empty-string entry as unscoped, not as one database named nothing", () => {
+    const decision = resolveExecutionMode({ ...mysql([""]), requestedParallelism: 4 });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.warnings.join(" ")).toMatch(/unscoped/);
+  });
+
+  it("says nothing when STAGED was never going to be chosen", () => {
+    // Parallelism 1 below the threshold streams anyway; a warning would describe a degradation
+    // that did not happen.
+    expect(resolveExecutionMode(mysql([]))).toEqual({ mode: "STREAM", parallelism: 1, warnings: [] });
+  });
+
+  it("keeps the missing-scratch reason when that is what stopped STAGED first", () => {
+    const decision = resolveExecutionMode({ ...mysql([]), requestedParallelism: 4, scratchConfigured: false });
+
+    expect(decision.mode).toBe("STREAM");
+    expect(decision.warnings).toEqual(["parallelism unavailable: scratch is not configured on this deploy"]);
+  });
+
+  it("leaves an engine that passes null — postgres — staging as before", () => {
+    const decision = resolveExecutionMode({ ...base, requestedParallelism: 4 });
+
+    expect(decision.mode).toBe("STAGED");
+    expect(decision.parallelism).toBe(4);
   });
 });

@@ -204,7 +204,10 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 > than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the
 > scratch volume sized for it and it writes the dump to disk in clear before uploading. Setting a
 > threshold opts every database above that size into it silently; `parallelism > 1` on a policy is
-> the explicit, per-policy way in, and the one to reach for first.
+> the explicit, per-policy way in, and the one to reach for first. Neither applies to a mysql/mariadb
+> target that is unscoped or selects several databases: a staged mysql dump (`mydumper`) copies
+> exactly one database, so such a target is streamed whatever the policy asks, and the job's reason
+> says so.
 
 ### Email notifications to an internal relay
 

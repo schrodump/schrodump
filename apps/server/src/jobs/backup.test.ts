@@ -32,6 +32,7 @@ const CTX: BackupContext = {
   requestedParallelism: 1,
   stagedThresholdBytes: 1000,
   scratchConfigured: true,
+  singleDatabaseStagingScope: null,
 };
 
 interface Harness {
@@ -146,5 +147,41 @@ describe("runBackupJob", () => {
     const h = makeHarness();
     await runBackupJob(CTX, h.ports);
     for (const state of h.persistedStates) expect(state).not.toBe("VERIFIED");
+  });
+
+  // The mode's warnings were returned in the outcome and read by nobody: a policy asking for
+  // parallelism 4 over an unscoped mysql target streamed at 1, and nothing anywhere said why.
+  it("writes an execution-mode degradation onto the SUCCEEDED job", async () => {
+    const reasons: (string | undefined)[] = [];
+    const h = makeHarness({
+      setState: (state, reason) => {
+        if (state === "SUCCEEDED") reasons.push(reason);
+        return Promise.resolve();
+      },
+    });
+
+    const outcome = await runBackupJob(
+      { ...CTX, requestedParallelism: 4, singleDatabaseStagingScope: [] },
+      h.ports,
+    );
+
+    expect(outcome.mode).toBe("STREAM");
+    expect(reasons).toEqual([
+      "staged unavailable: mydumper dumps a single database and this target is unscoped — streamed instead",
+    ]);
+  });
+
+  it("leaves the SUCCEEDED job without a reason when nothing degraded", async () => {
+    const reasons: (string | undefined)[] = [];
+    const h = makeHarness({
+      setState: (state, reason) => {
+        if (state === "SUCCEEDED") reasons.push(reason);
+        return Promise.resolve();
+      },
+    });
+
+    await runBackupJob(CTX, h.ports);
+
+    expect(reasons).toEqual([undefined]);
   });
 });
