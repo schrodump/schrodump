@@ -17,6 +17,23 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   request: it reads policies cross-organization and writes `organizationId`-scoped jobs. Idempotent
   per `(policyId, scheduledAt)`; orphan recovery marks `RUNNING → FAILED` at boot. The worker
   (`jobs/claim.ts` + `jobs/worker-wiring.ts`) is the other system process with the same status.
+  - **Every cron is read through `scheduler/cron.ts`, on the instance zone (`SCHRODUMP_TZ`).** The
+    policy route validates with it (400 on `cron`, create and PATCH), the scheduler takes windows
+    from it, the notification cadence is measured with it, and `GET /policies` answers `nextRunAt`
+    from it. Before, the route accepted any non-empty string and nothing passed a zone: a stored
+    `0 0 30 2 *` threw inside every tick, and every cron ran on the container's UTC while the UI
+    read it on the viewer's clock (a São Paulo `0 2 * * *` ran at 23:00 their time). The grammar is
+    the UI's five fields — a seconds field can name a new window every second, a new job per tick.
+    `canEverFire` refuses a day of month no listed month has (cron-parser only checks the
+    one-month case, and for `0 0 31 4,6 *` hands back a 1962 window instead of throwing), and `H`
+    is seeded by the expression (unseeded it is random per parse — a new window every tick).
+  - **Each policy is its own attempt, and so is each pass of the tick.** `dispatchDueJobs` catches,
+    logs `policyId` + reason once per tick, and moves on; the tick's passes (dispatch, fleet
+    notifications, job events) run through `runTickPasses` (`scheduler/tick.ts`). One unreadable
+    cron used to stop every policy listed after it and — because the notification passes were
+    awaited after dispatch in the same callback — every notification too. A stored policy the
+    scheduler cannot read is measured at the one-minute cadence floor by the notification pass, so
+    POLICY_QUIET says it has stopped producing backups instead of the pass throwing.
 - `crypto/` — the three crypto domains (below) plus key provisioning. `probe/` — real connection
   testing.
 - `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — `scopedPrisma`;
@@ -139,8 +156,18 @@ the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_
 `SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
 `SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS`,
 `SCHRODUMP_STAGED_THRESHOLD_BYTES`, `SCHRODUMP_NOTIFY_MIN_GAP_MS`, `SCHRODUMP_TRUSTED_PROXIES`,
-and the self-backup trio (`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`, `_NETWORK`).
-An absent scratch path ⇒ STREAM-only (no staged/parallel).
+`SCHRODUMP_TZ`, and the self-backup trio (`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`,
+`_NETWORK`). An absent scratch path ⇒ STREAM-only (no staged/parallel).
+
+> **`SCHRODUMP_TZ` is the one clock every cron is read on (default `UTC`), and it is per
+> instance, not per policy or per viewer.** Validated with Intl — the zone database cron-parser
+> reads through Luxon and the browser renders with — and stored in its canonical spelling; an
+> unknown name, an empty value or a bare offset (`+03:00`: no DST rules, and older browsers cannot
+> render it) stops the boot naming the variable, rather than reaching cron-parser and throwing on
+> every tick. The process clock stays UTC; the zone is applied where a cron is read. `GET /me`
+> carries it (`timeZone`), because every role needs it and the policy form needs it before any
+> policy exists — `GET /instance` is admin-only, and turning `GET /policies`' bare array into an
+> envelope would have broken every client.
 
 > **`SCHRODUMP_ADMIN_EMAIL` is `z.email()` and `SCHRODUMP_ADMIN_PASSWORD` is `min(12)`,** the same
 > floor as `minPasswordLength` in `auth.ts`. Validating it here means a too-short value is a legible

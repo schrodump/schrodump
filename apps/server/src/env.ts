@@ -3,6 +3,20 @@
 
 import { z } from "zod";
 
+// The canonical spelling of an IANA zone, or null when the runtime does not know it. Intl is the
+// zone database cron-parser reads through Luxon and the one the browser renders with, so a name it
+// refuses is a name the scheduler cannot run a cron on. A bare offset ("+03:00") is refused even
+// where this runtime accepts one: it is not a zone, it carries no daylight-saving rules, and older
+// browsers cannot render a date in it.
+function canonicalTimeZone(value: string): string | null {
+  if (!/^[A-Za-z]/.test(value)) return null;
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   // Key-encryption key, base64 (decodes to 32 bytes). Losing it loses every encrypted backup.
@@ -48,6 +62,26 @@ const EnvSchema = z.object({
   WORKER_POLL_MS: z.coerce.number().int().default(2000),
   // How often the scheduler evaluates enabled policies and dispatches due backup jobs.
   SCHRODUMP_SCHEDULER_TICK_MS: z.coerce.number().int().default(30000),
+  // The zone every policy's cron is read in — one per instance, IANA name. The container runs UTC,
+  // and before this existed every cron ran on that clock while the interface read it on the
+  // viewer's: "0 2 * * *" for a São Paulo operator said 02:00 and ran at 23:00. Now the scheduler,
+  // the notification cadence, the validation and the UI all read it on this one, and the UI says
+  // which. Checked here so a typo is a boot failure naming the variable, not a scheduler that throws
+  // on every tick. Empty is invalid, not "unset": compose passes it through only when set.
+  SCHRODUMP_TZ: z
+    .string()
+    .transform((value, ctx) => {
+      const zone = canonicalTimeZone(value);
+      if (zone === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "SCHRODUMP_TZ must be an IANA time zone name, such as UTC or America/Sao_Paulo",
+        });
+        return z.NEVER;
+      }
+      return zone;
+    })
+    .default("UTC"),
   // Bounds the awaited drain on SIGTERM. Kept under docker's default 10s stop grace so the abort +
   // scratch cleanup finish before SIGKILL. The abort itself is sub-second; this only caps a wedged
   // Docker teardown from holding the process past the window.

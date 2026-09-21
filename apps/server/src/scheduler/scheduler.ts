@@ -9,7 +9,8 @@ export interface ScheduledPolicy {
 
 export interface CronEvaluator {
   // The most recent window that has fired at or before `now` for this cron expression. The
-  // idempotency key on the job dedupes repeated ticks landing on the same window.
+  // idempotency key on the job dedupes repeated ticks landing on the same window. Throws for an
+  // expression the scheduler cannot read (see cron.ts).
   currentWindow(cron: string, now: Date): Date;
 }
 
@@ -32,23 +33,41 @@ export interface SchedulerDeps {
   cron: CronEvaluator;
   now(): Date;
   newCorrelationId(): string;
+  log: { error(o: Record<string, unknown>, m: string): void };
 }
 
 // Evaluates each enabled policy and idempotently dispatches a job for its current window. Because
 // creation is keyed on (policyId, scheduledAt), a duplicate tick (or a second replica) never
 // creates a second job. Returns the jobIds actually created this tick.
+//
+// Each policy is its own attempt. One stored "0 0 30 2 *" used to throw out of this loop on every
+// tick, and every policy after it in the list — every other organization's too — went
+// unscheduled for as long as it stayed there. A policy that cannot be dispatched is skipped and
+// logged, once per tick, for as long as it stays broken; the others do not wait on it.
 export async function dispatchDueJobs(deps: SchedulerDeps): Promise<string[]> {
   const now = deps.now();
   const created: string[] = [];
   for (const policy of await deps.store.enabledPolicies()) {
-    const scheduledAt = deps.cron.currentWindow(policy.cron, now);
-    const jobId = await deps.store.createScheduledJob({
-      organizationId: policy.organizationId,
-      policyId: policy.id,
-      scheduledAt,
-      correlationId: deps.newCorrelationId(),
-    });
-    if (jobId !== null) created.push(jobId);
+    try {
+      const scheduledAt = deps.cron.currentWindow(policy.cron, now);
+      const jobId = await deps.store.createScheduledJob({
+        organizationId: policy.organizationId,
+        policyId: policy.id,
+        scheduledAt,
+        correlationId: deps.newCorrelationId(),
+      });
+      if (jobId !== null) created.push(jobId);
+    } catch (err) {
+      deps.log.error(
+        {
+          policyId: policy.id,
+          organizationId: policy.organizationId,
+          cron: policy.cron,
+          reason: err instanceof Error ? err.message : String(err),
+        },
+        "scheduler skipped a policy it could not dispatch",
+      );
+    }
   }
   return created;
 }

@@ -29,23 +29,46 @@ export interface NotificationDeps {
   // unobserved between finishing and its chained verify. Below this age the previous snapshot is
   // treated as absent, so "the count did not come down" cannot fire on a healthy backup.
   minEvaluationGapMs: number;
+  // The instance zone (SCHRODUMP_TZ) — the clock the scheduler reads every cron on. The cadence
+  // below has to be measured on the same one: across a DST change, "every day at 02:00" is 23 or
+  // 25 hours apart on the zone's clock and exactly 24 on UTC's.
+  timeZone: string;
 }
+
+const MIN_INTERVAL_MS = 60_000;
 
 // Expected cadence for a policy, as the distance between two consecutive windows. CronEvaluator
 // only answers "the window at or before this instant", which is enough: ask for the current one,
 // then for the one just before it. Floored at a minute so a pathological expression cannot make the
 // quiet-policy deadline effectively zero and alert on every tick.
-function expectedIntervalMs(cron: string, now: Date): number {
-  const evaluator = cronEvaluator();
+function expectedIntervalMs(cron: string, now: Date, timeZone: string): number {
+  const evaluator = cronEvaluator(timeZone);
   const current = evaluator.currentWindow(cron, now);
   const previous = evaluator.currentWindow(cron, new Date(current.getTime() - 1));
-  return Math.max(current.getTime() - previous.getTime(), 60_000);
+  return Math.max(current.getTime() - previous.getTime(), MIN_INTERVAL_MS);
 }
 
 export async function runNotifications(deps: NotificationDeps): Promise<number> {
   const now = deps.now();
   const orgs = await deps.prisma.organization.findMany({ select: { id: true } });
   let delivered = 0;
+
+  // A cron the scheduler cannot read used to throw from here and end the pass for every
+  // organization — no alert anywhere, on the tick the scheduler stopped running that policy. Its
+  // cadence falls back to the one-minute floor instead: the scheduler skips the policy on every
+  // tick, so it will never produce a scheduled backup, and POLICY_QUIET — the trigger for a policy
+  // that has stopped producing them — is exactly what should say so, at the earliest moment it can.
+  const cadenceOf = (policy: { id: string; cron: string }, at: Date): number => {
+    try {
+      return expectedIntervalMs(policy.cron, at, deps.timeZone);
+    } catch (err) {
+      deps.log.error(
+        { policyId: policy.id, cron: policy.cron, reason: err instanceof Error ? err.message : String(err) },
+        "notification pass cannot read a policy's cron; treating it as quiet",
+      );
+      return MIN_INTERVAL_MS;
+    }
+  };
 
   for (const org of orgs) {
     const channels = await deps.prisma.notificationChannel.findMany({
@@ -77,7 +100,7 @@ export async function runNotifications(deps: NotificationDeps): Promise<number> 
         return {
           id: p.id,
           name: p.name,
-          expectedIntervalMs: expectedIntervalMs(p.cron, now),
+          expectedIntervalMs: cadenceOf(p, now),
           lastSucceededAt: last?.finishedAt ?? null,
         };
       }),

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { describe, expect, it } from "vitest";
+import { cronEvaluator } from "./wiring.js";
 import {
   dispatchDueJobs,
   recoverOrphanedJobs,
@@ -44,12 +45,14 @@ class FakeStore implements SchedulerStore {
   }
 }
 
-function makeDeps(store: SchedulerStore): SchedulerDeps {
+function makeDeps(store: SchedulerStore, over: Partial<SchedulerDeps> = {}): SchedulerDeps {
   return {
     store,
     cron: fixedCron,
     now: () => new Date("2026-07-23T00:05:00Z"),
     newCorrelationId: () => "corr",
+    log: { error: () => undefined },
+    ...over,
   };
 }
 
@@ -64,6 +67,31 @@ describe("dispatchDueJobs", () => {
     await dispatchDueJobs(makeDeps(store));
     await dispatchDueJobs(makeDeps(store)); // same window again
     expect(store.createdCount).toBe(1);
+  });
+
+  // SC-02, reproduced on a live deployment: POST /policies accepted "0 0 30 2 *", and from the next
+  // tick cron-parser threw out of this loop — every policy listed after it, in every organization,
+  // stopped being dispatched. The real evaluator, so the throw is the one production saw.
+  it("dispatches every other policy past one whose cron cannot be read, and says which it skipped", async () => {
+    const store = new FakeStore();
+    store.policies = [
+      { id: "before", organizationId: "o1", cron: "0 0 * * *" },
+      { id: "feb-30", organizationId: "o2", cron: "0 0 30 2 *" },
+      { id: "after", organizationId: "o3", cron: "0 0 * * *" },
+    ];
+    const logged: Array<{ o: Record<string, unknown>; m: string }> = [];
+    const created = await dispatchDueJobs(
+      makeDeps(store, {
+        cron: cronEvaluator("UTC"),
+        log: { error: (o, m) => logged.push({ o, m }) },
+      }),
+    );
+
+    expect(created).toHaveLength(2);
+    expect([...store.seen].map((key) => key.split("|")[0])).toEqual(["before", "after"]);
+    // Once, for the one it skipped, naming it and what the parser said.
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.o).toMatchObject({ policyId: "feb-30", reason: expect.stringMatching(/day of month/i) });
   });
 });
 

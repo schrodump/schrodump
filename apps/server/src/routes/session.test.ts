@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
 import { sessionRoutes } from "./session.js";
 
-async function appWith(ctx: AuthContext | null) {
+async function appWith(ctx: AuthContext | null, timeZone = "UTC") {
   const app = Fastify();
   await app.register((instance) => {
-    sessionRoutes(() => Promise.resolve(ctx))(instance);
+    sessionRoutes(() => Promise.resolve(ctx), { timeZone })(instance);
     return Promise.resolve();
   });
   return app;
@@ -20,7 +20,19 @@ describe("GET /me", () => {
     const app = await appWith({ userId: "u1", organizationId: "o1", role: "operator" satisfies Role , mustChangePassword: false });
     const res = await app.inject({ method: "GET", url: "/me" });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body)).toEqual({ userId: "u1", organizationId: "o1", role: "operator" , mustChangePassword: false });
+    expect(JSON.parse(res.body)).toEqual({ userId: "u1", organizationId: "o1", role: "operator" , mustChangePassword: false, timeZone: "UTC" });
+    await app.close();
+  });
+
+  // The zone every cron is read in, for every role: the policy form previews the next run on the
+  // scheduler's clock before any policy exists, and a viewer reads the same schedules an admin does.
+  it("tells a viewer the instance's time zone", async () => {
+    const app = await appWith(
+      { userId: "u2", organizationId: "o1", role: "viewer", mustChangePassword: false },
+      "America/Sao_Paulo",
+    );
+    const res = await app.inject({ method: "GET", url: "/me" });
+    expect((res.json() as { timeZone: string }).timeZone).toBe("America/Sao_Paulo");
     await app.close();
   });
 

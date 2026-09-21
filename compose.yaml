@@ -52,6 +52,10 @@ services:
       # either in .env got the server default and no indication the value had been ignored.
       SCHRODUMP_STAGED_THRESHOLD_BYTES:
       SCHRODUMP_NOTIFY_MIN_GAP_MS:
+      # The zone every policy's cron is read in (IANA name; UTC when unset). This container's own
+      # clock is UTC, and it stays that way: the zone is applied where a cron is read, not to the
+      # process. Passed through only when set — an empty value is invalid and stops the boot.
+      SCHRODUMP_TZ:
       # An SMTP relay whose certificate is signed by a CA this image's system store does not carry
       # — an internal Postfix, typically. Email is ALWAYS sent over TLS with strict verification;
       # this ADDS a CA to the trust set and there is deliberately no way to switch verification

@@ -4,29 +4,45 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
+import { cronProblem, nextWindow } from "../scheduler/cron.js";
 import { badRequest } from "./errors.js";
+
+// A cron is read by the parser the scheduler runs, on the instance's clock, before it is stored.
+// It used to be `z.string().min(1)`: "0 0 30 2 *" was accepted with a 201 and then threw inside
+// every scheduler tick. The refusal names the field and says why, in cron.ts's own sentence.
+function cronField(timeZone: string) {
+  return z
+    .string()
+    .min(1)
+    .superRefine((cron, ctx) => {
+      const problem = cronProblem(cron, timeZone);
+      if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
+    });
+}
 
 // verifyLevel default is CHECKSUM — verify is ON by default; turning it off (NONE) is an explicit
 // choice the UI must warn about.
-const CreatePolicySchema = z.object({
-  name: z.string().min(1),
-  targetId: z.string().min(1),
-  destinationId: z.string().min(1),
-  cron: z.string().min(1),
-  keepLast: z.number().int().min(0).default(0),
-  keepDaily: z.number().int().min(0).default(0),
-  keepWeekly: z.number().int().min(0).default(0),
-  keepMonthly: z.number().int().min(0).default(0),
-  keepYearly: z.number().int().min(0).default(0),
-  minAgeBeforeDeleteMs: z.number().int().min(0).default(0),
-  verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]).default("CHECKSUM"),
-  executionMode: z.enum(["STREAM", "STAGED"]).default("STREAM"),
-  parallelism: z.number().int().min(1).default(1),
-  compression: z.enum(["none", "zstd", "gzip"]).default("zstd"),
-  enabled: z.boolean().default(true),
-});
+function createPolicySchema(timeZone: string) {
+  return z.object({
+    name: z.string().min(1),
+    targetId: z.string().min(1),
+    destinationId: z.string().min(1),
+    cron: cronField(timeZone),
+    keepLast: z.number().int().min(0).default(0),
+    keepDaily: z.number().int().min(0).default(0),
+    keepWeekly: z.number().int().min(0).default(0),
+    keepMonthly: z.number().int().min(0).default(0),
+    keepYearly: z.number().int().min(0).default(0),
+    minAgeBeforeDeleteMs: z.number().int().min(0).default(0),
+    verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]).default("CHECKSUM"),
+    executionMode: z.enum(["STREAM", "STAGED"]).default("STREAM"),
+    parallelism: z.number().int().min(1).default(1),
+    compression: z.enum(["none", "zstd", "gzip"]).default("zstd"),
+    enabled: z.boolean().default(true),
+  });
+}
 
-export type CreatePolicyData = z.infer<typeof CreatePolicySchema>;
+export type CreatePolicyData = z.infer<ReturnType<typeof createPolicySchema>>;
 
 // Editable fields only, all optional, `.strict()` so a withheld field is a 400 rather than a silent
 // drop. `targetId` and `destinationId` are absent on purpose.
@@ -36,26 +52,28 @@ export type CreatePolicyData = z.infer<typeof CreatePolicySchema>;
 // one GFS chain; repointing the destination would leave every artifact already written to the old
 // one outside retention forever — never pruned, never attributable, and nothing about the policy
 // would look wrong. A policy that backs up something else is a new policy.
-const UpdatePolicySchema = z
-  .object({
-    name: z.string().min(1),
-    cron: z.string().min(1),
-    keepLast: z.number().int().min(0),
-    keepDaily: z.number().int().min(0),
-    keepWeekly: z.number().int().min(0),
-    keepMonthly: z.number().int().min(0),
-    keepYearly: z.number().int().min(0),
-    minAgeBeforeDeleteMs: z.number().int().min(0),
-    verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]),
-    executionMode: z.enum(["STREAM", "STAGED"]),
-    parallelism: z.number().int().min(1),
-    compression: z.enum(["none", "zstd", "gzip"]),
-    enabled: z.boolean(),
-  })
-  .partial()
-  .strict();
+function updatePolicySchema(timeZone: string) {
+  return z
+    .object({
+      name: z.string().min(1),
+      cron: cronField(timeZone),
+      keepLast: z.number().int().min(0),
+      keepDaily: z.number().int().min(0),
+      keepWeekly: z.number().int().min(0),
+      keepMonthly: z.number().int().min(0),
+      keepYearly: z.number().int().min(0),
+      minAgeBeforeDeleteMs: z.number().int().min(0),
+      verifyLevel: z.enum(["NONE", "CHECKSUM", "FULL_RESTORE"]),
+      executionMode: z.enum(["STREAM", "STAGED"]),
+      parallelism: z.number().int().min(1),
+      compression: z.enum(["none", "zstd", "gzip"]),
+      enabled: z.boolean(),
+    })
+    .partial()
+    .strict();
+}
 
-export type UpdatePolicyData = z.infer<typeof UpdatePolicySchema>;
+export type UpdatePolicyData = z.infer<ReturnType<typeof updatePolicySchema>>;
 
 export interface RemovePolicyResult {
   ok: boolean;
@@ -64,6 +82,15 @@ export interface RemovePolicyResult {
 
 export interface PolicyRecord extends CreatePolicyData {
   id: string;
+}
+
+// What the API answers with: the stored policy plus when the scheduler will next dispatch it.
+// Computed here, on the instance's clock, because the browser cannot: it runs on the viewer's, and
+// reading "0 2 * * *" there is how a São Paulo operator was told 02:00 for a job that ran at 23:00.
+// null when the policy is disabled (nothing will run) or when its cron cannot be read — one stored
+// before the route validated it, which the scheduler now skips on every tick.
+export interface PolicyView extends PolicyRecord {
+  nextRunAt: string | null;
 }
 
 export interface PolicyStore {
@@ -78,9 +105,29 @@ export interface PolicyStore {
 export interface PolicyRoutesDeps {
   resolver: SessionResolver;
   store(organizationId: string): PolicyStore;
+  // SCHRODUMP_TZ: the zone the scheduler reads every cron in. The validation and nextRunAt use it
+  // so neither can describe a different schedule from the one that runs.
+  timeZone: string;
+  now?: () => Date;
 }
 
 export function policyRoutes(deps: PolicyRoutesDeps) {
+  const CreatePolicySchema = createPolicySchema(deps.timeZone);
+  const UpdatePolicySchema = updatePolicySchema(deps.timeZone);
+  const now = deps.now ?? (() => new Date());
+
+  const view = (policy: PolicyRecord): PolicyView => {
+    let nextRunAt: string | null = null;
+    if (policy.enabled) {
+      try {
+        nextRunAt = nextWindow(policy.cron, now(), deps.timeZone).toISOString();
+      } catch {
+        // An unreadable stored cron: the list still answers, and the row says why it will not run.
+      }
+    }
+    return { ...policy, nextRunAt };
+  };
+
   return (app: FastifyInstance): void => {
     app.post(
       "/policies",
@@ -89,7 +136,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
         const parsed = CreatePolicySchema.safeParse(request.body);
         if (!parsed.success) return badRequest(reply, "invalid policy", parsed.error);
         const created = await deps.store(contextOf(request).organizationId).create(parsed.data);
-        return reply.status(201).send(created);
+        return reply.status(201).send(view(created));
       },
     );
 
@@ -97,7 +144,8 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
       "/policies",
       { preHandler: [authenticate(deps.resolver), requireRole("viewer")] },
       async (request, reply) => {
-        return reply.send(await deps.store(contextOf(request).organizationId).list());
+        const policies = await deps.store(contextOf(request).organizationId).list();
+        return reply.send(policies.map(view));
       },
     );
 
@@ -109,7 +157,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
         if (!params.success) return badRequest(reply, "invalid id", params.error);
         const policy = await deps.store(contextOf(request).organizationId).get(params.data.id);
         if (policy === null) return reply.status(404).send({ error: "not found" });
-        return reply.send(policy);
+        return reply.send(view(policy));
       },
     );
 
@@ -128,7 +176,7 @@ export function policyRoutes(deps: PolicyRoutesDeps) {
           .store(contextOf(request).organizationId)
           .update(params.data.id, parsed.data);
         if (updated === null) return reply.status(404).send({ error: "not found" });
-        return reply.send(updated);
+        return reply.send(view(updated));
       },
     );
 

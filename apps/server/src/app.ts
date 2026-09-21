@@ -58,6 +58,9 @@ export interface AppDeps {
   memberStore(organizationId: string): MemberStore;
   auditStore(organizationId: string): AuditStore;
   kek: Buffer;
+  // SCHRODUMP_TZ: the zone every cron is read in. GET /me tells the UI; the policy routes validate
+  // and compute nextRunAt in it.
+  timeZone: string;
 }
 
 export function buildApp(deps: AppDeps) {
@@ -87,7 +90,7 @@ export function buildApp(deps: AppDeps) {
     return Promise.resolve();
   });
   app.register((instance) => {
-    sessionRoutes(deps.resolver)(instance);
+    sessionRoutes(deps.resolver, { timeZone: deps.timeZone })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {
@@ -125,7 +128,11 @@ export function buildApp(deps: AppDeps) {
     return Promise.resolve();
   });
   app.register((instance) => {
-    policyRoutes({ resolver: deps.resolver, store: deps.policyStore })(instance);
+    policyRoutes({
+      resolver: deps.resolver,
+      store: deps.policyStore,
+      timeZone: deps.timeZone,
+    })(instance);
     return Promise.resolve();
   });
   app.register((instance) => {

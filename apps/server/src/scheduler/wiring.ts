@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { CronExpressionParser } from "cron-parser";
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { currentWindow } from "./cron.js";
 import type { CronEvaluator, SchedulerStore } from "./scheduler.js";
 
-export function cronEvaluator(): CronEvaluator {
+// Every window is computed on the instance's clock (SCHRODUMP_TZ), never the process's: the
+// container runs UTC, and an expression read there is not the one the operator wrote.
+export function cronEvaluator(timeZone: string): CronEvaluator {
   return {
-    currentWindow: (cron, now) => CronExpressionParser.parse(cron, { currentDate: now }).prev().toDate(),
+    currentWindow: (cron, now) => currentWindow(cron, now, timeZone),
   };
 }
 
