@@ -49,6 +49,14 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   `runRetention` applies it before any I/O. Silence is not an instruction. The same rule covers an
   incomplete view: an unreadable or orphaned manifest aborts the whole cycle rather than pruning
   against a picture already known to be partial.
+- **Retention never deletes the policy's newest `VERIFIED` artifact.** Chaining off a SUCCEEDED
+  backup protects old copies from a backup that *failed*; it says nothing about one that landed
+  and then failed its verify. `resolveRetention` ranks by `createdAt` and cannot see verification
+  state (it lives on the `Artifact` row, not in the manifest), so a run of FAILED verifies used to
+  fill `keepLast` and push the last copy that restores into the delete-set — reported as an
+  ordinary "kept 7, deleted 1". `runRetention` now asks `RetentionPorts.newestVerifiedJobId` (an
+  organization-scoped query in `worker-wiring.ts`) and passes it to the resolver as `alwaysKeep`;
+  when the window alone would have deleted it, `retentionSummary` names it in the job's reason.
 - **A verify that could not run is `INCONCLUSIVE`, not `FAILED`.** `FAILED` is a process that ran
   and broke; `INCONCLUSIVE` is `runVerifyJob` reporting that our own sandbox or runner never got to
   look — the artifact stays `UNOBSERVED`, which was always true. It became its own `JobState`

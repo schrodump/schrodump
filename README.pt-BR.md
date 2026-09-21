@@ -44,7 +44,8 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 - **Cifrado em repouso** — todo artefato é cifrado com [`age`](https://age-encryption.org) para dois
   recipients (operacional + escrow); as chaves são envelopadas por uma KEK que vive fora do host.
 - **Destinos S3-compatible** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Agendamento com retenção GFS** — avô-pai-filho, ciente das cadeias full/incremental.
+- **Agendamento com retenção GFS** — avô-pai-filho, ciente das cadeias full/incremental, e nunca
+  apaga a cópia verificada mais recente de uma política.
 - **Atrito de restore de propósito** — restrito por papel, limitado por uma matriz de capacidade da
   engine, e sobrescrever um banco exige digitar o nome dele.
 - **Interface web** — um painel construído em torno dos três estados, em inglês, português e espanhol.

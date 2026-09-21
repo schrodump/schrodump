@@ -47,7 +47,7 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
   destinatarios (operacional + escrow); las claves se envuelven con una KEK que vive fuera del host.
 - **Destinos compatibles con S3** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
 - **Programación con retención GFS** — abuelo-padre-hijo, consciente de las cadenas
-  completa/incremental.
+  completa/incremental, y nunca borra la copia verificada más reciente de una política.
 - **Fricción de restauración deliberada** — restringida por rol, acotada por una matriz de
   capacidad del motor, y sobrescribir una base exige escribir su nombre.
 - **Interfaz web** — un panel construido en torno a los tres estados, en inglés, portugués y español.

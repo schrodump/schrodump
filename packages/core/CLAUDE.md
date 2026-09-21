@@ -28,6 +28,12 @@ Guarding that is the caller's job (`retentionIsConfigured`, then `apps/server`),
 guard exists rather than a defensive default hidden in here. Silence is not an instruction, and
 this package is not the place to guess which silence it was.
 
+Verification state is the same kind of fact: it is not in the manifest, so the resolver cannot
+rank by it. The caller names what must survive whatever the counters say (`alwaysKeep` — the
+server passes the policy's newest `VERIFIED` artifact), and the resolver reports which of those
+survived only because of it (`keptOutsideWindow`), so the caller can say why it kept more than
+the policy asked.
+
 ## SPDX
 
 Every source file begins with:
