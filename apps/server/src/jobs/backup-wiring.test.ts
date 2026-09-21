@@ -407,6 +407,51 @@ describe("createBackupPorts.executeAndUpload", () => {
     expect(capture[0]?.mounts).toEqual([]);
   });
 
+  // A verified target's descriptors name PGSSLROOTCERT / --ssl-ca / --sslCAFile; every run that
+  // CONNECTS has to find the file there — the dump and the postgres globals dump — while the STAGED
+  // archive step, which only reads a directory, is given nothing it does not need.
+  it("mounts the CA, read-only, into every run that connects to the target", async () => {
+    const caMount = { source: "/scratch/job-1.tls-ca/tls-ca.pem", target: "/etc/schrodump/tls-ca.pem", readOnly: true };
+    const capture: Array<{ command: string; mounts: RunOptions["mounts"] }> = [];
+    const capturingRunner: Runner = {
+      run: (descriptor: ExecutionDescriptor, opts: RunOptions): Promise<RunResult> => {
+        capture.push({ command: descriptor.command[0] ?? "", mounts: opts.mounts });
+        opts.stdout?.write(Buffer.from("-- fixture payload\n"));
+        opts.stdout?.end();
+        return Promise.resolve({ exitCode: 0, stderr: "", durationMs: 1 });
+      },
+      withEphemeralService: () => Promise.reject(new Error("not used")),
+    };
+    const globals: ExecutionDescriptor = { ...DESCRIPTOR, command: ["pg_dumpall"] };
+
+    const { deps, recipient } = await makeDeps(0);
+    const recipients = { recipients: [recipient], keyIds: ["k"] };
+    const stream = createBackupPorts({
+      ...deps,
+      runner: capturingRunner,
+      tlsCaMount: caMount,
+      buildGlobalsDescriptor: () => globals,
+    });
+    await stream.executeAndUpload({ mode: "STREAM", parallelism: 1, probe: PROBE, recipients });
+    await stream.executeGlobals({ recipients, probe: PROBE });
+
+    const staged = createBackupPorts({
+      ...deps,
+      runner: capturingRunner,
+      tlsCaMount: caMount,
+      stagingPath: "/scratch/job-1",
+    });
+    await staged.executeAndUpload({ mode: "STAGED", parallelism: 2, probe: PROBE, recipients });
+
+    const [streamDump, globalsDump, stagedDump, archive] = capture;
+    expect(streamDump?.mounts).toContainEqual(caMount);
+    expect(globalsDump?.command).toBe("pg_dumpall");
+    expect(globalsDump?.mounts).toContainEqual(caMount);
+    expect(stagedDump?.mounts).toContainEqual(caMount);
+    expect(archive?.command).toBe("tar");
+    expect(archive?.mounts).not.toContainEqual(caMount);
+  });
+
   // The scratch release waits on put() settling (Promise.allSettled below the upload), and
   // lib-storage's Upload is not signal-aware on its own — so without the signal reaching the driver
   // an aborted STAGED backup holds its cleartext scratch directory until the multipart upload
@@ -633,6 +678,7 @@ describe("runBackupJob over createBackupPorts — a failure after the upload lea
         requestedParallelism: 1,
         scratchConfigured: false,
         singleDatabaseStagingScope: null,
+        stagedTlsRefusal: null,
       },
       ports,
     );

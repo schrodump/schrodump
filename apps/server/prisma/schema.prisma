@@ -226,6 +226,11 @@ model DatabaseTarget {
   // decrypted for display.
   encryptedCredential Json
   tls                 Boolean    @default(true)
+  // The target's CA certificate, PEM. NULL with tls on is "encrypted, certificate unverified" for
+  // postgres and mysql/mariadb (mongodb verifies against the system store); present is "verified
+  // against this CA, host name checked" — for the probe and every tool alike. Public, so stored in
+  // clear on purpose: it is not a credential, and wrapping it would pretend it were.
+  tlsCaCert           String?
   scope               Json // { databases, schemas, collections }
   // The last operator-triggered connection probe. All three NULL means it has never been run,
   // which the guided setup must tell apart from "run and refused" — one still has something to

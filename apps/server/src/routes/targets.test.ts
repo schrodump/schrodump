@@ -6,7 +6,39 @@ import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
 import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
-import { scopeProblem, targetRoutes, type TargetRecord, type TargetStore } from "./targets.js";
+import {
+  parseTlsCaCert,
+  scopeProblem,
+  targetRoutes,
+  TLS_CA_CERT_MAX_BYTES,
+  type CreateTargetData,
+  type TargetRecord,
+  type TargetStore,
+  type UpdateTargetData,
+} from "./targets.js";
+
+// A real certificate — a throwaway CA generated with openssl for the TLS checks, whose key was
+// discarded — so the parse check below is exercised against real DER, not a lookalike string.
+const CA_PEM = `-----BEGIN CERTIFICATE-----
+MIIDGTCCAgGgAwIBAgIUMGHMoUlysxM4gd601frgt6JuvTcwDQYJKoZIhvcNAQEL
+BQAwHDEaMBgGA1UEAwwRZW4wMiB0aHJvd2F3YXkgQ0EwHhcNMjYwOTIxMTMyMjA0
+WhcNMjYwOTIzMTMyMjA0WjAcMRowGAYDVQQDDBFlbjAyIHRocm93YXdheSBDQTCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMTM+XXNTr4BrCKHhYnMB+fv
+Ls3riK/ccTkQrm1bgN8M0cbQ6qWAqEtbfFxQ4gIomw1GrpL8O4iL9WR6FjAQOGol
+vOIq6CjQilTMK1/mt21nmHKmEBWNMdZMu6NoUb+RvQOwY5KrRK97Y1O7GjCwTk9d
+fp7nPqrI9nVSdD+Av5+ZkrqyNhZjYzniW+xwEdA8JCKq5SaIeHMVIZAUopbHL6BY
+CsFkmznb4CNwwmUUdlykjJuE/XLTMqVsztpJnrBquDQ1boSfH4QzCaxuqtguoBfz
+BAe3DthK6lUXWSTggYL7455dJ2KvrQkOo/xr8JnLemjBbpDkJ2NpEcFnwRhQbNsC
+AwEAAaNTMFEwHQYDVR0OBBYEFMyRcr/HRvG0goZqqrehhb17E3N/MB8GA1UdIwQY
+MBaAFMyRcr/HRvG0goZqqrehhb17E3N/MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggEBAMMxl44RdnOcq5quyOnUQIIQuZcDswT0yqjdIlm/cWMnNmSR
+Ys8Q6QNABqGPjVam0MQKzriVaFyzTpYpQXtJnMCoRlFRnkaBisL9xPIxsEXqqode
+USpJ+oX62Zqj4ypdT2s1Nu7jrTLYSTuZANBQgGAAYOmkZnpswv0OYZXl7uIqLY5F
+BN32Ro79xTpufWYjt0i56ab2s+kFn8WE4krkBRI+kszdPedyVVcJZal4dfzn29wN
+EpBzScjO5b/DqLkXClq8Avgk0klDW0d+u6jP2w0zE46ys6iEO+xGxjU7QgOdfHRi
+3c65A3ur1N6/jWgI5Xgd5pKQjJcnpk2JtxxdKyQ=
+-----END CERTIFICATE-----
+`;
 
 const RECORD: TargetRecord = {
   id: "t1",
@@ -16,6 +48,7 @@ const RECORD: TargetRecord = {
   port: 5432,
   username: "backup",
   tls: true,
+  tlsCaCert: null,
   scope: { databases: ["app"], schemas: [], collections: [] },
   encryptedCredential: { v: 1, dek: "WRAPPED-DEK", data: "CIPHERTEXT" },
   createdAt: new Date("2026-07-23T12:00:00Z"),
@@ -415,6 +448,179 @@ describe("POST /targets/discover", () => {
     const app = await appWith("operator");
     const res = await app.inject({ method: "POST", url: "/targets/discover", payload: { host: "x" } });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
+// The CA certificate is what makes TLS verified. It is public — stored in clear and returned — so
+// what the border checks is that it IS certificates, and nothing else: the likeliest wrong paste
+// is the private key that sits beside a server's certificate, and this column goes to every viewer.
+describe("parseTlsCaCert", () => {
+  it("accepts one certificate, and a bundle of several, and stores only the certificates", () => {
+    expect(parseTlsCaCert(CA_PEM)).toEqual({ ok: true, pem: CA_PEM });
+    const bundle = parseTlsCaCert(`subject=CN = en02\n${CA_PEM}\nissuer=CN = en02\n${CA_PEM}`);
+    expect(bundle.ok).toBe(true);
+    if (bundle.ok) {
+      expect(bundle.pem.match(/BEGIN CERTIFICATE/g)).toHaveLength(2);
+      expect(bundle.pem).not.toContain("subject=");
+    }
+  });
+
+  it("refuses anything that is not a certificate, a private key above all", () => {
+    const key = "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n";
+    expect(parseTlsCaCert(`${CA_PEM}${key}`)).toMatchObject({ ok: false, reason: expect.stringMatching(/private key/) });
+    expect(parseTlsCaCert("not a certificate")).toMatchObject({ ok: false });
+    expect(parseTlsCaCert("")).toMatchObject({ ok: false });
+  });
+
+  it("refuses a certificate block that does not parse — a truncated paste is caught now, not at backup time", () => {
+    const truncated = CA_PEM.replace(/^MIID.*$/m, "MIIDtruncated");
+    expect(parseTlsCaCert(truncated)).toMatchObject({ ok: false, reason: "certificate 1 of 1 could not be read" });
+  });
+});
+
+describe("targets — the CA certificate", () => {
+  interface RefusedBody {
+    error: string;
+    field?: string;
+    detail?: string;
+  }
+
+  it("stores a CA on create and returns it — it is public, unlike the password", async () => {
+    let stored: CreateTargetData | undefined;
+    const app = await appWith("operator", {
+      create: (data) => {
+        stored = data;
+        return Promise.resolve({ ...RECORD, tlsCaCert: data.tlsCaCert });
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets",
+      payload: { ...CREATE_PAYLOAD, tlsCaCert: CA_PEM },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(stored?.tlsCaCert).toBe(CA_PEM);
+    expect(res.json<{ tlsCaCert: string | null }>().tlsCaCert).toBe(CA_PEM);
+    await app.close();
+  });
+
+  it("stores null when none is given, which is TLS required and unverified", async () => {
+    let stored: CreateTargetData | undefined;
+    const app = await appWith("operator", {
+      create: (data) => {
+        stored = data;
+        return Promise.resolve(RECORD);
+      },
+    });
+    await app.inject({ method: "POST", url: "/targets", payload: CREATE_PAYLOAD });
+    expect(stored?.tlsCaCert).toBeNull();
+    await app.close();
+  });
+
+  it("returns it on read, null when there is none", async () => {
+    const app = await appWith("viewer", { get: () => Promise.resolve({ ...RECORD, tlsCaCert: CA_PEM }) });
+    const res = await app.inject({ method: "GET", url: "/targets/t1" });
+    expect(res.json<{ tlsCaCert: string | null }>().tlsCaCert).toBe(CA_PEM);
+    const list = await app.inject({ method: "GET", url: "/targets" });
+    expect(list.json<Array<{ tlsCaCert: string | null }>>()[0]?.tlsCaCert).toBeNull();
+    await app.close();
+  });
+
+  it("refuses something that is not a certificate with 400, naming the field", async () => {
+    const app = await appWith("operator");
+    for (const url of ["/targets", "/targets/discover"]) {
+      const payload =
+        url === "/targets"
+          ? { ...CREATE_PAYLOAD, tlsCaCert: "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----" }
+          : { engine: "postgres", host: "h", port: 5432, username: "u", password: "p", tlsCaCert: "nope" };
+      const res = await app.inject({ method: "POST", url, payload });
+      expect(res.statusCode, url).toBe(400);
+      expect(res.json<RefusedBody>().field, url).toBe("tlsCaCert");
+      expect(res.json<RefusedBody>().detail, url).toMatch(/^the CA certificate /);
+    }
+    await app.close();
+  });
+
+  it("refuses a bundle larger than the cap, naming the field", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets",
+      payload: { ...CREATE_PAYLOAD, tlsCaCert: CA_PEM.repeat(Math.ceil(TLS_CA_CERT_MAX_BYTES / CA_PEM.length) + 1) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<RefusedBody>()).toMatchObject({ field: "tlsCaCert", detail: expect.stringMatching(/KiB/) });
+    await app.close();
+  });
+
+  // A CA with TLS off would read as verification the connection is not doing.
+  it("refuses a CA sent with tls: false, on create and on discover", async () => {
+    const app = await appWith("operator");
+    for (const [url, payload] of [
+      ["/targets", { ...CREATE_PAYLOAD, tls: false, tlsCaCert: CA_PEM }],
+      ["/targets/discover", { engine: "postgres", host: "h", port: 5432, username: "u", password: "p", tls: false, tlsCaCert: CA_PEM }],
+    ] as const) {
+      const res = await app.inject({ method: "POST", url, payload });
+      expect(res.statusCode, url).toBe(400);
+      expect(res.json<RefusedBody>(), url).toMatchObject({ field: "tlsCaCert", detail: expect.stringMatching(/only with tls: true/) });
+    }
+    await app.close();
+  });
+
+  it("PATCH: a PEM replaces, null clears, and absence keeps", async () => {
+    const seen: UpdateTargetData[] = [];
+    const app = await appWith("operator", {
+      update: (_id, data) => {
+        seen.push(data);
+        return Promise.resolve(RECORD);
+      },
+    });
+    await app.inject({ method: "PATCH", url: "/targets/t1", payload: { tlsCaCert: CA_PEM } });
+    await app.inject({ method: "PATCH", url: "/targets/t1", payload: { tlsCaCert: null } });
+    await app.inject({ method: "PATCH", url: "/targets/t1", payload: { host: "db2.internal" } });
+    expect(seen[0]?.tlsCaCert).toBe(CA_PEM);
+    expect(seen[1]).toHaveProperty("tlsCaCert", null);
+    expect(seen[2]).not.toHaveProperty("tlsCaCert");
+    await app.close();
+  });
+
+  it("PATCH: a CA is judged against the row's own tls when the patch does not set it", async () => {
+    const app = await appWith("operator", { get: () => Promise.resolve({ ...RECORD, tls: false }) });
+    const res = await app.inject({ method: "PATCH", url: "/targets/t1", payload: { tlsCaCert: CA_PEM } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<RefusedBody>()).toMatchObject({ field: "tlsCaCert", detail: expect.stringMatching(/only with tls: true/) });
+    // Turning TLS on in the same patch is the fix, and it is accepted.
+    const fixed = await app.inject({
+      method: "PATCH",
+      url: "/targets/t1",
+      payload: { tls: true, tlsCaCert: CA_PEM },
+    });
+    expect(fixed.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("PATCH: refuses a malformed CA with 400, naming the field", async () => {
+    const app = await appWith("operator");
+    const res = await app.inject({ method: "PATCH", url: "/targets/t1", payload: { tlsCaCert: "" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json<RefusedBody>().field).toBe("tlsCaCert");
+    await app.close();
+  });
+
+  it("discover connects with the CA, so the pasted certificate is proved before anything is saved", async () => {
+    let seen: ProbeTarget | undefined;
+    const app = await appWith("operator", {}, (target) => {
+      seen = target;
+      return Promise.resolve(DISCOVERED);
+    });
+    await app.inject({
+      method: "POST",
+      url: "/targets/discover",
+      payload: { engine: "postgres", host: "h", port: 5432, username: "u", password: "p", tlsCaCert: CA_PEM },
+    });
+    expect(seen?.tlsCaCert).toBe(CA_PEM);
+    expect(seen?.tls).toBe(true);
     await app.close();
   });
 });

@@ -6,7 +6,7 @@
 import { Panel } from "@/components/ui/panel";
 import { useT } from "@/i18n/provider";
 import type { MessageKey } from "@/i18n/messages/en";
-import type { ProbeFailureCode } from "@/lib/domain";
+import type { ProbeFailureCode, TlsReading } from "@/lib/domain";
 import { formatServerVersion } from "@/lib/format";
 import type { DiscoverResult } from "@/lib/types";
 
@@ -39,6 +39,24 @@ const DETAIL: Record<Exclude<ProbeFailureCode, "TLS_FAILED">, MessageKey> = {
   UNKNOWN: "targets.verdict.detail.UNKNOWN",
 };
 
+// How the connection was secured, said on a success — "TLS required" alone read as verified when for
+// postgres and mysql it never was.
+const TLS_LINE: Record<TlsReading, MessageKey> = {
+  off: "targets.verdict.tls.off",
+  unverified: "targets.verdict.tls.unverified",
+  system: "targets.verdict.tls.system",
+  ca: "targets.verdict.tls.ca",
+};
+// And what to do about a TLS failure, which depends on what was asked for. None of them says "turn
+// TLS off": that was the advice here, and it trades a certificate problem for a password and every
+// dump crossing the network in the clear — and where the provider enforces TLS it does not even work.
+const TLS_FAILED_DETAIL: Record<TlsReading, MessageKey> = {
+  off: "targets.verdict.detail.TLS_FAILED.off",
+  unverified: "targets.verdict.detail.TLS_FAILED.on",
+  system: "targets.verdict.detail.TLS_FAILED.on",
+  ca: "targets.verdict.detail.TLS_FAILED.ca",
+};
+
 export function failureCodeOf(result: DiscoverResult): ProbeFailureCode {
   return result.failure ?? "UNKNOWN";
 }
@@ -52,7 +70,7 @@ export function VerdictPanel({
   result: DiscoverResult;
   hostPort: string;
   user: string;
-  tls: boolean;
+  tls: TlsReading;
 }) {
   const t = useT();
   if (result.ok) {
@@ -63,7 +81,7 @@ export function VerdictPanel({
           {t("targets.verdict.line", {
             version: result.serverVersionNum !== null ? formatServerVersion(result.serverVersionNum) : "?",
             hostPort,
-            tls: tls ? t("targets.verdict.tlsOn") : t("targets.verdict.tlsOff"),
+            tls: t(TLS_LINE[tls]),
           })}
         </div>
       </Panel>
@@ -71,10 +89,7 @@ export function VerdictPanel({
   }
   const code = failureCodeOf(result);
   const vars = { hostPort, user: user.length > 0 ? user : "?" };
-  const detail =
-    code === "TLS_FAILED"
-      ? t(tls ? "targets.verdict.detail.TLS_FAILED.on" : "targets.verdict.detail.TLS_FAILED.off", vars)
-      : t(DETAIL[code], vars);
+  const detail = code === "TLS_FAILED" ? t(TLS_FAILED_DETAIL[tls], vars) : t(DETAIL[code], vars);
   return (
     <Panel tone="error" data-verdict={code} className="p-3.5">
       <div className="text-[13px] font-medium text-destructive-text">{t(TITLE[code])}</div>

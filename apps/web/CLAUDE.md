@@ -220,7 +220,8 @@ screens that follow:
   never by a secret, and shows the raw driver code only on UNKNOWN. A delete says up front what the
   server will say — which policies still point here — instead of after the 409; a viewer sees no
   action at all, the server refusing the write being the first lock and the missing button the
-  second. TLS is still the boolean the API holds; the design's four-mode select is a server change.
+  second. TLS is the API's `tls` plus an optional `tlsCaCert` (see "Target TLS" below), not the
+  design's four-mode select.
 - **The configuration trio** (destinations, policies, channels). One family of forms through
   `ui/form-bits.tsx` (`FormHeader`, `FieldLabel`, `SaveBar`): the primary action carries the
   first thing to fix, the locked fields in edit stay on screen with the reason (`Panel` tone
@@ -326,6 +327,33 @@ credential has exactly one path and it does not go through here. Client-side par
 WHATWG `URL`. On success the field is cleared (do not keep the password in two places in state);
 on error no field is touched. It refuses `mongodb+srv` and multi-host URIs with a reason instead of
 guessing.
+
+## Target TLS says what it verifies (`components/target-form.tsx`, `lib/domain.ts`)
+
+"Require TLS" alone read as verified, and for postgres and mysql/mariadb it never was: without a CA
+the server encrypts and checks nothing, while mongodb verifies against the system trust store. So
+the form reads the settings through `tlsReadingOf` (off / unverified / system / ca — the server's
+three modes, with mongo's "require" split out) and says under the checkbox what the current one
+means; the list row and the `VerdictPanel` line say the same, and the verdict describes the
+connection discovery actually made (`discoveredTls`), not whatever the fields say now.
+
+- **The CA certificate is public, so it is read back** — unlike the password. With TLS on, the form
+  offers a PEM textarea; in edit mode a stored one shows as configured with Replace and Remove, and
+  the PATCH carries `tlsCaCert` only when it changed: a PEM to replace, `null` to remove, absent to
+  keep ("Replace" with nothing pasted keeps it, the way an empty password field does). It is never
+  sent with TLS off: the server refuses that, and a stored CA stays inert while TLS is off.
+- **Discovery connects with the CA the backup will use**, so a wrong CA is caught before anything is
+  saved. `caCertProblemOf` blocks Save on a paste that is not PEM or is a PRIVATE KEY — the server
+  does the real check (`parseTlsCaCert`), this only says why before the request.
+- **The `TLS_FAILED` verdict never says "turn TLS off".** It used to point at the Require TLS switch,
+  whose only "fix" sends the password and every dump in the clear and is refused where the provider
+  enforces TLS. Now: the certificate could not be verified — paste the provider's CA; with a CA
+  configured, check the bundle and that the host is the name on the certificate.
+- A mysql/mariadb target with TLS and no CA is told a staged policy will stream: mydumper cannot
+  require TLS without verifying it.
+- **A pasted URL asking for verification** (`sslmode=verify-full`/`verify-ca`, `VERIFY_IDENTITY`, a
+  CA file parameter) turns TLS on and asks for the CA it cannot carry (`tlsVerify` in
+  `lib/connection-url.ts`).
 
 ## Target scope is chosen, never typed (`components/target-form.tsx`)
 

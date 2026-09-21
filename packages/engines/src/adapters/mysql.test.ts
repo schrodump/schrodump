@@ -116,9 +116,16 @@ describe("mysqlAdapter.buildDump", () => {
     expect(descriptor.command.join(" ")).not.toContain("--ssl-mode");
   });
 
+  // TLS off, so the argv pinned here is mydumper's own; the TLS modes have their own block in
+  // tls.test.ts — including the one mydumper cannot honour, which refuses.
   it("STAGED emits mydumper to a directory with its own image", () => {
     const descriptor = mysqlAdapter.buildDump(
-      dumpInput({ executionMode: "STAGED", parallelism: 4, stagingPath: "/scratch/out" }),
+      dumpInput({
+        executionMode: "STAGED",
+        parallelism: 4,
+        stagingPath: "/scratch/out",
+        connection: { ...CONN, tls: false },
+      }),
     );
     expect(descriptor.image).toBe("schrodump/mydumper:1");
     expect(descriptor.command).toEqual([
@@ -166,7 +173,8 @@ describe("mysqlAdapter.buildDump", () => {
         executionMode: "STAGED",
         parallelism: 4,
         stagingPath: "/scratch/out",
-        connection: { ...CONN, database: connectionDatabase },
+        // TLS off: a TLS target without a CA is refused staging on its own grounds (tls.test.ts).
+        connection: { ...CONN, tls: false, database: connectionDatabase },
         scope: { databases, schemas: [], collections: [] },
       });
 
@@ -233,6 +241,7 @@ describe("buildRestore", () => {
   it("STAGED passes myloader an explicit drop mode, so a restore over live tables is not a FAIL", () => {
     const descriptor = mysqlAdapter.buildRestore({
       ...restoreInput,
+      connection: { ...CONN, tls: false },
       executionMode: "STAGED",
       sourcePath: SOURCE_PATH,
     });

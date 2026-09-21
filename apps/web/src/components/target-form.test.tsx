@@ -260,3 +260,102 @@ describe("TargetForm keeps a discovery honest about where it came from", () => {
   });
 });
 
+// "Require TLS" was a checkbox that meant "encrypt, verify nothing" to pg_dump and "verify against
+// Node's bundled CAs" to the probe, and said neither. The form now says which mode it is in, takes
+// the CA that makes it verified, and connects with it — at discovery and in what it saves.
+describe("TargetForm and TLS", () => {
+  const PEM = "-----BEGIN CERTIFICATE-----\nMIIBsjCCAVigAwIBAgIUQ\n-----END CERTIFICATE-----\n";
+  const caField = () => screen.getByLabelText("CA certificate (PEM, optional)");
+  const tlsMode = () => document.querySelector("[data-tls-mode]");
+
+  function bodyOf(path: string): Record<string, unknown> {
+    const call = post.mock.calls.find(([p]) => p === path);
+    expect(call).toBeDefined();
+    return call![1] as Record<string, unknown>;
+  }
+
+  it("says what each mode means, and that TLS without a CA verifies nothing", async () => {
+    const user = renderForm();
+    expect(tlsMode()).toHaveAttribute("data-tls-mode", "unverified");
+    expect(tlsMode()).toHaveTextContent(/certificate is not verified/);
+
+    await user.click(caField());
+    await user.paste(PEM);
+    expect(tlsMode()).toHaveAttribute("data-tls-mode", "ca");
+    expect(tlsMode()).toHaveTextContent(/checked against the CA below/);
+
+    await user.click(screen.getByLabelText("Require TLS"));
+    expect(tlsMode()).toHaveAttribute("data-tls-mode", "off");
+    // No CA field while TLS is off: the server refuses one sent with TLS off.
+    expect(screen.queryByLabelText("CA certificate (PEM, optional)")).toBeNull();
+  });
+
+  it("tells a MongoDB operator that TLS without a CA verifies against the system store", async () => {
+    const user = renderForm();
+    await user.selectOptions(screen.getByLabelText("Engine"), "mongodb");
+    expect(tlsMode()).toHaveAttribute("data-tls-mode", "system");
+    expect(tlsMode()).toHaveTextContent(/system trust store/);
+  });
+
+  it("discovers over the connection the backup will use, CA included, and saves it", async () => {
+    const user = renderForm();
+    await fillConnection(user);
+    await user.click(caField());
+    await user.paste(PEM);
+    await user.click(discoverButton());
+    // Picked by the fixture's own name, whatever it is called.
+    const [firstDatabase] = TWO_DATABASES.databases;
+    await user.click(await screen.findByLabelText(new RegExp(firstDatabase!.name)));
+    await user.click(createButton());
+
+    await waitFor(() => expect(post.mock.calls.some(([p]) => p === "/targets")).toBe(true));
+    expect(bodyOf("/targets/discover")).toMatchObject({ tls: true, tlsCaCert: PEM });
+    expect(bodyOf("/targets")).toMatchObject({ tls: true, tlsCaCert: PEM });
+    // And the verdict says how that connection was secured.
+    expect(screen.getByText(/verified against the CA certificate · host name checked/)).toBeInTheDocument();
+  });
+
+  it("never sends a CA with TLS off, even one pasted before TLS was switched off", async () => {
+    const user = renderForm();
+    await fillConnection(user, "mysql");
+    await user.click(caField());
+    await user.paste(PEM);
+    await user.click(screen.getByLabelText("Require TLS"));
+    await user.click(createButton());
+    await waitFor(() => expect(post.mock.calls.some(([p]) => p === "/targets")).toBe(true));
+    expect(bodyOf("/targets")).toMatchObject({ tls: false, tlsCaCert: null });
+  });
+
+  // The field is stored in clear and shown to every viewer; the likeliest wrong paste is the key.
+  it("blocks Save on a pasted private key, and says so", async () => {
+    const user = renderForm();
+    await fillConnection(user, "mysql");
+    await user.click(caField());
+    await user.paste("-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n");
+    expect(createButton()).toBeDisabled();
+    expect(screen.getByTestId("button-blocked-reason")).toHaveTextContent(/that is a private key/i);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("warns that a mysql target without a CA cannot be staged", async () => {
+    const user = renderForm();
+    await user.selectOptions(screen.getByLabelText("Engine"), "mysql");
+    expect(screen.getByText(/mydumper cannot require TLS without verifying it/)).toBeInTheDocument();
+    await user.click(caField());
+    await user.paste(PEM);
+    expect(screen.queryByText(/mydumper cannot require TLS without verifying it/)).toBeNull();
+  });
+
+  it("a pasted URL asking for verification turns TLS on and asks for the CA it cannot carry", async () => {
+    const user = renderForm();
+    await user.type(urlField(), "postgres://ana:s3cret@db.internal/shop?sslmode=verify-full");
+    await user.click(fillButton());
+    expect(screen.getByLabelText("Require TLS")).toBeChecked();
+    expect(screen.getByText(/A URL can name a CA file but not carry it/)).toBeInTheDocument();
+
+    await user.click(caField());
+    await user.paste(PEM);
+    expect(screen.queryByText(/A URL can name a CA file but not carry it/)).toBeNull();
+  });
+});
+

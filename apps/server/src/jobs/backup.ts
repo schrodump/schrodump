@@ -42,8 +42,9 @@ export interface BackupContext {
   // Absent means size never selects STAGED — see resolveExecutionMode's note.
   stagedThresholdBytes?: number;
   scratchConfigured: boolean;
-  // Required, and passed straight through — see resolveExecutionMode's note on it.
+  // Both required, and passed straight through — see resolveExecutionMode's notes on them.
   singleDatabaseStagingScope: readonly string[] | null;
+  stagedTlsRefusal: string | null;
 }
 
 export interface BackupPorts {
@@ -130,6 +131,7 @@ export async function runBackupJob(ctx: BackupContext, ports: BackupPorts): Prom
       stagedCapable: caps.stagedCapable,
       maxParallelism: caps.maxParallelism,
       singleDatabaseStagingScope: ctx.singleDatabaseStagingScope,
+      stagedTlsRefusal: ctx.stagedTlsRefusal,
     });
     // Unreachable while STAGED is disabled (resolveExecutionMode explains why). Kept, not deleted:
     // the directory pipeline that re-enables STAGED needs exactly this reserve/release lifecycle.

@@ -848,19 +848,25 @@ describe("backupContextFor — routing a backup by what its target selects", () 
 
   // runBackupJob over fake ports, with the REAL adapter building the descriptor the executor would
   // run — so what is asserted is the command, not only the mode it was built for.
-  async function backUp(engine: EngineKind, scopedDatabases: string[], requestedParallelism: number) {
+  async function backUp(
+    engine: EngineKind,
+    scopedDatabases: string[],
+    requestedParallelism: number,
+    tls: { tls: boolean; tlsCaCert?: string } = { tls: false },
+  ) {
     const connectDatabase = scopedDatabases[0] ?? (engine === "postgres" ? "postgres" : "mysql");
+    const connection: TargetConnection = {
+      host: "db",
+      port: 3306,
+      database: connectDatabase,
+      username: "root",
+      password: "pw",
+      ...tls,
+    };
     const buildDescriptor = buildDumpDescriptorFor({
       adapter: resolveAdapter(engine),
       engine,
-      connection: {
-        host: "db",
-        port: 3306,
-        database: connectDatabase,
-        username: "root",
-        password: "pw",
-        tls: false,
-      },
+      connection,
       scopedDatabases,
       scopedSchemas: [],
       facts,
@@ -909,6 +915,8 @@ describe("backupContextFor — routing a backup by what its target selects", () 
         requestedParallelism,
         stagedThresholdBytes: undefined,
         scratchConfigured: true,
+        adapter: resolveAdapter(engine),
+        connection,
       }),
       ports,
     );
@@ -949,6 +957,33 @@ describe("backupContextFor — routing a backup by what its target selects", () 
     expect(reasons).toEqual(["SUCCEEDED:"]);
   });
 
+  // mydumper falls back to plaintext under --ssl-mode=REQUIRED (measured), so a TLS target without a
+  // CA streams even when everything else says stage — through mysqldump, which refuses plaintext.
+  it("streams a TLS mysql target that has no CA, and the job says why", async () => {
+    const { executed, reasons, reserved } = await backUp("mysql", ["shop"], 4, { tls: true });
+
+    expect(executed[0]).toMatchObject({ mode: "STREAM", parallelism: 1 });
+    expect(executed[0]!.command[0]).toBe("mysqldump");
+    expect(executed[0]!.command).toContain("--ssl-mode=REQUIRED");
+    expect(reserved).toBe(false);
+    expect(reasons[0]).toMatch(/fall back to plaintext.*streamed instead/);
+  });
+
+  it("still stages a TLS mysql target with a CA, verified by mydumper", async () => {
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    const { executed } = await backUp("mysql", ["shop"], 4, { tls: true, tlsCaCert: pem });
+
+    expect(executed[0]).toMatchObject({ mode: "STAGED", parallelism: 4 });
+    expect(executed[0]!.command).toEqual(
+      expect.arrayContaining(["mydumper", "--ssl-mode=VERIFY_IDENTITY", "--ca=/etc/schrodump/tls-ca.pem"]),
+    );
+  });
+
+  it("leaves a TLS postgres target staging: pg_dump -Fd honours every TLS mode", async () => {
+    const { executed } = await backUp("postgres", ["shop"], 4, { tls: true });
+    expect(executed[0]).toMatchObject({ mode: "STAGED", parallelism: 4 });
+  });
+
   it("routes mariadb the same way, since it shares the adapter", async () => {
     const { executed } = await backUp("mariadb", [], 4);
     expect(executed[0]).toMatchObject({ mode: "STREAM", parallelism: 1 });
@@ -966,6 +1001,8 @@ describe("backupContextFor — routing a backup by what its target selects", () 
       requestedParallelism: 4,
       stagedThresholdBytes: undefined,
       scratchConfigured: true,
+      adapter: {},
+      connection: { host: "db", port: 3306, database: "shop", username: "root", password: "pw", tls: false },
     };
     expect(backupContextFor({ ...base, engine: "mysql", scopedDatabases: [] }).singleDatabaseStagingScope).toEqual([]);
     expect(

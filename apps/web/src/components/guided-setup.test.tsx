@@ -34,6 +34,7 @@ const TARGET: Target = {
   port: 5432,
   username: "backup",
   tls: true,
+  tlsCaCert: null,
   scope: { databases: ["app"], schemas: [], collections: [] },
   createdAt: "2026-09-01T00:00:00.000Z",
   lastProbeAt: null,

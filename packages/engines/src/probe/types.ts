@@ -12,6 +12,11 @@ export interface ProbeConnection {
   // TLS is required by default; `false` is an explicit opt-out on the target, never a silent
   // fallback.
   readonly tls: boolean;
+  // The target's CA certificate (PEM). Read through targetTlsOf (descriptor.ts), exactly as the
+  // descriptors read it, so the probe connects the way the dump will: present means verify the
+  // chain against it and check the host name; absent means encrypted and, for postgres and
+  // mysql/mariadb, unverified.
+  readonly tlsCaCert?: string;
   // Mandatory: an unreachable target must never hang the job indefinitely.
   readonly connectTimeoutMs: number;
 }

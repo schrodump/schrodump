@@ -26,6 +26,7 @@ const TARGET: Target = {
   port: 5432,
   username: "backup",
   tls: true,
+  tlsCaCert: null,
   // One database, because that is the only postgres scope that backs up what it names: pg_dump
   // copies exactly one, and this fixture used to carry two — the shape that silently backed up the
   // first and dropped the second, and that the form and the API now refuse.
@@ -139,6 +140,76 @@ describe("TargetForm in edit mode", () => {
     // The two that would break things: a blank password must not travel, and engine is refused.
     expect(patch?.body).not.toHaveProperty("password");
     expect(patch?.body).not.toHaveProperty("engine");
+    // Nothing was done to the CA, so nothing is said about it.
+    expect(patch?.body).not.toHaveProperty("tlsCaCert");
+  });
+});
+
+// The CA has three answers in a PATCH — absent keeps it, a PEM replaces it, null removes it — and
+// the form has to send exactly the one the operator chose. It is public, so the form can say one is
+// configured; replacing it follows the password's rule, empty keeps what is stored.
+describe("TargetForm edits the CA certificate", () => {
+  const PEM = "-----BEGIN CERTIFICATE-----\nMIIBstored\n-----END CERTIFICATE-----\n";
+  const NEXT = "-----BEGIN CERTIFICATE-----\nMIIBnext\n-----END CERTIFICATE-----\n";
+  const WITH_CA: Target = { ...TARGET, tlsCaCert: PEM };
+
+  async function patchAfter(act: (user: ReturnType<typeof userEvent.setup>) => Promise<void>, target = WITH_CA) {
+    const { calls } = captureFetch();
+    const user = renderWith(<TargetForm onDone={() => undefined} target={target} />);
+    await act(user);
+    await user.click(save());
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    return calls.find((c) => c.method === "PATCH")?.body as Record<string, unknown>;
+  }
+
+  it("says one is configured and keeps it when untouched", async () => {
+    const body = await patchAfter(async () => {
+      expect(screen.getByText("A CA certificate is configured.")).toBeInTheDocument();
+      // Verified, and the form says so.
+      expect(document.querySelector("[data-tls-mode]")).toHaveAttribute("data-tls-mode", "ca");
+    });
+    expect(body).not.toHaveProperty("tlsCaCert");
+  });
+
+  it("replaces it with the pasted certificate", async () => {
+    const body = await patchAfter(async (user) => {
+      await user.click(screen.getByRole("button", { name: "Replace the CA" }));
+      await user.click(screen.getByLabelText("CA certificate (PEM, optional)"));
+      await user.paste(NEXT);
+    });
+    expect(body).toMatchObject({ tlsCaCert: NEXT });
+  });
+
+  it("keeps it when Replace was opened and nothing was pasted", async () => {
+    const body = await patchAfter(async (user) => {
+      await user.click(screen.getByRole("button", { name: "Replace the CA" }));
+    });
+    expect(body).not.toHaveProperty("tlsCaCert");
+  });
+
+  it("clears it with null, and says the connection is no longer verified", async () => {
+    const body = await patchAfter(async (user) => {
+      await user.click(screen.getByRole("button", { name: "Remove" }));
+      expect(screen.getByText(/no longer verified/)).toBeInTheDocument();
+      expect(document.querySelector("[data-tls-mode]")).toHaveAttribute("data-tls-mode", "unverified");
+    });
+    expect(body).toHaveProperty("tlsCaCert", null);
+  });
+
+  it("says nothing about the CA when TLS is switched off — the server refuses a CA with TLS off", async () => {
+    const body = await patchAfter(async (user) => {
+      await user.click(screen.getByLabelText("Require TLS"));
+    });
+    expect(body).toMatchObject({ tls: false });
+    expect(body).not.toHaveProperty("tlsCaCert");
+  });
+
+  it("adds one to a target that had none", async () => {
+    const body = await patchAfter(async (user) => {
+      await user.click(screen.getByLabelText("CA certificate (PEM, optional)"));
+      await user.paste(NEXT);
+    }, TARGET);
+    expect(body).toMatchObject({ tlsCaCert: NEXT });
   });
 });
 

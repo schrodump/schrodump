@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import { X509Certificate } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
@@ -9,7 +10,7 @@ import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
 import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
-import { badRequest } from "./errors.js";
+import { badRequest, type BadRequestBody } from "./errors.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
 const ScopeSchema = z.object({
@@ -21,17 +22,87 @@ const ScopeSchema = z.object({
   collections: z.array(z.string()),
 });
 
-// The password is write-only: it is encrypted into `encryptedCredential` and never echoed.
-const CreateTargetSchema = z.object({
-  name: z.string().min(1),
-  engine: EngineSchema,
-  host: z.string().min(1),
-  port: z.number().int(),
-  username: z.string().min(1),
-  password: z.string().min(1),
-  tls: z.boolean().default(true),
-  scope: ScopeSchema,
-});
+// Big enough for the largest bundle an operator is told to paste: AWS's RDS global bundle is 108
+// certificates in 165,408 bytes (measured). A cap exists so the column cannot be used as storage;
+// a regional bundle (~4.5 KB) is the tidier paste, and docs/install.md says so.
+export const TLS_CA_CERT_MAX_BYTES = 256 * 1024;
+
+const PEM_BLOCK = /-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g;
+
+// A CA certificate is public, so what is checked here is SHAPE: one or more X.509 certificates in
+// PEM, each of which node:crypto can actually parse — a truncated paste is refused now, not
+// discovered as a failed backup. Text around the blocks (the "subject=" lines some bundles carry) is
+// dropped and only the certificates are stored. Any other PEM block is refused outright: this field
+// is stored in clear and returned to every viewer, and the likeliest wrong paste is the server's
+// PRIVATE KEY sitting beside its certificate.
+export function parseTlsCaCert(
+  input: string,
+): { readonly ok: true; readonly pem: string } | { readonly ok: false; readonly reason: string } {
+  const blocks = [...input.matchAll(PEM_BLOCK)];
+  if (blocks.some((block) => block[1] !== "CERTIFICATE")) {
+    return {
+      ok: false,
+      reason:
+        "holds a PEM block that is not a certificate — paste the CA certificate only; a private key " +
+        "must never be pasted here",
+    };
+  }
+  if (blocks.length === 0) {
+    return {
+      ok: false,
+      reason:
+        "must be one or more PEM certificates (-----BEGIN CERTIFICATE----- … -----END CERTIFICATE-----)",
+    };
+  }
+  const certificates: string[] = [];
+  for (const [index, block] of blocks.entries()) {
+    try {
+      certificates.push(new X509Certificate(block[0]).toString().trim());
+    } catch {
+      return { ok: false, reason: `certificate ${String(index + 1)} of ${String(blocks.length)} could not be read` };
+    }
+  }
+  return { ok: true, pem: `${certificates.join("\n")}\n` };
+}
+
+const TlsCaCertSchema = z
+  .string()
+  .max(TLS_CA_CERT_MAX_BYTES, `a CA certificate bundle is at most ${String(TLS_CA_CERT_MAX_BYTES / 1024)} KiB`)
+  .transform((value, ctx) => {
+    const parsed = parseTlsCaCert(value);
+    if (parsed.ok) return parsed.pem;
+    ctx.addIssue({ code: "custom", message: `the CA certificate ${parsed.reason}` });
+    return z.NEVER;
+  });
+
+// A CA with TLS off would read as verification the connection is not doing. Refused where both
+// arrive together; the PATCH route applies the same rule against the row's own `tls`.
+const CA_NEEDS_TLS = "a CA certificate applies only with tls: true — TLS is off for this target";
+
+function refuseCaWithoutTls(
+  value: { tls?: boolean | undefined; tlsCaCert?: string | null | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.tls === false && typeof value.tlsCaCert === "string") {
+    ctx.addIssue({ code: "custom", path: ["tlsCaCert"], message: CA_NEEDS_TLS });
+  }
+}
+
+// The password is write-only: it is encrypted into `encryptedCredential` and never echoed. The CA
+// certificate is not a secret and is stored, and returned, as it is.
+const CreateTargetSchema = z
+  .object({
+    name: z.string().min(1),
+    engine: EngineSchema,
+    host: z.string().min(1),
+    port: z.number().int(),
+    username: z.string().min(1),
+    password: z.string().min(1),
+    tls: z.boolean().default(true),
+    tlsCaCert: TlsCaCertSchema.nullable().default(null),
+    scope: ScopeSchema,
+  })
+  .superRefine(refuseCaWithoutTls);
 
 // Editable fields only, all optional. `engine` is deliberately absent and `.strict()` turns sending
 // it into a 400 rather than a silent no-op: the engine decides a target's dump/restore descriptors
@@ -41,6 +112,9 @@ const CreateTargetSchema = z.object({
 // `password` keeps the write-only contract in both directions: omit it and the stored credential is
 // untouched, which is what makes editing a host or port possible at all when the UI can never read
 // the secret back to re-submit it.
+//
+// `tlsCaCert` has three answers, not two: absent keeps the stored one, a PEM replaces it, `null`
+// clears it — which is how a target goes back from verified to merely encrypted.
 const UpdateTargetSchema = z
   .object({
     name: z.string().min(1),
@@ -49,23 +123,30 @@ const UpdateTargetSchema = z
     username: z.string().min(1),
     password: z.string().min(1),
     tls: z.boolean(),
+    tlsCaCert: TlsCaCertSchema.nullable(),
     scope: ScopeSchema,
   })
   .partial()
-  .strict();
+  .strict()
+  .superRefine(refuseCaWithoutTls);
 
 type EngineName = z.infer<typeof EngineSchema>;
 
 // The connection alone — everything a probe needs and nothing that would be stored. Used by
-// /targets/discover so an operator can see what a server holds BEFORE a target exists.
-const DiscoverSchema = z.object({
-  engine: EngineSchema,
-  host: z.string().min(1),
-  port: z.number().int(),
-  username: z.string().min(1),
-  password: z.string().min(1),
-  tls: z.boolean().default(true),
-});
+// /targets/discover so an operator can see what a server holds BEFORE a target exists. The CA is
+// part of the connection: discovering over a verified connection is how the operator learns the CA
+// they pasted is the right one before anything is saved.
+const DiscoverSchema = z
+  .object({
+    engine: EngineSchema,
+    host: z.string().min(1),
+    port: z.number().int(),
+    username: z.string().min(1),
+    password: z.string().min(1),
+    tls: z.boolean().default(true),
+    tlsCaCert: TlsCaCertSchema.nullable().default(null),
+  })
+  .superRefine(refuseCaWithoutTls);
 
 // What a scope has to look like for the dump tool to copy what the operator meant. Enforced at
 // the border, and again at dump time by buildDumpDescriptorFor (jobs/worker-wiring.ts): the two
@@ -111,6 +192,7 @@ export interface CreateTargetData {
   port: number;
   username: string;
   tls: boolean;
+  tlsCaCert: string | null;
   scope: z.infer<typeof ScopeSchema>;
   encryptedCredential: EncryptedCredential;
 }
@@ -123,6 +205,8 @@ export interface TargetRecord {
   port: number;
   username: string;
   tls: boolean;
+  // Public, so it IS included in a response — unlike the credential below.
+  tlsCaCert: string | null;
   scope: unknown;
   // Present in the store, NEVER included in a response.
   encryptedCredential: unknown;
@@ -154,6 +238,7 @@ interface PublicTarget {
   port: number;
   username: string;
   tls: boolean;
+  tlsCaCert: string | null;
   scope: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -171,6 +256,7 @@ function toPublicTarget(target: TargetRecord): PublicTarget {
     port: target.port,
     username: target.username,
     tls: target.tls,
+    tlsCaCert: target.tlsCaCert,
     scope: target.scope,
     createdAt: target.createdAt,
     updatedAt: target.updatedAt,
@@ -206,6 +292,7 @@ export function targetRoutes(deps: TargetRoutesDeps) {
           port: parsed.data.port,
           username: parsed.data.username,
           tls: parsed.data.tls,
+          tlsCaCert: parsed.data.tlsCaCert,
           scope: parsed.data.scope,
           encryptedCredential: encryptCredential(deps.kek, parsed.data.password),
         });
@@ -267,13 +354,25 @@ export function targetRoutes(deps: TargetRoutesDeps) {
         }
 
         const store = deps.store(contextOf(request).organizationId);
-        // The engine is not in a patch — it cannot be changed — so the rule reads it off the row.
-        // One extra query, only when the scope itself is what is being changed.
-        if (rest.scope !== undefined) {
+        // Two rules need the row: the engine is not in a patch — it cannot be changed — so the scope
+        // rule reads it off the row, and a CA sent without `tls` is judged against the row's own
+        // `tls`. One extra query, only when one of them applies.
+        const needsRow =
+          rest.scope !== undefined || (typeof rest.tlsCaCert === "string" && rest.tls === undefined);
+        if (needsRow) {
           const current = await store.get(params.data.id);
           if (current === null) return reply.status(404).send({ error: "not found" });
-          const problem = scopeProblem(current.engine as EngineName, rest.scope);
-          if (problem !== null) return reply.status(400).send({ error: problem });
+          if (rest.scope !== undefined) {
+            const problem = scopeProblem(current.engine as EngineName, rest.scope);
+            if (problem !== null) return reply.status(400).send({ error: problem });
+          }
+          if (typeof rest.tlsCaCert === "string" && rest.tls === undefined && !current.tls) {
+            return reply.status(400).send({
+              error: "invalid target update",
+              field: "tlsCaCert",
+              detail: CA_NEEDS_TLS,
+            } satisfies BadRequestBody);
+          }
         }
 
         const updated = await store.update(params.data.id, {
@@ -318,6 +417,7 @@ export function prismaTargetStore(prisma: PrismaClient, organizationId: string):
           port: data.port,
           username: data.username,
           tls: data.tls,
+          tlsCaCert: data.tlsCaCert,
           scope: data.scope,
           encryptedCredential: data.encryptedCredential,
         },

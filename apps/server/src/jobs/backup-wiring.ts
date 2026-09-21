@@ -39,6 +39,12 @@ export interface BackupWiringDeps {
   // the password via env (PGPASSWORD/MYSQL_PWD) and runs with no mount. Materialized + cleaned up by
   // the composer (worker-wiring), which holds the decrypted password.
   configMount?: RunMount;
+  // The target's CA certificate, read-only at TLS_CA_PATH, for a target whose TLS is verified. Set
+  // for any engine; mounted into every run that CONNECTS to the target — the dump and the postgres
+  // globals dump — because a descriptor that names PGSSLROOTCERT / --ssl-ca / --sslCAFile without
+  // the file is a run that fails, and one that skipped the flag would be a run that quietly stopped
+  // verifying. Materialized and removed by the composer (worker-wiring).
+  tlsCaMount?: RunMount;
   // Scratch directory a STAGED dump writes its directory-format output into. Mounted into the dump
   // container at the SAME path it was told to write to — a descriptor path that is not mounted is a
   // path inside the container, and the dump dies with it.
@@ -87,23 +93,33 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
     for (const key of keys) written.delete(key);
   };
 
+  // What a run that connects to the target needs mounted: mongo's `--config` password file and the
+  // target's CA certificate, each only when it applies. Empty for a postgres or mysql target whose
+  // TLS is off or unverified — those carry everything in env.
+  const connectionMounts: RunMount[] = [
+    ...(deps.configMount !== undefined ? [deps.configMount] : []),
+    ...(deps.tlsCaMount !== undefined ? [deps.tlsCaMount] : []),
+  ];
+
   // `what` names the step in the job's reason ("globals dump execution failed (exit code 1): ...").
   // Without it a globals failure read exactly like a database-dump failure, one step after the
   // database dump had already succeeded and been uploaded.
+  //
+  // `mounts` is explicit rather than defaulted: the archive step of a STAGED dump reads a directory
+  // and connects to nothing, and every other caller connects to the target and passes
+  // connectionMounts. A default would be the place a new caller forgets the CA.
   const uploadEncrypted = async (
     descriptor: ExecutionDescriptor,
     recipients: string[],
     key: string,
     what: "dump" | "dump archive" | "globals dump",
-    extraMounts: RunMount[] = [],
+    mounts: RunMount[],
   ): Promise<{ checksum: string; sizeBytes: number; rawBytes: number }> => {
     written.add(key);
     const dumpOut = new PassThrough();
     const runPromise = deps.runner.run(descriptor, {
       network: deps.network,
-      // Empty for every engine except mongodb, whose password is delivered through the mounted
-      // `--config` file rather than argv/env.
-      mounts: [...(deps.configMount !== undefined ? [deps.configMount] : []), ...extraMounts],
+      mounts,
       stdout: dumpOut,
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
@@ -240,7 +256,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
 
     const dump = await deps.runner.run(dumpDescriptor, {
       network: deps.network,
-      mounts: [...(deps.configMount !== undefined ? [deps.configMount] : []), stagingMount],
+      mounts: [...connectionMounts, stagingMount],
       timeoutMs: deps.timeoutMs,
       correlationId: deps.jobId,
       ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
@@ -287,7 +303,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
       const { checksum, sizeBytes, rawBytes } =
         mode === "STAGED"
           ? await archiveStagedDump(dumpDescriptor, recipients.recipients, key)
-          : await uploadEncrypted(dumpDescriptor, recipients.recipients, key, "dump");
+          : await uploadEncrypted(dumpDescriptor, recipients.recipients, key, "dump", connectionMounts);
       return {
         bucketKey: key,
         manifestKey: manifestKey(deps.prefix, deps.organizationId, deps.jobId),
@@ -311,6 +327,7 @@ export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
         recipients.recipients,
         objectKey("globals.bin"),
         "globals dump",
+        connectionMounts,
       );
     },
 

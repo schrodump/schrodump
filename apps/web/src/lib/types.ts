@@ -135,6 +135,10 @@ export interface Target {
   port: number;
   username: string;
   tls: boolean;
+  // The target's CA certificate, PEM, or null. Public — the server returns it, unlike the password —
+  // which is what lets the form say "configured", reuse it for discovery, and offer to replace or
+  // remove it.
+  tlsCaCert: string | null;
   // What the target is scoped to back up. The server has always returned it (toPublicTarget); the
   // web simply never declared it, so nothing could read it back — which is what an edit form needs
   // to show the databases already configured instead of silently clearing them.

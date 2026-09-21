@@ -246,6 +246,7 @@ async function probeTarget(
       correlationId: `probe:${row.id}`,
     }),
     tls: row.tls,
+    tlsCaCert: row.tlsCaCert,
     databases: scope.success ? scope.data.databases : [],
   });
 }

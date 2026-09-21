@@ -56,6 +56,22 @@ describe("parseConnectionUrl", () => {
     expect(parsed("mysql://u:p@h/db?ssl-mode=REQUIRED").tls).toBe(true);
   });
 
+  // A URL can ask for verification but cannot carry the CA it would verify against — the form turns
+  // TLS on and tells the operator the certificate is still needed, rather than implying a verified
+  // connection it cannot make.
+  it("notes when the URL asks for the certificate to be verified", () => {
+    expect(parsed("postgres://u:p@h/db?sslmode=verify-full").tlsVerify).toBe(true);
+    expect(parsed("postgres://u:p@h/db?sslmode=verify-ca").tlsVerify).toBe(true);
+    expect(parsed("mysql://u:p@h/db?ssl-mode=VERIFY_IDENTITY").tlsVerify).toBe(true);
+    expect(parsed("postgres://u:p@h/db?sslmode=require&sslrootcert=/etc/ca.pem").tlsVerify).toBe(true);
+    expect(parsed("mongodb://u:p@h/db?tls=true&tlsCAFile=ca.pem").tlsVerify).toBe(true);
+    // Still TLS on, whichever of them it was.
+    expect(parsed("postgres://u:p@h/db?sslmode=verify-full").tls).toBe(true);
+    // require encrypts without verifying, and saying nothing asks for nothing.
+    expect(parsed("postgres://u:p@h/db?sslmode=require").tlsVerify).toBe(false);
+    expect(parsed("postgres://u:p@h/db").tlsVerify).toBe(false);
+  });
+
   it("unbrackets an IPv6 host", () => {
     expect(parsed("postgres://u:p@[2001:db8::1]:5432/shop").host).toBe("2001:db8::1");
   });

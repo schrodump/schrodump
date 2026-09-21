@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { EngineDescriptorError, type EngineAdapter, type TargetConnection, type VerifySandbox } from "../descriptor.js";
+import {
+  EngineDescriptorError,
+  TLS_CA_PATH,
+  tlsModeOf,
+  type EngineAdapter,
+  type TargetConnection,
+  type VerifySandbox,
+} from "../descriptor.js";
 
 const MIN_MAJOR = 13;
 const MAX_MAJOR = 18;
@@ -15,10 +22,17 @@ function connArgs(connection: TargetConnection): string[] {
   return ["-h", connection.host, "-p", String(connection.port), "-U", connection.username];
 }
 
+// The TLS mode reaches libpq through PGSSLMODE, whose values ARE the mode names: `require` encrypts
+// and verifies nothing, `verify-full` checks the chain against PGSSLROOTCERT and the host name
+// against the certificate. The probe (probe/postgres.ts) connects the same way, from the same
+// reading. Every tool that touches the target takes this env — pg_dump, pg_dumpall, pg_restore and
+// psql alike — so no one of them can be the unverified exception.
 function connEnv(connection: TargetConnection): Record<string, string> {
+  const mode = tlsModeOf(connection);
   return {
     PGPASSWORD: connection.password,
-    PGSSLMODE: connection.tls ? "require" : "disable",
+    PGSSLMODE: mode,
+    ...(mode === "verify-full" ? { PGSSLROOTCERT: TLS_CA_PATH } : {}),
   };
 }
 

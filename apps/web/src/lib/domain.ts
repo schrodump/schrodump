@@ -166,6 +166,29 @@ export const PROBE_FAILURE_CODES = [
 ] as const;
 export type ProbeFailureCode = (typeof PROBE_FAILURE_CODES)[number];
 
+// What a target's TLS settings mean, in the terms the server applies them — to the probe and to every
+// tool that connects, identically (targetTlsOf in the engines package). Four readings, not three,
+// because "TLS on, no CA" means different things per engine: postgres and mysql/mariadb encrypt and
+// do NOT verify the server's certificate; mongodb's tools verify against the system trust store
+// anyway, which is their own default. A CA with TLS off is inert, so it reads as off.
+export type TlsReading = "off" | "unverified" | "system" | "ca";
+export function tlsReadingOf(engine: EngineKind, tls: boolean, hasCa: boolean): TlsReading {
+  if (!tls) return "off";
+  if (hasCa) return "ca";
+  return engine === "mongodb" ? "system" : "unverified";
+}
+
+// What the server accepts as a CA certificate is decided there (routes/targets.ts parseTlsCaCert:
+// every PEM block a certificate node:crypto can parse, and no other kind of block). This mirror only
+// catches the obvious — nothing that looks like a certificate, or a PRIVATE KEY pasted beside one —
+// so Save can say why before a request is made. The key case matters most: the field is stored in
+// clear and shown to every viewer.
+export type CaCertProblem = "notPem" | "privateKey";
+export function caCertProblemOf(pem: string): CaCertProblem | null {
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(pem)) return "privateKey";
+  return /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/.test(pem) ? null : "notPem";
+}
+
 // What a scope has to look like for the dump tool to copy what the operator meant. The server holds
 // the authoritative copy (routes/targets.ts, scopeProblem) and refuses at the border; this mirror
 // lets the form disable Save before a request is ever made. Postgres: pg_dump copies exactly one

@@ -17,7 +17,7 @@ import { useDeleteTarget, useTestConnection } from "@/hooks/use-mutations";
 import { usePolicies, useTargets } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import { canManageTargets, type ProbeFailureCode, type Role } from "@/lib/domain";
+import { canManageTargets, tlsReadingOf, type ProbeFailureCode, type Role } from "@/lib/domain";
 import type { Policy, Target } from "@/lib/types";
 
 const ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_12rem_auto]";
@@ -50,6 +50,9 @@ export function TargetRow({
   const scopeText = whole ? t("targets.scope.wholeInstance") : scopeNames.join(", ");
   const users = policies.filter((policy) => policy.targetId === target.id);
   const hostPort = `${target.host}:${target.port}`;
+  // How the connection is secured is part of what the target points at: "TLS on" alone read as
+  // verified when, for postgres and mysql without a CA, nothing checks who answers.
+  const tlsReading = tlsReadingOf(target.engine, target.tls, target.tlsCaCert !== null);
 
   return (
     <div className="border-b border-border">
@@ -57,7 +60,7 @@ export function TargetRow({
         <div className="min-w-0">
           <div className="truncate text-[13.5px] font-medium">{target.name}</div>
           <div className="mt-0.5 truncate font-mono text-[11.5px] text-muted-foreground">
-            {t(`engine.${target.engine}`)} · {hostPort}
+            {t(`engine.${target.engine}`)} · {hostPort} · {t(`targets.list.tls.${tlsReading}`)}
           </div>
           {users.length > 0 ? (
             <div className="mt-0.5 truncate font-mono text-[11px] text-subtle-foreground">
@@ -114,7 +117,12 @@ export function TargetRow({
       ) : null}
       {test.isSuccess ? (
         <div className="px-[18px] pb-3">
-          <VerdictPanel result={test.data} hostPort={hostPort} user={target.username} tls={target.tls} />
+          <VerdictPanel
+            result={test.data}
+            hostPort={hostPort}
+            user={target.username}
+            tls={tlsReading}
+          />
         </div>
       ) : null}
       {test.isError ? (

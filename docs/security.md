@@ -337,6 +337,48 @@ Dumps run in ephemeral containers, one per job, built from the target's own majo
   than contain anything. Containment comes from the container being ephemeral, having no socket
   access and mounting nothing else.
 
+## The connection to your database, and what each TLS mode verifies
+
+A target has three TLS modes, and Schrodump applies each one **identically** to the connection test,
+the probe every backup starts with, and every tool that connects — `pg_dump`, `pg_dumpall`,
+`pg_restore`, `psql`, `mysqldump`/`mariadb-dump`, the `mysql`/`mariadb` client, `mongodump`,
+`mongorestore`. A connection test that passes is a backup that can connect, and the reverse. (The
+verify sandbox is a throwaway container on the executor network and never connects to your
+database.)
+
+| Target settings                | What is checked                                                                                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TLS off                        | Nothing. The password and every dump cross the network in the clear. An explicit choice, recorded on the target.                                                           |
+| TLS on, no CA certificate      | **PostgreSQL, MySQL, MariaDB:** encrypted; the server's certificate is **not** verified (libpq's `sslmode=require`). Anyone who can sit in the path can pose as the server. **MongoDB:** encrypted and verified against the system trust store, which is the tools' own default and covers Atlas and other public CAs. |
+| TLS on, with a CA certificate  | Encrypted; the certificate chain verified against **that CA only**, and the host name checked against the certificate — libpq `verify-full`, MySQL `VERIFY_IDENTITY`, MariaDB `--ssl-verify-server-cert`, mongo `--sslCAFile`. |
+
+The CA certificate is public and is stored as it is, in clear, on the target row and returned by the
+API: it is not a credential, and wrapping it like one would suggest a protection it does not need.
+The API accepts only PEM certificates it can parse, and refuses any other PEM block outright — the
+likeliest wrong paste is the server's private key, and this field is shown to every viewer.
+
+The tools read the CA from a file: the server writes it onto the scratch volume and bind-mounts it
+**read-only** into the executor at `/etc/schrodump/tls-ca.pem`, the same way the mongo `--config`
+password file travels. A target with a CA therefore needs `SCHRODUMP_SCRATCH_PATH` configured; without
+it the backup fails at once and says so.
+
+What is not covered:
+
+- **A staged MySQL/MariaDB dump requires a CA to use TLS.** `mydumper`/`myloader` (MariaDB
+  Connector/C) have no way to require TLS without verifying it: `--ssl-mode=REQUIRED` completed a
+  whole dump against a server with TLS switched off, in plaintext (measured). With a CA they verify
+  properly. So a TLS target without a CA is never staged — the policy's staged request streams
+  instead, and the job says why — and a staged artifact is not restored into such a target.
+- **The MariaDB client below 11.4 has no "required but unverified" mode.** `--ssl` encrypts when the
+  server offers TLS and falls back to plaintext when it does not; 11.4 and later clients verify by
+  default and refuse plaintext. The probe that runs first, against the same server, refuses a server
+  that offers no TLS, so a backup never reaches the client against one — but against an active
+  attacker, unverified TLS was never a defence. Paste the CA.
+- **For MySQL/MariaDB, give a verified target the host NAME on its certificate.** For an IP address
+  the probe's driver (mysql2) checks the certificate against `localhost` before logging in, and
+  Schrodump checks it against the address only once the connection is up — so an IP works only when
+  the certificate names both, and the login has already happened when the second check runs.
+
 ## Supply chain
 
 A backup tool is a high-value target: compromise the image, and you have credentials for every

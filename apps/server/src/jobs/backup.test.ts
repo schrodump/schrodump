@@ -33,6 +33,7 @@ const CTX: BackupContext = {
   stagedThresholdBytes: 1000,
   scratchConfigured: true,
   singleDatabaseStagingScope: null,
+  stagedTlsRefusal: null,
 };
 
 interface Harness {
@@ -125,6 +126,41 @@ describe("runBackupJob", () => {
       "persistArtifact",
       "setState:SUCCEEDED",
     ]);
+  });
+
+  // A degradation nobody can read is a silent one. The TLS reroute is the case that matters here: a
+  // policy asking for a staged dump of a TLS target without a CA gets a stream, and the job says why.
+  it("writes an execution-mode degradation as the SUCCEEDED job's reason", async () => {
+    const reasons: Array<string | undefined> = [];
+    const h = makeHarness({
+      setState: (state, reason) => {
+        if (state === "SUCCEEDED") reasons.push(reason);
+        return Promise.resolve();
+      },
+    });
+    const refusal = "mydumper cannot require TLS without verifying it";
+    const outcome = await runBackupJob(
+      { ...CTX, requestedParallelism: 4, stagedTlsRefusal: refusal },
+      h.ports,
+    );
+    expect(outcome.mode).toBe("STREAM");
+    expect(reasons).toEqual([
+      `staged unavailable: ${refusal}, and this TLS target has no CA certificate — streamed instead`,
+    ]);
+    // And nothing was reserved for a STAGED dump that did not happen.
+    expect(h.calls).not.toContain("reserveScratch");
+  });
+
+  it("writes no reason on a SUCCEEDED job that degraded nothing", async () => {
+    const reasons: Array<string | undefined> = [];
+    const h = makeHarness({
+      setState: (state, reason) => {
+        if (state === "SUCCEEDED") reasons.push(reason);
+        return Promise.resolve();
+      },
+    });
+    await runBackupJob(CTX, h.ports);
+    expect(reasons).toEqual([undefined]);
   });
 
   // The scratch reserve/release lifecycle used to be covered here through STAGED mode. STAGED is
