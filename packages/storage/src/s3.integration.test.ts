@@ -10,7 +10,7 @@ import { createS3Driver } from "./s3.js";
 //
 // Point it at a MinIO container, e.g.:
 //   docker run -p 9000:9000 -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-//     minio/minio server /data
+//     quay.io/minio/minio server /data
 // then export SCHRODUMP_TEST_S3_ENDPOINT / _ACCESS_KEY / _SECRET_KEY / _BUCKET.
 
 const endpoint = process.env.SCHRODUMP_TEST_S3_ENDPOINT;

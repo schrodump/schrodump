@@ -127,7 +127,7 @@ docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
   -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-  minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/dev/null
+  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/dev/null
 for _ in $(seq 1 60); do
   docker exec "${PROJECT}-target" pg_isready -h 127.0.0.1 -U app -d shop >/dev/null 2>&1 && break
   sleep 2

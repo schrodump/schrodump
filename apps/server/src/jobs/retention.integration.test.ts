@@ -7,7 +7,7 @@
 // otherwise, exactly like packages/storage's s3.integration.test.ts:
 //
 //   docker run -p 9000:9000 -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-//     minio/minio server /data
+//     quay.io/minio/minio server /data
 //   export SCHRODUMP_TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
 //          SCHRODUMP_TEST_S3_ACCESS_KEY=minio SCHRODUMP_TEST_S3_SECRET_KEY=minio123
 
