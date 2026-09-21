@@ -136,7 +136,9 @@ export async function runRestoreJob(
     if (keyId === null) {
       return await fail(
         ports,
-        "no server-held identity matches this artifact (sealed) — supply an identity in memory",
+        "no server-held identity matches this artifact: it is sealed to the escrow key alone, which " +
+          "this server never stores — restore it outside Schrodump with the escrow identity " +
+          "(docs/backup-restore.md, \"Restoring a sealed artefact\")",
       );
     }
 

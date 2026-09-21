@@ -89,7 +89,7 @@ export function recipientsForSealMode(
 
 // Restore resolves the decryption key from the MANIFEST's keyIds, never from global config. It
 // returns a key the server can actually decrypt with (operational), or null when the artifact is
-// sealed and the operator must supply an identity in memory.
+// sealed — escrow-only — and has to be restored outside Schrodump with the escrow identity.
 export function resolveDecryptionKeyId(
   manifestKeyIds: string[],
   availableKeys: EncryptionKeyRecord[],
