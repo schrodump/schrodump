@@ -105,6 +105,22 @@ EOF
 compose() { docker compose -p "$PROJECT" --env-file "${WORK}/.env" "$@"; }
 api() { curl -sS -b "${WORK}/cookies" -c "${WORK}/cookies" -H "Origin: ${ORIGIN}" "$@"; }
 
+# "Is at least one artifact VERIFIED", asked of a /artifacts body.
+#
+# Not "is the count exactly one". Creating a policy also dispatches its most recent past cron
+# window, so a step that triggers one backup can end up with two artifacts and a count of 2 — and a
+# detector matching the literal `"VERIFIED":1` then waits out its whole five-minute clock and fails
+# saying nothing reached VERIFIED, printing a body in which everything did. That is a false red on
+# whatever branch happened to be unlucky, which is worse than no check: it teaches people to rerun.
+# Step 9 already had this comment; the two counters that watch for green did not have the reading.
+any_verified() {
+  case "$1" in
+    *'"VERIFIED":0'*|*'"VERIFIED": 0'*) return 1 ;;
+    *'"VERIFIED":'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Waits until no job is PENDING or RUNNING. Creating a policy also dispatches its most recent past
 # cron window on top of the manual trigger, and each backup chains a verify, so a step that ends when
 # ITS artifact goes green can leave a second chained verify still starting. Recreating the container
@@ -196,13 +212,11 @@ verified=""
 for attempt in $(seq 1 60); do
   sleep 5
   body="$(api "${BASE}/backend/artifacts")"
-  case "$body" in
-    *'"VERIFIED":1'*|*'"VERIFIED": 1'*)
-      printf '   VERIFIED after %ss\n' "$((attempt * 5))"
-      verified=yes
-      break
-      ;;
-  esac
+  if any_verified "$body"; then
+    printf '   VERIFIED after %ss\n' "$((attempt * 5))"
+    verified=yes
+    break
+  fi
   jobs="$(api "${BASE}/backend/jobs")"
   case "$jobs" in
     *'"state":"FAILED"'*)
@@ -302,9 +316,10 @@ api -o /dev/null -w '   re-verify the pre-rotation artifact %{http_code}\n' -X P
   "${BASE}/backend/artifacts/${old_artifact}/verify"
 for attempt in $(seq 1 60); do
   sleep 5
-  case "$(api "${BASE}/backend/artifacts")" in
-    *'"VERIFIED":1'*|*'"VERIFIED": 1'*) printf '   still VERIFIED, decrypted with the retired key\n'; break ;;
-  esac
+  if any_verified "$(api "${BASE}/backend/artifacts")"; then
+    printf '   still VERIFIED, decrypted with the retired key\n'
+    break
+  fi
   [ "$attempt" -eq 60 ] && fail "an artifact sealed to the retired key could not be verified after rotation"
 done
 
