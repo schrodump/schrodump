@@ -37,7 +37,7 @@ describe("LastCheck", () => {
     expect(el).toHaveAttribute("data-check", "passed");
     // The viewer's local time, computed the way the component does — never the raw UTC slice this
     // used to hardcode ("15:12"), which read three hours off for a São Paulo operator.
-    expect(el).toHaveTextContent(formatTime(at));
+    expect(el).toHaveTextContent(formatTime("en", at));
   });
 
   it("says failed, which is a different answer from never", () => {

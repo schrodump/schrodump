@@ -5,7 +5,7 @@
 
 import type { MessageKey } from "@/i18n/messages/en";
 import { useT } from "@/i18n/provider";
-import { formatTime } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
 
 // The recorded outcome of an operator-triggered check — a target probe or a destination canary.
 //
@@ -25,9 +25,10 @@ export function LastCheck({
   keys: { never: MessageKey; lastOk: MessageKey; lastFailed: MessageKey };
 }) {
   const t = useT();
+  const fmt = useFormat();
   // The viewer's local time, not the UTC slice this used to show — a probe run at 02:00 in São
   // Paulo read as 05:00 on the row.
-  const when = at === null ? "" : formatTime(at);
+  const when = at === null ? "" : fmt.time(at);
 
   if (ok === null || at === null) {
     return (

@@ -7,7 +7,8 @@ import { AdminOnly, LoadingLine, SettingsPanel } from "@/components/settings-pan
 import { useSelfBackups } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import { formatBytes, formatRelative } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
 import type { SelfBackup } from "@/lib/types";
 
 // A self-backup that SUCCEEDED is amber, not green, and that is not a styling slip.
@@ -35,6 +36,7 @@ function Pill({ className, children, state }: { className: string; children: str
 
 export function SelfBackupPanel() {
   const t = useT();
+  const fmt = useFormat();
   const query = useSelfBackups();
 
   const body = (): React.ReactNode => {
@@ -61,7 +63,7 @@ export function SelfBackupPanel() {
             {t(`selfBackup.state.${latest.state}`)}
           </Pill>
           <span className="font-mono text-[11.5px] text-muted-foreground">
-            {t("selfBackup.lastRun", { when: formatRelative(latest.finishedAt ?? latest.startedAt) })}
+            {t("selfBackup.lastRun", { when: fmt.relative(latest.finishedAt ?? latest.startedAt) })}
           </span>
           {latest.sizeBytes !== null ? (
             <span className="font-mono text-[11.5px] text-muted-foreground">

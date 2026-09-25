@@ -12,7 +12,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { I18nProvider } from "@/i18n/provider";
+import { I18nProvider, type Locale } from "@/i18n/provider";
 import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 import { ArtifactRow } from "./page";
@@ -51,11 +51,12 @@ function renderRow(
   artifact: Artifact,
   destinationName: string | null = "Cloudflare R2",
   role: Role = "operator",
+  locale: Locale = "en",
 ): ReactNode | void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <I18nProvider>
+      <I18nProvider initialLocale={locale}>
         <ArtifactRow artifact={artifact} role={role} destinationName={destinationName} />
       </I18nProvider>
     </QueryClientProvider>,
@@ -291,5 +292,29 @@ describe("verify is operator+, and the button says so by not being there", () =>
     expect(screen.queryByRole("button", { name: /verify/i })).toBeNull();
     // The row is still fully readable — hiding the action never hides the evidence.
     expect(document.querySelector("summary")).toHaveTextContent(/unobserved/i);
+  });
+});
+
+// The language menu used to change the labels and nothing else: `Intl` was called with `undefined`,
+// which resolves to the BROWSER's locale — a different setting from the app's. A Portuguese screen
+// read "NÃO OBSERVADO" beside "2 days ago". The row is the smallest place the two meet, so it is
+// where the binding is held.
+describe("the age beside a row is written in the language the interface is in", () => {
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+  it("says it in Portuguese under a Portuguese interface", () => {
+    renderRow({ ...base, createdAt: threeDaysAgo }, "Cloudflare R2", "operator", "pt-BR");
+    expect(screen.getByText("há 3 dias")).toBeInTheDocument();
+    expect(screen.queryByText("3 days ago")).toBeNull();
+  });
+
+  it("says it in Spanish under a Spanish interface", () => {
+    renderRow({ ...base, createdAt: threeDaysAgo }, "Cloudflare R2", "operator", "es");
+    expect(screen.getByText("hace 3 días")).toBeInTheDocument();
+  });
+
+  it("and in English under an English one", () => {
+    renderRow({ ...base, createdAt: threeDaysAgo }, "Cloudflare R2", "operator", "en");
+    expect(screen.getByText("3 days ago")).toBeInTheDocument();
   });
 });

@@ -55,9 +55,9 @@ describe("PolicyRow schedule", () => {
     wrap(<PolicyRow policy={base} timeZone={VIEWER_ZONE} now={NOW} />);
     expect(screen.getByText("0 2 * * *")).toBeInTheDocument();
     const reading = screen.getByTestId("cron-reading");
-    expect(reading).toHaveTextContent(`every day at ${formatTime(new Date(2000, 0, 1, 2, 0).toISOString())} ${VIEWER_ZONE} ·`);
+    expect(reading).toHaveTextContent(`every day at ${formatTime("en", new Date(2000, 0, 1, 2, 0).toISOString())} ${VIEWER_ZONE} ·`);
     // Same clock as the viewer's: nothing to disambiguate.
-    expect(reading).toHaveTextContent(new RegExp(`· next tomorrow ${formatTime(TOMORROW_2AM)}$`));
+    expect(reading).toHaveTextContent(new RegExp(`· next tomorrow ${formatTime("en", TOMORROW_2AM)}$`));
   });
 
   // SC-01. The row used to compute the next run itself, on the browser's clock, while the
@@ -71,8 +71,8 @@ describe("PolicyRow schedule", () => {
     const serverSays = new Date(2026, 8, 8, 23, 17).toISOString();
     wrap(<PolicyRow policy={{ ...base, nextRunAt: serverSays }} timeZone={OTHER_ZONE} now={NOW} />);
     const reading = screen.getByTestId("cron-reading");
-    expect(reading).toHaveTextContent(`next today ${formatTime(serverSays)} your time`);
-    expect(reading).not.toHaveTextContent(`tomorrow ${formatTime(TOMORROW_2AM)}`);
+    expect(reading).toHaveTextContent(`next today ${formatTime("en", serverSays)} your time`);
+    expect(reading).not.toHaveTextContent(`tomorrow ${formatTime("en", TOMORROW_2AM)}`);
     // And the expression is read on the instance's clock, which the sentence names.
     expect(reading).toHaveTextContent(new RegExp(`^every day at .+ ${OTHER_ZONE} ·`));
   });

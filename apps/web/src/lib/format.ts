@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import type { Locale } from "../i18n/provider";
+
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
 
 // Locale-independent byte formatting for artifact sizes. Kept pure so it is trivially testable.
@@ -21,22 +23,29 @@ export function formatServerVersion(versionNum: number): string {
   return `${major}.${minor}.${patch}`;
 }
 
-// Timestamps travel as UTC ISO strings; the operator reads them where they are. Rendering with Intl
-// at the browser's resolved locale and timezone means a São Paulo operator does not silently add
-// three hours in their head — the row said 05:00 for a job that ran at 02:00 their time, which is
-// exactly the kind of quiet mismatch that makes a person distrust the whole screen. An unparseable
-// or empty value returns "" so the caller decides what absence looks like (a dash, a placeholder).
+// Timestamps travel as UTC ISO strings; the operator reads them where they are. The TIMEZONE is the
+// browser's — a São Paulo operator does not silently add three hours in their head, because the row
+// said 05:00 for a job that ran at 02:00 their time, and that quiet mismatch is what makes a person
+// distrust the whole screen. An unparseable or empty value returns "" so the caller decides what
+// absence looks like (a dash, a placeholder).
+//
+// The LOCALE is the app's, and it is a required argument rather than `undefined`. Passing nothing
+// resolves to the BROWSER's locale, which is a different setting from the one the language menu
+// changes: switching the interface to Portuguese used to leave every date and every "2 days ago" in
+// whatever the browser was set to, so a pt-BR screen read "Não observado · 2 days ago". Making it
+// required is the point — a call site that can be written without a locale is the call site the
+// next author writes without one. `useFormat()` binds it to the active locale for components.
 
-export function formatDateTime(iso: string): string {
+export function formatDateTime(locale: Locale, iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-export function formatTime(iso: string): string {
+export function formatTime(locale: Locale, iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(date);
 }
 
 // Successively larger units, each expressed in the previous one. The loop divides the elapsed time
@@ -69,10 +78,10 @@ export function formatDuration(ms: number): string {
   return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
 }
 
-export function formatRelative(iso: string, now: Date = new Date()): string {
+export function formatRelative(locale: Locale, iso: string, now: Date = new Date()): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   let duration = (date.getTime() - now.getTime()) / 1000; // seconds; negative is the past
   for (const division of DIVISIONS) {
     if (Math.abs(duration) < division.amount) return rtf.format(Math.round(duration), division.unit);
@@ -105,10 +114,10 @@ export function dayGroupOf(iso: string, now: Date = new Date()): DayGroup {
 }
 
 // The date alone, in the viewer's locale — the day-group header for anything older than yesterday.
-export function formatDate(iso: string): string {
+export function formatDate(locale: Locale, iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
 }
 
 // The zone the screen renders in, named, with its offset — "America/Sao_Paulo · UTC−03:00". A ledger

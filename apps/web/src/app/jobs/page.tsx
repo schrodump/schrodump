@@ -21,13 +21,10 @@ import { cn } from "@/lib/cn";
 import { JOB_KINDS, type JobKind, type JobState } from "@/lib/domain";
 import {
   dayGroupOf,
-  formatDate,
-  formatDateTime,
   formatDuration,
-  formatRelative,
-  formatTime,
   timeZoneNote,
 } from "@/lib/format";
+import { useFormat, type Format } from "@/lib/use-format";
 import type { Job, JobList } from "@/lib/types";
 
 // Five minutes: past it, a queue wait stops being scheduling jitter and becomes the signal that the
@@ -84,6 +81,7 @@ function useNow(live: boolean): Date {
 
 export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
   const t = useT();
+  const fmt = useFormat();
   const [copied, setCopied] = useState(false);
   const started = ms(job.startedAt);
   const finished = ms(job.finishedAt);
@@ -112,7 +110,7 @@ export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
           : durationMs !== null
             ? t("jobs.ranIn", { duration: formatDuration(durationMs) })
             : job.startedAt !== null
-              ? t("jobs.startedRelative", { when: formatRelative(job.startedAt, now) })
+              ? t("jobs.startedRelative", { when: fmt.relative(job.startedAt, now) })
               : null;
   const waitLine =
     job.state === "PENDING"
@@ -159,16 +157,16 @@ export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
   const facts: Fact[] = [
     {
       label: t("jobs.fact.scheduled"),
-      value: job.scheduledAt === null ? t("jobs.fact.manual") : formatDateTime(job.scheduledAt),
+      value: job.scheduledAt === null ? t("jobs.fact.manual") : fmt.dateTime(job.scheduledAt),
     },
     {
       label: t("jobs.fact.started"),
-      value: job.startedAt === null ? null : `${formatDateTime(job.startedAt)} · ${formatRelative(job.startedAt, now)}`,
+      value: job.startedAt === null ? null : `${fmt.dateTime(job.startedAt)} · ${fmt.relative(job.startedAt, now)}`,
     },
     {
       label: t("jobs.fact.finished"),
       value:
-        job.finishedAt === null ? null : `${formatDateTime(job.finishedAt)} · ${formatRelative(job.finishedAt, now)}`,
+        job.finishedAt === null ? null : `${fmt.dateTime(job.finishedAt)} · ${fmt.relative(job.finishedAt, now)}`,
     },
     { label: t("jobs.fact.duration"), value: durationMs === null ? null : formatDuration(durationMs) },
     {
@@ -303,7 +301,7 @@ export function JobRow({ job, now = new Date() }: { job: Job; now?: Date }) {
         </div>
 
         <div className="hidden font-mono text-[12px] text-muted-foreground tabular-nums sm:block">
-          {formatTime(anchor)}
+          {fmt.time(anchor)}
         </div>
 
         <div className="hidden justify-end sm:flex">
@@ -400,12 +398,12 @@ function groupByDay(items: Job[], now: Date): Group[] {
     }));
 }
 
-function groupLabel(group: Group, t: ReturnType<typeof useT>): string {
+function groupLabel(group: Group, t: ReturnType<typeof useT>, fmt: Format): string {
   return group.label === "today"
     ? t("group.today")
     : group.label === "yesterday"
       ? t("group.yesterday")
-      : formatDate(group.sample);
+      : fmt.date(group.sample);
 }
 
 function groupCountOf(t: ReturnType<typeof useT>, count: number): string {
@@ -416,6 +414,7 @@ function groupCountOf(t: ReturnType<typeof useT>, count: number): string {
 // footer can be tested against a fixture without a session or a query client around them.
 export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
   const t = useT();
+  const fmt = useFormat();
   const [stateFilter, setStateFilter] = useState<JobState | "ALL">("ALL");
   const [kindFilter, setKindFilter] = useState<JobKind | "ALL">("ALL");
 
@@ -531,8 +530,8 @@ export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
             <EmptyState message={t("jobs.noneInFilter")} />
           ) : (
             groups.map((group) => (
-              <section key={group.key} aria-label={groupLabel(group, t)}>
-                <GroupHeader label={groupLabel(group, t)} count={groupCountOf(t, group.items.length)} />
+              <section key={group.key} aria-label={groupLabel(group, t, fmt)}>
+                <GroupHeader label={groupLabel(group, t, fmt)} count={groupCountOf(t, group.items.length)} />
                 {group.items.map((job) => (
                   <JobRow key={job.id} job={job} now={now} />
                 ))}

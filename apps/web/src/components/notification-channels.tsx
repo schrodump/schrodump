@@ -20,7 +20,7 @@ import {
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
 import { channelState } from "@/lib/domain";
-import { formatRelative } from "@/lib/format";
+import { useFormat } from "@/lib/use-format";
 import type { NotificationChannel, NotificationChannelKind } from "@/lib/types";
 
 // Mirrors the server's schema, which refuses anything shorter. Stated here so the rule is read
@@ -38,6 +38,7 @@ export const CHANNEL_ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[10
 
 export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel; canEdit: boolean }) {
   const t = useT();
+  const fmt = useFormat();
   const setEnabled = useSetNotificationChannelEnabled();
   const remove = useDeleteNotificationChannel();
   const test = useTestNotificationChannel();
@@ -134,7 +135,7 @@ export function ChannelRow({ channel, canEdit }: { channel: NotificationChannel;
           <Panel tone="error" className="p-3">
             <p className="text-[12.5px]">{t("notifications.lastFailure", { reason: channel.lastFailure ?? "" })}</p>
             {channel.lastFailureAt !== null ? (
-              <p className="mt-1 font-mono text-[11px] text-subtle-foreground">{formatRelative(channel.lastFailureAt)}</p>
+              <p className="mt-1 font-mono text-[11px] text-subtle-foreground">{fmt.relative(channel.lastFailureAt)}</p>
             ) : null}
           </Panel>
         </div>

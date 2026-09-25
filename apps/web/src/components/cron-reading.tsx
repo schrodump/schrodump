@@ -3,10 +3,11 @@
 
 "use client";
 
-import { useT } from "@/i18n/provider";
+import { useI18n, useT, type Locale } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
 import { namesAClockTime, nextRun, parseCron, readCron, sameWallClock, type CronReading as Reading } from "@/lib/cron";
-import { dayGroupOf, formatDateTime, formatTime } from "@/lib/format";
+import { dayGroupOf } from "@/lib/format";
+import { useFormat, type Format } from "@/lib/use-format";
 
 // The two things a cron expression does not say on its own: what it means in words, when the
 // shape has an honest sentence, and when it fires next. A disabled policy has no next run and says
@@ -37,6 +38,8 @@ export function CronReading({
   className?: string;
 }) {
   const t = useT();
+  const { locale } = useI18n();
+  const fmt = useFormat();
   const reading = readCron(cron);
   const live = nextRunAt === undefined;
   // For a saved policy the scheduler's own answer decides: it is the one that refuses what it
@@ -58,11 +61,11 @@ export function CronReading({
       reading === null
         ? t("policies.cron.zoneOnly", { zone: timeZone })
         : namesAClockTime(reading)
-          ? t("policies.cron.inZone", { reading: describe(reading, t), zone: timeZone })
-          : describe(reading, t);
+          ? t("policies.cron.inZone", { reading: describe(reading, t, locale, fmt), zone: timeZone })
+          : describe(reading, t, locale, fmt);
   } else if (!unreadable && reading !== null && !namesAClockTime(reading)) {
     // "every 15 minutes" is the same on every clock, so it can be said before the zone is known.
-    sentence = describe(reading, t);
+    sentence = describe(reading, t, locale, fmt);
   }
 
   const nextText = !enabled
@@ -72,8 +75,8 @@ export function CronReading({
       : next === null
         ? null
         : timeZone !== null && !sameWallClock(next, timeZone)
-          ? t("policies.next.viewerClock", { when: relativeDay(next, now, t) })
-          : t("policies.next", { when: relativeDay(next, now, t) });
+          ? t("policies.next.viewerClock", { when: relativeDay(next, now, t, fmt) })
+          : t("policies.next", { when: relativeDay(next, now, t, fmt) });
 
   const parts = [sentence, nextText].filter((part): part is string => part !== null);
 
@@ -84,7 +87,7 @@ export function CronReading({
   );
 }
 
-function describe(reading: Reading, t: ReturnType<typeof useT>): string {
+function describe(reading: Reading, t: ReturnType<typeof useT>, locale: Locale, fmt: Format): string {
   switch (reading.kind) {
     case "everyMinute":
       return t("policies.cron.everyMinute");
@@ -95,33 +98,33 @@ function describe(reading: Reading, t: ReturnType<typeof useT>): string {
     case "everyHours":
       return t("policies.cron.everyHours", { every: String(reading.every), minute: String(reading.minute).padStart(2, "0") });
     case "daily":
-      return t("policies.cron.daily", { time: clock(reading.hour, reading.minute) });
+      return t("policies.cron.daily", { time: clock(reading.hour, reading.minute, fmt) });
     case "weekly":
-      return t("policies.cron.weekly", { day: weekday(reading.dayOfWeek), time: clock(reading.hour, reading.minute) });
+      return t("policies.cron.weekly", { day: weekday(reading.dayOfWeek, locale), time: clock(reading.hour, reading.minute, fmt) });
     case "monthly":
-      return t("policies.cron.monthly", { day: String(reading.dayOfMonth), time: clock(reading.hour, reading.minute) });
+      return t("policies.cron.monthly", { day: String(reading.dayOfMonth), time: clock(reading.hour, reading.minute, fmt) });
   }
 }
 
 // An hour and minute as the viewer's locale writes a time of day. Built on a local Date only to
 // borrow the locale's format: the hour is the expression's, not converted to any clock.
-function clock(hour: number, minute: number): string {
+function clock(hour: number, minute: number, fmt: Format): string {
   const d = new Date(2000, 0, 1, hour, minute);
-  return formatTime(d.toISOString());
+  return fmt.time(d.toISOString());
 }
 
-function weekday(dayOfWeek: number): string {
+function weekday(dayOfWeek: number, locale: Locale): string {
   // Sunday = 0; 4 Jan 2026 is a Sunday.
   const d = new Date(2026, 0, 4 + dayOfWeek);
-  return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(d);
+  return new Intl.DateTimeFormat(locale, { weekday: "long" }).format(d);
 }
 
-function relativeDay(at: Date, now: Date, t: ReturnType<typeof useT>): string {
+function relativeDay(at: Date, now: Date, t: ReturnType<typeof useT>, fmt: Format): string {
   const day = dayGroupOf(at.toISOString(), now);
-  const time = formatTime(at.toISOString());
+  const time = fmt.time(at.toISOString());
   if (day.label === "today") return t("policies.next.today", { time });
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (day.key === dayGroupOf(tomorrow.toISOString(), now).key) return t("policies.next.tomorrow", { time });
-  return formatDateTime(at.toISOString());
+  return fmt.dateTime(at.toISOString());
 }
