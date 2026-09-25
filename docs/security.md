@@ -295,6 +295,43 @@ short one is a legible startup failure naming the variable rather than a confusi
 Rate limiting is a cost multiplier on guessing, not a substitute for a strong password. Twelve
 characters of `passwordpassword` is still `passwordpassword`.
 
+### A signed-in operator is one framed click from a restore
+
+The session cookie makes the browser the operator, and the two most destructive controls in the
+product are a single click each: **restore over a live database**, and **delete a VERIFIED
+artifact**. Put the interface in an invisible `<iframe>` on a page the operator was led to, line
+the frame up under something they mean to click, and their own session does the rest. No password
+is asked for again, because they are already signed in.
+
+So every response says it may not be framed, twice over:
+
+| Header | Sent by | Value |
+| --- | --- | --- |
+| `Content-Security-Policy` | UI (`apps/web/next.config.ts`) | `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'` |
+| `Content-Security-Policy` | API (`@fastify/helmet`) | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` |
+| `X-Frame-Options` | both | `DENY` |
+| `X-Content-Type-Options` | both | `nosniff` |
+| `Referrer-Policy` | both | `no-referrer` |
+
+`frame-ancestors 'none'` is the control that matters; `X-Frame-Options: DENY` repeats it for
+anything that predates CSP level 2. `no-referrer` keeps artifact ids and target names out of the
+`Referer` of wherever the operator clicks next, and `nosniff` stops an error body from being read
+back as a document. The two sides do not overlap on one response: the UI's `headers()` skips the
+`/api/auth/` and `/backend/` prefixes it proxies, because a *duplicated* `X-Frame-Options` is
+discarded by browsers rather than enforced.
+
+**Known limit: `script-src` keeps `'unsafe-inline'`, so the XSS half of the policy is weak.** Next
+serves the React payload as a chain of inline `self.__next_f.push([...])` scripts whose content
+differs per page and per build. No hash covers them; a nonce would have to come from middleware,
+which means giving up the prerendered shell for every route. And a hash cannot simply be *added*:
+the moment one is present, browsers ignore `'unsafe-inline'` — Next's own bootstrap included — and
+the page never hydrates. There is no `'unsafe-eval'`: Zod's JIT probe is switched off
+(`z.config({ jitless: true })`) rather than allowed for.
+
+**No `Strict-Transport-Security` is sent by the application.** Schrodump serves plain HTTP and the
+operator terminates TLS in front of it, so HSTS is the proxy's to send — see
+[install.md](install.md#put-it-behind-tls-this-is-not-optional).
+
 ## The KEK belongs somewhere else
 
 `SCHRODUMP_KEK` encrypts the data keys that encrypt every artefact. Keeping it on the host that

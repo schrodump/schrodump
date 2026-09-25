@@ -43,6 +43,13 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
 - `observability/` — `pino.ts` (logging with redaction), `audit.ts` (the art. 37 trail, below) and
   `health.ts` (`GET /health`, below).
 - `bootstrap/` — first-boot admin creation and the setup-token flow.
+- `security-headers.ts` — `@fastify/helmet`, registered first in `buildApp` so a 401 from the RBAC
+  hook and a 404 carry the headers too. The API answers JSON and nothing else, so its policy is
+  `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, with
+  `X-Frame-Options: DENY` (not helmet's SAMEORIGIN) and **no HSTS** — this process listens on plain
+  HTTP and the operator terminates TLS in front of it (`docs/install.md`). The UI's own, richer
+  policy lives in `apps/web/next.config.ts`, whose `headers()` skips the proxied prefixes so no
+  response ends up carrying both.
 
 ## Invariants
 
