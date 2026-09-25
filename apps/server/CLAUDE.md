@@ -549,6 +549,16 @@ STREAM-only (no staged/parallel).
 
 ## Self-backup (`jobs/self-backup*.ts`)
 
+- **A non-zero exit fails the self-backup.** The runner reports a tool's exit code by RESOLVING
+  with it, and this path checked only whether the promise REJECTED — so a `pg_dump` that died
+  partway and exited 1 having written some bytes was recorded `SUCCEEDED`, with a truncated dump.
+  The artifact path has checked `exitCode !== 0` since the 9.4 GB dump that reached the bucket as
+  877 bytes; this one had not. It is the FAST recovery path for a lost metadata database — the
+  alternative is rebuilding the catalog from every manifest in the bucket — so a truncated one
+  marked good is the copy an operator reaches for on the worst day. The failure carries the tool's
+  own stderr through `describeToolFailure`, and the object is removed before the throw: an object
+  with no row and no manifest is one nothing will ever reclaim.
+
 - **Sealed with the ESCROW key, and it refuses to run without an active one.** The **operational**
   key's identity lives, KEK-wrapped, **inside the database the dump saves** — in the disaster where
   a self-backup would be used, it is gone with it. An artifact sealed only to that key is a decoy:

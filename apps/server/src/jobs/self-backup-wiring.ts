@@ -16,6 +16,7 @@ import { resolveAdapter } from "@schrodump/engines/registry";
 import type { Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
 import { objectKey } from "@schrodump/storage/manifest-sidecar";
+import { describeToolFailure } from "./restore-executor.js";
 import { encryptStream } from "../crypto/artifact.js";
 import {
   selectSelfBackupRecipients,
@@ -215,6 +216,25 @@ export function createSelfBackupPorts(
       ]);
       if (runOutcome.status === "rejected") throw runOutcome.reason as Error;
       if (putOutcome.status === "rejected") throw putOutcome.reason as Error;
+
+      // A non-zero exit RESOLVES — the runner reports the code, it does not throw on it — and this
+      // path only ever checked whether the promise rejected. So a pg_dump that failed partway and
+      // exited 1 having written some bytes was recorded SUCCEEDED, with a truncated dump, and the
+      // artifact path had checked `exitCode !== 0` since the 9.4 GB dump that reached the bucket as
+      // 877 bytes. The self-backup is the FAST recovery path for a lost metadata database; a
+      // truncated one marked good is the copy an operator reaches for on the worst day.
+      //
+      // The object is removed before throwing, for the same reason the rawBytes guard removes it:
+      // an object with no row and no manifest is one nothing will ever reclaim.
+      if (runOutcome.value.exitCode !== 0) {
+        await context.driver.delete([bucketKey]).catch(() => undefined);
+        throw new Error(
+          describeToolFailure(
+            `self-backup dump failed (exit code ${runOutcome.value.exitCode})`,
+            runOutcome.value.stderr,
+          ),
+        );
+      }
 
       // The same guard the artifact path grew after a STAGED dump shipped 318 empty bytes under a
       // SUCCEEDED job. pg_dump exiting 0 having written nothing is a failure wearing a success
