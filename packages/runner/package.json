@@ -34,10 +34,10 @@
   },
   "dependencies": {
     "@schrodump/core": "workspace:*",
-    "dockerode": "^4.0.0"
+    "dockerode": "^4.0.12"
   },
   "devDependencies": {
-    "@types/dockerode": "^3.3.0",
-    "@types/node": "^22.0.0"
+    "@types/dockerode": "^3.3.47",
+    "@types/node": "^22.20.4"
   }
 }
