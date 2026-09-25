@@ -17,6 +17,19 @@ Um backup que um restore não provou não é um backup — é um palpite.
 
 ---
 
+> **Beta: pré-1.0, um mantenedor.** Dezenove release candidates, nenhuma release estável ainda.
+>
+> **O que está provado.** Todo pull request sobe o `compose.yaml` que a gente publica e passa vinte
+> e dois passos por ele: as quatro engines nos dois modos de execução, cada uma verificada por um
+> restore de verdade, três delas restauradas por cima de dados vivos, um catálogo reconstruído só a
+> partir do bucket, uma rotação de chave com o artefato anterior ainda legível, a retenção apagando
+> de fato, uma notificação assinada e um e-mail entregues.
+>
+> **O que não está.** Nada foi marcado como estável, então ainda não há promessa sobre atualizar de
+> uma versão para a seguinte, e o v1 sai com arestas conhecidas — todas escritas em
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Leia essa lista antes de
+> depender disto.
+
 ## Por que Schrodump
 
 Um job de backup que sai com código `0` provou uma coisa só: um processo rodou sem reclamar. **Não**
@@ -43,10 +56,13 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 - **Agentless** — nada é instalado no host do seu banco. Os dumps rodam em contêineres efêmeros
   construídos a partir da major version do próprio alvo.
 - **Cifrado em repouso** — todo artefato é cifrado com [`age`](https://age-encryption.org) para dois
-  recipients (operacional + escrow); as chaves são envelopadas por uma KEK que vive fora do host.
+  recipients (operacional + escrow); essas duas chaves são envelopadas por uma KEK que pertence a um
+  gerenciador de segredos, injetada no start. O início rápido abaixo escreve a KEK no `.env` do
+  host para você subir, e tirá-la de lá é a primeira coisa a fazer.
 - **Destinos S3-compatible** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Agendamento com retenção GFS** — avô-pai-filho, ciente das cadeias full/incremental, e nunca
-  apaga a cópia verificada mais recente de uma política.
+- **Agendamento com retenção GFS** — avô-pai-filho por contagem e por janela de calendário, rodando
+  só quando um backup novo da mesma política entrou, e nunca apaga a cópia verificada mais recente
+  de uma política.
 - **Atrito de restore de propósito** — restrito por papel, limitado por uma matriz de capacidade da
   engine, e sobrescrever um banco exige digitar o nome dele.
 - **Interface web** — um painel construído em torno dos três estados, em inglês, português e espanhol.
@@ -99,6 +115,33 @@ alvo → teste → política. Passo a passo completo em [docs/install.md](docs/i
 | MySQL 8 | AWS S3 · Cloudflare R2 · Backblaze B2 |
 | MariaDB | MinIO · SeaweedFS · Ceph RGW |
 | MongoDB | |
+
+## Como ele se compara — e quando não usar o Schrodump
+
+| No lugar do Schrodump | O que é | Por que você escolheria |
+| --- | --- | --- |
+| **pgBackRest**, **Barman**, **WAL-G** | Backup físico de PostgreSQL com arquivamento contínuo de WAL e point-in-time recovery | Você precisa de um ponto de recuperação medido em segundos, ou tem um cluster grande o bastante para que dump-e-carga não seja um restore plausível. São a resposta madura para esse problema, e o Schrodump não compete com elas. |
+| **restic**, **Backrest** | Backup de arquivos, cifrado e deduplicado, de qualquer coisa em disco | Você quer uma ferramenta só para o host inteiro, não só para os bancos. Vale lembrar: copiar um data directory em uso não é, por si só, um backup consistente de banco — precisa de snapshot de filesystem ou da engine parada. |
+| **postgresus**, **databasus** | `pg_dump` agendado, self-hosted, com painel e notificações | O que há de mais parecido em formato com o Schrodump, e mais simples. Se um job que saiu com `0` é a garantia que você quer, eles entregam isso com menos peças. |
+| **`pg_dump` + cron** | A linha de base de onde todo mundo parte | Nada para implantar, nada novo para confiar. É exatamente o que o Schrodump automatiza — mais a parte em que alguma coisa abre o arquivo depois. |
+| **Backup gerenciado** (RDS, Cloud SQL, Atlas e afins) | Snapshots do provedor, em geral com PITR | São bons, já estão pagos e você quase certamente deve deixá-los ligados. Também moram dentro da conta que pode apagá-los, raramente migram entre provedores e nada neles pede que você ensaie o restore. |
+
+**Onde o Schrodump perde.** Ele **não faz PITR nem backup físico**, e isso é estrutural, não
+inacabado: ele alcança seu banco pelo protocolo de client, de um contêiner em outro lugar — é o que
+o torna agentless e também o motivo de nunca conseguir engatar um `archive_command` ou ler um data
+directory. Ou seja: **seu ponto de recuperação é o último dump, e seu tempo de recuperação é o que
+um restore levar** — meça os dois, e se qualquer um dos números for inaceitável, você precisa da
+primeira linha daquela tabela, não desta ferramenta. Dump-e-carga também escala pior que uma cópia
+em nível de arquivo: em banco grande, o restore é a metade cara.
+[docs/roadmap.md](docs/roadmap.md) traz o raciocínio e o que teria de mudar.
+
+**O que ele faz que as outras não fazem.** Ele se recusa a relatar um backup como bom porque um
+processo saiu com `0`. Várias das ferramentas acima checam integridade — `restic check`,
+`pgbackrest verify` — e isso é uma checagem real sobre os bytes; o padrão do Schrodump é mais forte
+e mais estreito: restaurar o artefato num banco descartável da versão certa, confirmar que ele abre
+e, enquanto nada tiver feito isso, mostrá-lo como pergunta em aberto em vez de sucesso. Rodar os
+dois é a configuração sensata — backup físico pelo ponto de recuperação, Schrodump pela evidência de
+que um dump, que você de fato consegue levar embora, restaura.
 
 ## Como funciona
 
@@ -153,7 +196,8 @@ assinada estão implementados e testados. O restore cobre artefatos single-strea
 tabela, MongoDB até banco ou coleção. Um replica set MongoDB tem o oplog incluído no dump, e um
 restore full-cluster o reaplica, de modo que todas as coleções chegam a um único instante. Backup
 físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que
-não está no v1.
+não está no v1, e o [CHANGELOG.md](CHANGELOG.md) lista todos os release candidates publicados até
+aqui e o que cada um mudou.
 
 ## Contribuindo
 

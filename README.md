@@ -17,6 +17,19 @@ A backup a restore hasn't proven isn't a backup — it's a guess.
 
 ---
 
+> **Beta: pre-1.0, one maintainer.** Nineteen release candidates, no stable release yet.
+>
+> **What is proven.** Every pull request stands the shipped `compose.yaml` up and drives
+> twenty-two steps through it: all four engines in both execution modes, each verified by a real
+> restore, three of them restored over live data, a catalog rebuilt from the bucket alone, a key
+> rotation with the pre-rotation artifact still readable, retention observed actually deleting, a
+> signed notification and an email delivered.
+>
+> **What is not.** Nothing has been tagged stable, so nothing is promised yet about upgrading from
+> one version to the next, and v1 ships with known sharp edges — every one of them written down in
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Read that list before you
+> depend on this.
+
 ## Why Schrodump
 
 A backup job that exits `0` has proven one thing: a process ran without complaining. It has **not**
@@ -43,10 +56,13 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 - **Agentless** — nothing is installed on your database host. Dumps run in ephemeral containers
   built from the target's own major version.
 - **Encrypted at rest** — every artifact is encrypted with [`age`](https://age-encryption.org) to
-  two recipients (operational + escrow); keys are wrapped by a KEK that lives outside the host.
+  two recipients (operational + escrow); those two keys are wrapped by a KEK that belongs in a
+  secrets manager and injected at start. The quick start below writes it into `.env` on the host to
+  get you running, which is the first thing to move.
 - **S3-compatible destinations** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Scheduling with GFS retention** — grandfather-father-son, aware of full/incremental chains,
-  and it never deletes a policy's newest verified copy.
+- **Scheduling with GFS retention** — grandfather-father-son by count and by calendar bucket, run
+  only when a fresh backup of the same policy has landed, and it never deletes a policy's newest
+  verified copy.
 - **Deliberate restore friction** — role-gated, scoped by an engine capability matrix, and an
   overwrite requires typing the database name.
 - **Web UI** — a dashboard built around the three states, in English, Portuguese and Spanish.
@@ -99,6 +115,32 @@ canary → target → test → policy. Full walkthrough in [docs/install.md](doc
 | MariaDB | MinIO · SeaweedFS · Ceph RGW |
 | MongoDB | |
 
+## How it compares — and when not to use Schrodump
+
+| Instead of Schrodump | What it is | Why you would pick it |
+| --- | --- | --- |
+| **pgBackRest**, **Barman**, **WAL-G** | Physical PostgreSQL backup with continuous WAL archiving and point-in-time recovery | You need a recovery point measured in seconds, or a cluster large enough that dump-and-reload is not a plausible restore. These are the mature answer to that problem and Schrodump does not compete with them. |
+| **restic**, **Backrest** | Encrypted, deduplicated file-level backup of whatever is on a disk | You want one tool for the whole host, not only its databases. Note that copying a running data directory is not a consistent database backup on its own — it needs a filesystem snapshot or a stopped engine. |
+| **postgresus**, **databasus** | Self-hosted scheduled `pg_dump` with a dashboard and notifications | Closest in shape to Schrodump, and simpler. If a job that exited `0` is the assurance you want, they give it to you with fewer moving parts. |
+| **`pg_dump` + cron** | The baseline everyone starts from | Nothing to deploy, nothing new to trust. It is precisely what Schrodump automates — plus the part where something opens the file afterwards. |
+| **Hosted backups** (RDS, Cloud SQL, Atlas, and the rest) | Provider-managed snapshots, usually with PITR | They are good, they are already paid for, and you should almost certainly leave them switched on. They also live inside the account that can delete them, they rarely move between providers, and nothing in them asks you to rehearse the restore. |
+
+**Where Schrodump loses.** It has **no PITR and no physical backups**, and that is structural rather
+than unfinished: it reaches your database over the client protocol from a container somewhere else,
+which is what makes it agentless and is also why it can never hook `archive_command` or read a data
+directory. So **your recovery point is the last dump and your recovery time is however long a
+restore takes** — measure both, and if either number is unacceptable you need the first row of that
+table, not this tool. Dump-and-reload also scales worse than a file-level copy: on a large database
+the restore is the expensive half. [docs/roadmap.md](docs/roadmap.md) sets out the reasoning and
+what would have to change.
+
+**What it does that they do not.** It refuses to report a backup as good because a process exited
+`0`. Several of the tools above check integrity — `restic check`, `pgbackrest verify` — and that is
+a real check on the bytes; Schrodump's default is stronger and narrower: restore the artifact into a
+throwaway database of the right version, confirm it opens, and until something has, show it as an
+open question rather than a success. Running both is the sensible configuration — physical backups
+for the recovery point, Schrodump for the evidence that a dump you can actually move restores.
+
 ## How it works
 
 Schrodump is a monorepo (Node 22, TypeScript, pnpm) split by responsibility:
@@ -148,7 +190,9 @@ tested. Restore covers both single-stream and staged (directory) artifacts, and 
 engine provides a mechanism for it: PostgreSQL to a schema or a table, MongoDB to a database or a
 collection. A MongoDB replica set is dumped with its oplog, and a full-cluster restore replays it,
 so every collection lands on a single instant. Physical/PITR backups are on the roadmap.
-[docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1.
+[docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1, and
+[CHANGELOG.md](CHANGELOG.md) lists every release candidate published so far and what each one
+changed.
 
 ## Contributing
 

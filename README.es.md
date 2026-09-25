@@ -17,6 +17,20 @@ Una copia que una restauración no ha probado no es una copia — es una suposic
 
 ---
 
+> **Beta: pre-1.0, un solo mantenedor.** Diecinueve release candidates, ninguna versión estable
+> todavía.
+>
+> **Lo que está probado.** Cada pull request levanta el `compose.yaml` que publicamos y le hace
+> pasar veintidós pasos: los cuatro motores en ambos modos de ejecución, cada uno verificado con una
+> restauración real, tres de ellos restaurados sobre datos vivos, un catálogo reconstruido solo
+> desde el bucket, una rotación de clave con el artefacto anterior aún legible, la retención
+> borrando de verdad, una notificación firmada y un correo entregados.
+>
+> **Lo que no.** No hay nada etiquetado como estable, así que todavía no se promete nada sobre
+> actualizar de una versión a la siguiente, y v1 sale con aristas conocidas — todas escritas en
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Lee esa lista antes de
+> depender de esto.
+
 ## Por qué Schrodump
 
 Un trabajo de copia que termina con código `0` ha probado una sola cosa: un proceso se ejecutó sin
@@ -44,10 +58,13 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
 - **Sin agente** — no se instala nada en el host de tu base de datos. Los volcados se ejecutan en
   contenedores efímeros construidos a partir de la versión mayor del propio destino.
 - **Cifrado en reposo** — cada artefacto se cifra con [`age`](https://age-encryption.org) para dos
-  destinatarios (operacional + escrow); las claves se envuelven con una KEK que vive fuera del host.
+  destinatarios (operacional + escrow); esas dos claves se envuelven con una KEK que pertenece a un
+  gestor de secretos y se inyecta al arrancar. El inicio rápido de abajo la escribe en el `.env` del
+  host para que puedas empezar, y sacarla de ahí es lo primero que hay que hacer.
 - **Destinos compatibles con S3** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Programación con retención GFS** — abuelo-padre-hijo, consciente de las cadenas
-  completa/incremental, y nunca borra la copia verificada más reciente de una política.
+- **Programación con retención GFS** — abuelo-padre-hijo por recuento y por ventana de calendario,
+  que solo se ejecuta cuando ha entrado una copia nueva de la misma política, y nunca borra la copia
+  verificada más reciente de una política.
 - **Fricción de restauración deliberada** — restringida por rol, acotada por una matriz de
   capacidad del motor, y sobrescribir una base exige escribir su nombre.
 - **Interfaz web** — un panel construido en torno a los tres estados, en inglés, portugués y español.
@@ -101,6 +118,34 @@ origen distinto de `SCHRODUMP_URL`—, crea el administrador y sigue el flujo gu
 | MySQL 8 | AWS S3 · Cloudflare R2 · Backblaze B2 |
 | MariaDB | MinIO · SeaweedFS · Ceph RGW |
 | MongoDB | |
+
+## Cómo se compara — y cuándo no usar Schrodump
+
+| En lugar de Schrodump | Qué es | Por qué lo elegirías |
+| --- | --- | --- |
+| **pgBackRest**, **Barman**, **WAL-G** | Copia física de PostgreSQL con archivado continuo de WAL y recuperación a un punto en el tiempo (PITR) | Necesitas un punto de recuperación medido en segundos, o tienes un clúster lo bastante grande como para que volcar y recargar no sea una restauración plausible. Son la respuesta madura a ese problema, y Schrodump no compite con ellas. |
+| **restic**, **Backrest** | Copia de archivos, cifrada y deduplicada, de lo que haya en un disco | Quieres una sola herramienta para el host entero, no solo para sus bases de datos. Ojo: copiar un directorio de datos en uso no es por sí solo una copia consistente de base de datos — hace falta un snapshot del sistema de archivos o el motor parado. |
+| **postgresus**, **databasus** | `pg_dump` programado, autoalojado, con panel y notificaciones | Lo más parecido en forma a Schrodump, y más simple. Si un trabajo que terminó en `0` es la garantía que buscas, te la dan con menos piezas. |
+| **`pg_dump` + cron** | La línea de base de la que parte todo el mundo | Nada que desplegar, nada nuevo en lo que confiar. Es exactamente lo que Schrodump automatiza — más la parte en la que algo abre el archivo después. |
+| **Copias gestionadas** (RDS, Cloud SQL, Atlas y compañía) | Snapshots del proveedor, normalmente con PITR | Son buenas, ya están pagadas y casi con seguridad deberías dejarlas activadas. También viven dentro de la cuenta que puede borrarlas, rara vez se mueven entre proveedores y nada en ellas te pide que ensayes la restauración. |
+
+**Dónde pierde Schrodump.** **No hace PITR ni copias físicas**, y eso es estructural, no algo a
+medio terminar: llega a tu base de datos por el protocolo de cliente, desde un contenedor que está
+en otro sitio — eso es lo que lo hace sin agente y también la razón por la que nunca podrá enganchar
+un `archive_command` ni leer un directorio de datos. Es decir: **tu punto de recuperación es el
+último volcado, y tu tiempo de recuperación es lo que tarde una restauración** — mide los dos, y si
+cualquiera de esos números es inaceptable, necesitas la primera fila de esa tabla y no esta
+herramienta. Volcar y recargar además escala peor que una copia a nivel de archivo: en una base
+grande, la restauración es la mitad cara. [docs/roadmap.md](docs/roadmap.md) recoge el razonamiento
+y lo que tendría que cambiar.
+
+**Lo que sí hace y las demás no.** Se niega a dar por buena una copia porque un proceso terminó en
+`0`. Varias de las herramientas de arriba comprueban integridad — `restic check`,
+`pgbackrest verify` — y eso es una comprobación real sobre los bytes; lo que Schrodump hace por
+defecto es más fuerte y más estrecho: restaurar el artefacto en una base desechable de la versión
+correcta, confirmar que abre y, mientras nada lo haya hecho, mostrarlo como pregunta abierta en
+lugar de como éxito. Usar ambos es la configuración sensata — copias físicas para el punto de
+recuperación, Schrodump para la evidencia de que un volcado, que además puedes llevarte, restaura.
 
 ## Cómo funciona
 
@@ -156,7 +201,9 @@ single-stream y staged (directorio), y tiene alcance donde el motor ofrece un me
 PostgreSQL hasta esquema o tabla, MongoDB hasta base de datos o colección. Un replica set de
 MongoDB se vuelca junto con su oplog, y una restauración full-cluster lo reaplica, de modo que todas
 las colecciones quedan en un mismo instante. Las copias físicas/PITR están en la hoja de ruta.
-[docs/roadmap.md](docs/roadmap.md) indica exactamente qué está y qué no está en v1.
+[docs/roadmap.md](docs/roadmap.md) indica exactamente qué está y qué no está en v1, y el
+[CHANGELOG.md](CHANGELOG.md) enumera todas las release candidates publicadas hasta ahora y qué
+cambió cada una.
 
 ## Contribuir
 

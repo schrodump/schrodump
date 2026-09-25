@@ -4,5 +4,13 @@ CNPJ 34.292.395/0001-65
 Schrodump is licensed under the GNU Affero General Public License v3.0
 or later. See LICENSE for the full text.
 
-Contributions are accepted under the Schrodump Contributor License
-Agreement (see CONTRIBUTING.md).
+Contributions are certified by the Developer Certificate of Origin
+<https://developercertificate.org/>, not a Contributor License Agreement.
+There is no agreement to sign and no copyright is assigned: a contributor
+keeps the copyright in their contribution and licenses it under
+AGPL-3.0-or-later, the same terms as the rest of the work. Certification
+is the `Signed-off-by` trailer on each commit (`git commit -s`), and the
+`dco` job in CI refuses a pull request whose commits do not carry it.
+
+See CONTRIBUTING.md for the trailer, what it certifies, and why a CLA was
+deliberately not chosen.
