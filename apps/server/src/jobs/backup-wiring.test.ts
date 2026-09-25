@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { generateX25519Identity, identityToRecipient } from "age-encryption";
 import type { ExecutionDescriptor } from "@schrodump/core/execution";
 import type { PutOptions, PutResult, StorageDriver } from "@schrodump/storage/driver";
+import { artifactKey } from "@schrodump/storage/manifest-sidecar";
 import type { RunOptions, RunResult, Runner } from "@schrodump/runner/runner";
 import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
 import { runBackupJob, type BackupOutcome, type ProbeResult } from "./backup.js";
@@ -54,6 +55,7 @@ function fakeRunner(exitCode: number): Runner {
 // transient put() failure (finding #1) instead of the default happy-path put.
 function fakeDriver(options?: {
   deletedKeys?: string[];
+  putKeys?: string[];
   putBehavior?: "succeed" | "reject";
 }): StorageDriver {
   const unused = (): never => {
@@ -62,8 +64,9 @@ function fakeDriver(options?: {
   const deletedKeys = options?.deletedKeys ?? [];
   const putBehavior = options?.putBehavior ?? "succeed";
   return {
-    put: (_key: string, body: Readable): Promise<PutResult> =>
+    put: (key: string, body: Readable): Promise<PutResult> =>
       new Promise((resolve, reject) => {
+        options?.putKeys?.push(key);
         if (putBehavior === "reject") {
           // Drain the stream so encryptStream's writer doesn't hang, then fail as if S3 had a
           // transient error — the object was never durably written.
@@ -727,5 +730,35 @@ describe("runBackupJob over createBackupPorts — a failure after the upload lea
       `${PREFIX}/manifest.json`,
     ]);
     expect(result.deleted).toEqual([]);
+  });
+});
+
+// The seam that shipped broken. `createBackupPorts` built its keys with a template literal while
+// everything that reads or deletes one used @schrodump/storage's builder — and the two agree for
+// every prefix except the one the destination form uses by default, "".
+//
+// `/org/job/artifact.bin` and `org/job/artifact.bin` are different S3 keys. So on a deployment that
+// took the default, the manifest (always built by the shared builder) was deletable and the
+// artifact was not: retention removed the row and the sidecar, reported "kept 7, deleted 1", and
+// left artifact.bin and globals.bin in the bucket for good. Observed on a real instance as
+// `bucketKey = "/cmtq…"` next to `manifestKey = "cmtq…"` in the same Artifact row.
+describe("the key a backup writes is the key retention computes", () => {
+  it("has no leading slash when the prefix is empty, and matches the storage builder", async () => {
+    const putKeys: string[] = [];
+    const { deps } = await makeDeps(0, { driver: fakeDriver({ putKeys }) });
+    const ports = createBackupPorts({ ...deps, prefix: "" });
+
+    await ports
+      .executeAndUpload({
+        probe: PROBE,
+        mode: "STREAM",
+        parallelism: 1,
+        recipients: { recipients: [], keyIds: [] },
+      })
+      .catch(() => undefined);
+
+    const key = putKeys[0] ?? "";
+    expect(key).toBe(artifactKey("", "org-1", "job-1"));
+    expect(key.startsWith("/")).toBe(false);
   });
 });

@@ -19,6 +19,9 @@ export interface RetentionWiringDeps {
   artifactJobIds(): Promise<string[]>;
   // jobId of the newest of those whose catalog state is VERIFIED, or null (organization-scoped).
   newestVerifiedJobId(): Promise<string | null>;
+  // The keys THIS artifact was actually written under, as its catalog row records them. Null when
+  // the row has gone. See deleteArtifact for why the computed keys are not enough on their own.
+  recordedKeys(jobId: string): Promise<{ bucketKey: string; manifestKey: string } | null>;
   // Removes the DB Artifact row (organization-scoped).
   deleteArtifactRow(jobId: string): Promise<void>;
 }
@@ -50,8 +53,24 @@ export function createRetentionPorts(deps: RetentionWiringDeps): RetentionPorts 
     },
     newestVerifiedJobId: () => deps.newestVerifiedJobId(),
     deleteArtifact: async (jobId) => {
+      // Both spellings, and the reason is a defect that shipped. The write path built its keys with
+      // a template literal and the read path with the shared builder, so a destination created with
+      // the form's default prefix of "" wrote `/<org>/<job>/artifact.bin` while everything here
+      // computed `<org>/<job>/artifact.bin`. Retention deleted the manifest (built by the shared
+      // builder, so it matched), deleted the row, reported "kept 7, deleted 1" — and left
+      // `artifact.bin` and `globals.bin` in the bucket forever.
+      //
+      // The builder is now shared (backup-wiring.ts), which stops new ones. It does not reclaim the
+      // artifacts already written, because those rows still record the key they were written under
+      // — so the row is asked, and both answers are deleted. DeleteObjects treats an absent key as
+      // a successful delete, so naming a key that was never written costs nothing, and naming the
+      // one that was is the whole point.
+      const recorded = await deps.recordedKeys(jobId);
       const artifact = artifactKey(deps.prefix, deps.organizationId, jobId);
       await deps.driver.delete([
+        ...(recorded === null
+          ? []
+          : [recorded.bucketKey, recorded.manifestKey, globalsObjectKey(recorded.bucketKey)]),
         artifact,
         manifestKey(deps.prefix, deps.organizationId, jobId),
         // A postgres backup writes a THIRD object beside those two, and nothing ever deleted it.

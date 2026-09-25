@@ -1718,6 +1718,11 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
             destinationId: policy.destinationId,
             policyId,
           }),
+        recordedKeys: async (artifactJobId) =>
+          prisma.artifact.findFirst({
+            where: { organizationId: job.organizationId, jobId: artifactJobId },
+            select: { bucketKey: true, manifestKey: true },
+          }),
         deleteArtifactRow: async (artifactJobId) => {
           await prisma.artifact.deleteMany({
             where: { organizationId: job.organizationId, jobId: artifactJobId },

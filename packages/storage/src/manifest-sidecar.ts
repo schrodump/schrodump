@@ -23,14 +23,37 @@ function joinKey(...segments: string[]): string {
     .join("/");
 }
 
+// THE key builder. Every object a backup writes goes through this one, and so does everything that
+// reads or deletes one, because the two used to disagree and the disagreement was silent.
+//
+// The destination form defaults `prefix` to "". A template literal then writes
+// `/<org>/<job>/artifact.bin` — S3 keys may begin with a slash and that one is a different key from
+// `<org>/<job>/artifact.bin`, which is what this function returns. So on every deployment that took
+// the default prefix, the artifact was written at one key and retention deleted another: the row
+// and the manifest went, `artifact.bin` and `globals.bin` stayed, and the job reported
+// "retention kept 7, deleted 1". Observed on a real instance, where the same Artifact row carried
+// `bucketKey = "/cmtq…"` and `manifestKey = "cmtq…"` — the two paths, side by side, in one row.
+//
+// Storage the operator pays for outside the window they configured, forever, and — since
+// `pg_dumpall --globals-only` emits `CREATE ROLE … PASSWORD 'SCRAM-SHA-256$…'` — role password
+// hashes surviving the retention that was supposed to age them out.
+export function objectKey(
+  prefix: string,
+  organizationId: string,
+  jobId: string,
+  name: string,
+): string {
+  return joinKey(prefix, organizationId, jobId, name);
+}
+
 // <prefix>/<organizationId>/<jobId>/artifact.bin
 export function artifactKey(prefix: string, organizationId: string, jobId: string): string {
-  return joinKey(prefix, organizationId, jobId, "artifact.bin");
+  return objectKey(prefix, organizationId, jobId, "artifact.bin");
 }
 
 // <prefix>/<organizationId>/<jobId>/manifest.json
 export function manifestKey(prefix: string, organizationId: string, jobId: string): string {
-  return joinKey(prefix, organizationId, jobId, "manifest.json");
+  return objectKey(prefix, organizationId, jobId, "manifest.json");
 }
 
 // Writes the manifest IN CLEAR next to its artifact, using the deterministic serialization
