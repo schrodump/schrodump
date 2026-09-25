@@ -401,6 +401,22 @@ database of every operator who pulled it.
   the image, and a way to fetch and run arbitrary code is not something a container holding
   database credentials should have lying around.
 
+### What the dependency audit still reports, and why
+
+`pnpm audit` is printed in full on every run and only **critical** fails the build — a gate that is
+permanently red because upstream has not shipped a patch teaches people to ignore it. So the
+remainder is listed here rather than left for the reader to re-derive:
+
+| Advisory | Reaches | Why it stays |
+| --- | --- | --- |
+| `vitest` / `@vitest/mocker` (moderate) | the test runner | Fixed in 4.x. A major bump of the runner is its own change with its own risk, and no part of it is in the published image. |
+| `deepmerge-ts` (high) | `prisma` → `@prisma/config` | The Prisma CLI, at build and migrate time. Not in the runtime, and not ours to bump — it moves when Prisma moves. |
+| `uuid` (moderate) | `dockerode` → `uuid` | Runtime, and the only one here that is. The flaw is a missing bounds check in `v3`/`v5`/`v6` **when a `buf` is supplied**; nothing in this codebase calls those, and forcing a major of a transitive we cannot exercise without a Docker daemon trades a real risk for a theoretical one. |
+
+Every direct dependency is at a version with no open advisory. If any of the three above reaches
+critical, or a fix lands upstream, it moves — the weekly scheduled scan exists so that "no change
+here" does not mean "nobody looked".
+
 ### Was known, now fixed: `sharp` no longer ships in the image
 
 Next traces `sharp` into the standalone build, so `sharp` and its bundled `libvips` used to be

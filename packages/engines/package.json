@@ -45,9 +45,7 @@
       "import": "./dist/probe/mongodb.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -56,13 +54,13 @@
   },
   "dependencies": {
     "@schrodump/core": "workspace:*",
-    "mongodb": "^7.5.0",
-    "mysql2": "^3.23.0",
-    "pg": "^8.22.0"
+    "mongodb": "^7.6.0",
+    "mysql2": "^3.24.4",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/pg": "^8.20.0",
-    "testcontainers": "^12.0.0"
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "testcontainers": "^12.1.0"
   }
 }
