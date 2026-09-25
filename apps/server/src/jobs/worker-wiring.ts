@@ -32,6 +32,7 @@ import type {
 } from "@schrodump/engines/probe/types";
 import { createDockerRunner, type RunMount } from "@schrodump/runner/runner";
 import { ScratchManager } from "@schrodump/runner/scratch";
+import { sweepManagedContainers } from "@schrodump/runner/docker";
 import {
   recipientsForSealMode,
   resolveDecryptionKeyId,
@@ -673,7 +674,48 @@ export interface JobExecutorDeps {
   signal?: AbortSignal;
 }
 
-export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
+// What a process that DIED left behind. Removal is in `finally` blocks everywhere, which covers a
+// crash of one job and not a crash of the process: a SIGKILL leaves the executor or the verify
+// sandbox running and its scratch directory on disk, holding the dump in CLEAR.
+export interface AbandonedSweep {
+  scratchDirs: string[];
+  containers: string[];
+}
+
+// The executor plus the one thing that is not a job: the sweep. It is returned here rather than put
+// on JobExecutor because the worker runs CLAIMED JOBS and this is not one — and it has to come from
+// here, because the ScratchManager tracks its own live reservations and a second instance over the
+// same root would have an empty set and delete a directory an active job owns.
+export type JobExecutorWithSweep = JobExecutor & { sweepAbandoned(): Promise<AbandonedSweep> };
+
+// The two halves run independently ON PURPOSE. They fail for unrelated reasons — a read-only
+// scratch volume, a socket proxy that denies `GET /containers/json` — and a deployment where one
+// is broken must still get the other. One `try` around both means the first thing to throw
+// silently cancels the sweep the disk actually needed.
+//
+// Taking both as arguments is what makes that testable without a Docker daemon: a unit test that
+// reached the real socket would sweep the HOST's containers.
+export async function sweepAbandonedWith(deps: {
+  sweepScratch(): Promise<string[]>;
+  sweepContainers(): Promise<string[]>;
+  log: { warn: (obj: Record<string, unknown>, msg: string) => void };
+}): Promise<AbandonedSweep> {
+  let scratchDirs: string[] = [];
+  try {
+    scratchDirs = await deps.sweepScratch();
+  } catch (err) {
+    deps.log.warn({ err }, "could not sweep abandoned scratch directories");
+  }
+  let containers: string[] = [];
+  try {
+    containers = await deps.sweepContainers();
+  } catch (err) {
+    deps.log.warn({ err }, "could not sweep abandoned containers");
+  }
+  return { scratchDirs, containers };
+}
+
+export function createJobExecutor(deps: JobExecutorDeps): JobExecutorWithSweep {
   const prisma = deps.prisma;
   const runner = createDockerRunner();
   const scratch =
@@ -1739,5 +1781,15 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
     await setJobState(job.id, "SUCCEEDED", retentionSummary(result));
   };
 
-  return { runBackup, runVerify, runRestore, runRetention };
+  const sweepAbandoned = (): Promise<AbandonedSweep> =>
+    sweepAbandonedWith({
+      // gc() skips every directory an active reservation owns and every one under the age ceiling
+      // (24h), which is far longer than the executor timeout — so a directory it removes cannot
+      // belong to a job that is still running, here or on another replica.
+      sweepScratch: () => (scratch === null ? Promise.resolve([]) : scratch.gc()),
+      sweepContainers: () => sweepManagedContainers(),
+      log: deps.log,
+    });
+
+  return { runBackup, runVerify, runRestore, runRetention, sweepAbandoned };
 }

@@ -174,7 +174,14 @@ Your responsibilities:
 - Size it with `SCRATCH_MAX_BYTES` so a runaway dump fills a volume instead of the host's root
   filesystem.
 
-Schrodump sweeps abandoned scratch directories at boot and periodically.
+Schrodump sweeps abandoned scratch directories at boot and hourly, along with any executor or
+verify-sandbox container an earlier process left running. This is the case a `finally` cannot
+cover: `SIGTERM` is handled below, but an OOM, a host crash or `docker kill` gives the process no
+chance to clean up, and what it leaves is a dump in clear on the scratch volume and — for a
+full-restore verify — a container holding the restored database. Only directories older than 24
+hours and containers this deployment created are touched, and the sweep runs under the same lock as
+the worker, so a live replica's work is never reaped. **Until v0.1.0-rc.21 it did not run at all:
+the sweep existed and nothing called it.**
 
 > **`docker stop` / `SIGTERM`.** The server installs a shutdown handler: it stops claiming new work,
 > aborts the in-flight run (the runner force-kills that job's container), waits for the drain to

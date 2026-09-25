@@ -2,7 +2,11 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, stat, utimes } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ScratchManager } from "@schrodump/runner/scratch";
 import type { PrismaClient } from "@prisma/client";
 import type { ProbeResult as EngineProbeResult } from "@schrodump/engines/probe/types";
 import {
@@ -20,6 +24,7 @@ import {
   backupContextFor,
   buildDumpDescriptorFor,
   createJobExecutor,
+  sweepAbandonedWith,
   createWorkerStore,
   originDatabaseFor,
   postgresUnscopedAlternatives,
@@ -1035,5 +1040,66 @@ describe("backupContextFor — routing a backup by what its target selects", () 
     }
     expect(thrown).toBeInstanceOf(EngineDescriptorError);
     expect((thrown as EngineDescriptorError).code).toBe("MYSQL_STAGED_REQUIRES_ONE_DATABASE");
+  });
+});
+
+// BK-03 and BK-10 are one story: every removal in this codebase happens in a `finally`, which
+// covers a job that crashed and not a PROCESS that was SIGKILLed. docs/security.md promised a boot
+// sweep of abandoned scratch directories and `ScratchManager.gc()` had NO CALLER anywhere — the
+// dump stayed on disk in clear and the disk filled over weeks.
+describe("sweepAbandoned", () => {
+  const quiet = { warn: () => undefined };
+
+  it("removes an abandoned scratch directory, and leaves a fresh one alone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "schrodump-sweep-"));
+    const abandoned = join(root, "job-from-a-process-that-died");
+    const fresh = join(root, "job-that-just-started");
+    await mkdir(abandoned);
+    await mkdir(fresh);
+    // Older than the 24h ceiling gc() applies. That ceiling is what makes the sweep safe to run
+    // while another replica is working: nothing it removes can belong to a live job.
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await utimes(abandoned, old, old);
+    const scratch = new ScratchManager({ root, maxConcurrentStaged: 1 });
+
+    const result = await sweepAbandonedWith({
+      sweepScratch: () => scratch.gc(),
+      sweepContainers: () => Promise.resolve([]),
+      log: quiet,
+    });
+
+    expect(result.scratchDirs).toEqual(["job-from-a-process-that-died"]);
+    await expect(stat(fresh)).resolves.toBeDefined();
+    await expect(stat(abandoned)).rejects.toThrow();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  // One `try` around both halves means the first to throw silently cancels the other. They fail for
+  // unrelated reasons — a read-only scratch volume, a socket proxy that denies GET /containers/json
+  // — and a deployment where one is broken must still get the other.
+  it("still sweeps scratch when the container sweep throws, and says so", async () => {
+    const warnings: string[] = [];
+    const result = await sweepAbandonedWith({
+      sweepScratch: () => Promise.resolve(["orphan"]),
+      sweepContainers: () => Promise.reject(new Error("docker socket denied")),
+      log: { warn: (_obj, msg) => warnings.push(msg) },
+    });
+
+    expect(result.scratchDirs).toEqual(["orphan"]);
+    expect(result.containers).toEqual([]);
+    expect(warnings).toEqual(["could not sweep abandoned containers"]);
+  });
+
+  it("still sweeps containers when the scratch sweep throws, and says so", async () => {
+    const warnings: string[] = [];
+    const result = await sweepAbandonedWith({
+      sweepScratch: () => Promise.reject(new Error("read-only volume")),
+      sweepContainers: () => Promise.resolve(["aaaaaaaaaaaa"]),
+      log: { warn: (_obj, msg) => warnings.push(msg) },
+    });
+
+    expect(result.containers).toEqual(["aaaaaaaaaaaa"]);
+    expect(result.scratchDirs).toEqual([]);
+    expect(warnings).toEqual(["could not sweep abandoned scratch directories"]);
   });
 });

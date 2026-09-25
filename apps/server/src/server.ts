@@ -209,6 +209,8 @@ export async function main(): Promise<void> {
 
   // --- worker boot ---
   const WORKER_LOCK_KEY = 0x5343_4852_444d_5031n; // "SCHRDMP1"
+  // An hour. See the sweep loop below for why nothing is gained by running it more often.
+  const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
   // The advisory lock must hold on ONE pinned connection for the whole drain; the shared client
   // pools freely, so it gets its own single-connection client (never used for API/drain queries).
   const advisoryLockPrisma = createAdvisoryLockPrismaClient(env.DATABASE_URL);
@@ -241,6 +243,40 @@ export async function main(): Promise<void> {
     signal: shutdownController.signal,
     log: logger,
   });
+  // 2a. Sweep what a process that DIED left behind — before the first drain, and on a slow loop
+  //     after that. Every removal in this codebase is in a `finally`, which covers a job that
+  //     crashed and not a PROCESS that was SIGKILLed: an OOM, a host crash or `docker kill` leaves
+  //     the executor or the verify sandbox running on the executor network, and the job's scratch
+  //     directory on disk with the dump in CLEAR. docs/security.md promised this sweep and
+  //     ScratchManager.gc() had no caller at all.
+  //
+  //     Under the WORKER lock, and that is load-bearing: a running container may belong to a live
+  //     replica mid rolling-restart, and reaping it would abort a backup nobody asked to abort.
+  //     null means another holder has the lock, so the sweep is correctly skipped.
+  const sweep = async (): Promise<void> => {
+    const result = await withAdvisoryLock(lock, WORKER_LOCK_KEY, () => executor.sweepAbandoned());
+    if (result === null) return;
+    if (result.scratchDirs.length > 0 || result.containers.length > 0) {
+      logger.info(
+        { scratchDirs: result.scratchDirs, containers: result.containers },
+        "swept what an earlier process left behind",
+      );
+    }
+  };
+  await sweep().catch((err: unknown) => {
+    // A sweep that cannot run is not a reason to refuse to boot. It is a reason to say so.
+    logger.warn({ err }, "could not sweep abandoned scratch directories and containers");
+  });
+  const sweepHandle = startLoop({
+    // Slow on purpose: the age ceiling gc() applies is 24h, so nothing is reclaimed sooner however
+    // often this runs, and each tick lists containers over the socket proxy.
+    intervalMs: SWEEP_INTERVAL_MS,
+    tick: () =>
+      sweep().catch((err: unknown) => {
+        logger.warn({ err }, "sweep tick failed");
+      }),
+  });
+
   const workerDeps = { store, executor, log: logger, sanitizeReason };
   const handle = startLoop({
     intervalMs: env.WORKER_POLL_MS,
@@ -370,6 +406,7 @@ export async function main(): Promise<void> {
       runGracefulShutdown({
         handle,
         scheduler: schedulerHandle,
+        sweep: sweepHandle,
         ...(selfBackupHandle !== null ? { selfBackup: selfBackupHandle } : {}),
         controller: shutdownController,
         disconnect: () => advisoryLockPrisma.$disconnect(),

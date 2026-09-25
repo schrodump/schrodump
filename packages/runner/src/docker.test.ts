@@ -12,8 +12,10 @@ import {
   createDockerRunner,
   demuxInto,
   executorCreateOptions,
+  MANAGED_LABEL,
   sanitizeStderr,
   serviceCreateOptions,
+  sweepManagedContainers,
   type ContainerSpec,
   type DockerEngine,
   type EphemeralServiceSpec,
@@ -803,5 +805,76 @@ describe("backpressure reaches the container", () => {
 
     expect(src.state.produced).toBe(OFFERED * CHUNK);
     expect(stdout.writableLength).toBeGreaterThan(CHUNK);
+  });
+});
+
+// Removal lives in `finally` blocks, which covers a job that crashed and not a PROCESS that was
+// SIGKILLed. An OOM, a host crash or `docker kill` leaves the executor or the verify sandbox
+// running on the executor network, holding an anonymous volume that for a FULL_RESTORE verify IS
+// the restored database in clear. Nothing reaped them, because nothing could tell them apart from
+// a container the operator started — which is what the label is for.
+describe("what a crash leaves behind", () => {
+  const spec: ContainerSpec = {
+    image: "postgres:16-alpine",
+    command: ["pg_dump"],
+    env: {},
+    network: "targets",
+    mounts: [],
+  };
+  const service: EphemeralServiceSpec = {
+    image: "postgres:16-alpine",
+    env: {},
+    network: "targets",
+    readinessCommand: ["true"],
+    port: 5432,
+    correlationId: "c",
+    readinessTimeoutMs: 1,
+  };
+
+  it("labels every container it creates — executors and sandboxes alike", () => {
+    expect(executorCreateOptions(spec).Labels).toEqual({ [MANAGED_LABEL]: "1" });
+    expect(serviceCreateOptions(service).Labels).toEqual({ [MANAGED_LABEL]: "1" });
+  });
+
+  it("sweeps only labelled containers, in every state, with their volumes", async () => {
+    const removed: unknown[] = [];
+    let askedFor: unknown = null;
+    const engine = {
+      listContainers: (opts: unknown) => {
+        askedFor = opts;
+        return Promise.resolve([{ Id: "aaaaaaaaaaaa1111" }, { Id: "bbbbbbbbbbbb2222" }]);
+      },
+      getContainer: (id: string) => ({
+        remove: (opts: unknown) => {
+          removed.push({ id, opts });
+          return Promise.resolve();
+        },
+      }),
+    };
+
+    const ids = await sweepManagedContainers(engine as never);
+
+    expect(ids).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+    // `all` or an exited sandbox is left behind; the filter is what keeps this off the operator's
+    // own containers; `v` is what takes the restored database with it.
+    expect(askedFor).toEqual({ all: true, filters: { label: [`${MANAGED_LABEL}=1`] } });
+    expect(removed).toEqual([
+      { id: "aaaaaaaaaaaa1111", opts: { force: true, v: true } },
+      { id: "bbbbbbbbbbbb2222", opts: { force: true, v: true } },
+    ]);
+  });
+
+  it("does not let one stuck container stop the boot, or the rest of the sweep", async () => {
+    const engine = {
+      listContainers: () => Promise.resolve([{ Id: "stuck1111111" }, { Id: "fine22222222" }]),
+      getContainer: (id: string) => ({
+        remove: () =>
+          id === "stuck1111111"
+            ? Promise.reject(new Error("device or resource busy"))
+            : Promise.resolve(),
+      }),
+    };
+
+    await expect(sweepManagedContainers(engine as never)).resolves.toEqual(["fine22222222"]);
   });
 });

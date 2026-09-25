@@ -138,6 +138,16 @@ drain_queue() {
 }
 
 log "1/22  docker compose up"
+# What a process that DIED left in scratch. Removal lives in `finally` blocks, which covers a job
+# that crashed and not a SIGKILLed PROCESS: an OOM or a host crash leaves the job's directory on
+# disk holding the dump in CLEAR, and the disk fills over weeks. docs/security.md promised a boot
+# sweep and ScratchManager.gc() had no caller at all.
+#
+# Only the boot can prove it: the sweep is wired in server.ts, under the worker's advisory lock, and
+# no unit test reaches that. Dated well past the 24h ceiling gc() applies — `-t` rather than `-d`
+# because this script is meant to run on a laptop as well as on the runner.
+mkdir -p "${SCRATCH}/job-from-a-process-that-died" "${SCRATCH}/job-that-just-started"
+touch -t 202001010000 "${SCRATCH}/job-from-a-process-that-died"
 compose up -d >/dev/null
 for _ in $(seq 1 60); do
   status="$(compose ps --format '{{.Service}} {{.Status}}' 2>/dev/null || true)"
@@ -173,6 +183,16 @@ done
 echo "$ui_headers$api_headers" | tr 'A-Z' 'a-z' | grep -q 'strict-transport-security' &&
   fail "the app sent HSTS — that belongs to the operator's proxy (docs/install.md)"
 printf '   security headers on the UI and the API\n'
+
+# The boot sweep has had its chance by now — /backend/health answering means the worker boot
+# sequence, which runs it, is past. The fresh directory is the control: a sweep that removed both
+# would take the directory of a job another replica is running.
+[ ! -e "${SCRATCH}/job-from-a-process-that-died" ] ||
+  fail "an abandoned scratch directory survived the boot — the dump inside it is in clear"
+[ -e "${SCRATCH}/job-that-just-started" ] ||
+  fail "the boot sweep removed a scratch directory that was not abandoned"
+rmdir "${SCRATCH}/job-that-just-started"
+printf '   scratch swept of what a dead process left, and only that\n'
 
 log "2/22  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
