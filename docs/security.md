@@ -317,8 +317,9 @@ So every response says it may not be framed, twice over:
 anything that predates CSP level 2. `no-referrer` keeps artifact ids and target names out of the
 `Referer` of wherever the operator clicks next, and `nosniff` stops an error body from being read
 back as a document. The two sides do not overlap on one response: the UI's `headers()` skips the
-`/api/auth/` and `/backend/` prefixes it proxies, because a *duplicated* `X-Frame-Options` is
-discarded by browsers rather than enforced.
+`/api/auth/` and `/backend/` prefixes it proxies, because the rewrite already forwards the API's
+headers, and a browser enforces *every* `Content-Security-Policy` it is sent — two of them mean the
+effective rule is the intersection of two policies nobody wrote together.
 
 **Known limit: `script-src` keeps `'unsafe-inline'`, so the XSS half of the policy is weak.** Next
 serves the React payload as a chain of inline `self.__next_f.push([...])` scripts whose content

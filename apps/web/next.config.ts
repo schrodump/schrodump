@@ -70,10 +70,12 @@ const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
   async headers() {
-    // Every route this app serves itself. The two rewritten prefixes are excluded because the
-    // API answers them with its own headers (@fastify/helmet, apps/server/src/app.ts) and a
-    // rewrite forwards those: a second X-Frame-Options would make the pair a duplicate, which a
-    // browser discards instead of enforcing.
+    // Every route this app serves itself. The two rewritten prefixes are excluded because the API
+    // answers them with its own headers (@fastify/helmet, apps/server/src/app.ts) and the rewrite
+    // forwards those. Adding these on top would put TWO Content-Security-Policy headers on one
+    // response, and a browser enforces every policy it is sent — the effective rule becomes the
+    // intersection of two nobody wrote together. One response, one set, written by whichever side
+    // produced it.
     return [{ source: "/((?!api/auth/|backend/).*)", headers: securityHeaders }];
   },
   async rewrites() {

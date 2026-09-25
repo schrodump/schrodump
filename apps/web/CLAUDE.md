@@ -341,8 +341,10 @@ VERIFIED artifact, one click each, and a signed-in operator carries the cookie i
 `src/lib/security-headers.test.ts` asserts the exported config itself, not a copy of it.
 
 - **The `source` excludes `api/auth/` and `backend/`.** Those are rewritten to the API, which sets
-  its own headers through `@fastify/helmet`, and a rewrite forwards them. Two `X-Frame-Options` on
-  one response is a duplicate, and a browser discards a duplicated one rather than enforcing it.
+  its own headers through `@fastify/helmet`, and the rewrite forwards them. Adding these on top
+  would send two `Content-Security-Policy` headers on one response — a browser enforces every
+  policy it receives, so the effective rule becomes the intersection of two nobody wrote together,
+  and it changes whenever either side does. One response, one set.
 - **`script-src` keeps `'unsafe-inline'` and it cannot be dropped here.** Next serves the RSC
   payload as inline `self.__next_f.push([...])` scripts, different on every page and every build.
   A hash cannot cover them, and adding the theme script's hash would make browsers ignore

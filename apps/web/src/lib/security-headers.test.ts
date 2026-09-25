@@ -61,8 +61,8 @@ describe("the UI's security headers", () => {
     const pattern = await matcher();
 
     // The API sets its own through @fastify/helmet and the rewrite forwards them. Two
-    // X-Frame-Options headers on one response are a duplicate, and a browser discards a
-    // duplicated frame-options header instead of enforcing it.
+    // Content-Security-Policy headers on one response are both enforced, so the effective policy
+    // becomes the intersection of two that were never written together.
     expect(pattern.test("/backend/artifacts")).toBe(false);
     expect(pattern.test("/api/auth/sign-in/email")).toBe(false);
     // Asserted together with a page the rule MUST still cover: a source that matches nothing at
