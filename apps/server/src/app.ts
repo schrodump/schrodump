@@ -29,6 +29,7 @@ import { sessionRoutes } from "./routes/session.js";
 import { setupRoutes, type SetupDeps } from "./routes/setup.js";
 import { targetRoutes, type TargetStore } from "./routes/targets.js";
 import { testTargetConnection } from "./probe/test-connection.js";
+import { registerSecurityHeaders } from "./security-headers.js";
 
 export interface AppDeps {
   logger: FastifyBaseLogger;
@@ -81,6 +82,10 @@ export function buildApp(deps: AppDeps) {
     reply.header("x-correlation-id", request.id);
     done();
   });
+
+  // Before everything else, so a response that never reaches a route — a 401 from the RBAC hook,
+  // a 404, the error handler's 500 — is covered too.
+  registerSecurityHeaders(app);
 
   registerErrorHandler(app);
 

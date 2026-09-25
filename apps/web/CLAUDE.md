@@ -332,6 +332,31 @@ clock — it asserts a freshness the screen does not have.
   checked". Nothing is ever flipped optimistically: the verdict is the server's, and invalidating
   is how the screen asks for it again.
 
+## Security headers (`next.config.ts`, `headers()`)
+
+Every route this app serves carries `Content-Security-Policy`, `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. `frame-ancestors 'none'` is
+why it exists: the restore dialog writes over a live database and the delete dialog destroys a
+VERIFIED artifact, one click each, and a signed-in operator carries the cookie into any frame.
+`src/lib/security-headers.test.ts` asserts the exported config itself, not a copy of it.
+
+- **The `source` excludes `api/auth/` and `backend/`.** Those are rewritten to the API, which sets
+  its own headers through `@fastify/helmet`, and the rewrite forwards them. Adding these on top
+  would send two `Content-Security-Policy` headers on one response — a browser enforces every
+  policy it receives, so the effective rule becomes the intersection of two nobody wrote together,
+  and it changes whenever either side does. One response, one set.
+- **`script-src` keeps `'unsafe-inline'` and it cannot be dropped here.** Next serves the RSC
+  payload as inline `self.__next_f.push([...])` scripts, different on every page and every build.
+  A hash cannot cover them, and adding the theme script's hash would make browsers ignore
+  `'unsafe-inline'` for Next's bootstrap too — the app would not hydrate. Going strict means a
+  middleware nonce, which means every route renders dynamically; all thirteen are prerendered
+  today. `style-src` keeps it for React's inline `style` attributes.
+- **No `'unsafe-eval'`, and nothing may need it.** Zod decides whether to JIT-compile validators by
+  calling `Function("")`; under this policy that throws, is caught, and logs a violation on every
+  page. `providers.tsx` sets `z.config({ jitless: true })` so the probe never happens. A dependency
+  that genuinely needs `eval` is a dependency to replace, not a directive to widen.
+- **No HSTS.** Plain HTTP behind the operator's proxy — see `docs/install.md`.
+
 ## Domain and formatting
 
 - `src/lib/domain.ts` is a hand-maintained mirror of the `@schrodump/core` vocabulary (small,

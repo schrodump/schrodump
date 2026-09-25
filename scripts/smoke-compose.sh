@@ -146,6 +146,34 @@ done
 compose ps --format '{{.Service}}	{{.Status}}'
 echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a service came up unhealthy"
 
+# The headers are configured in two places that no unit test sees together — next.config.ts for the
+# pages, @fastify/helmet for the API — and they only reach a browser if the shipped image serves
+# them. The restore dialog is one click from writing over a live database, so "the config says
+# DENY" is not the claim that matters; "this container said DENY" is.
+#
+# The app service carries no healthcheck, so `compose up -d` returning says nothing about the two
+# listeners being up; every later step is separated from the boot by the minute step 2 spends
+# standing databases up. This one is not, so it waits for itself.
+up=""
+for _ in $(seq 1 60); do
+  if curl -fsS -o /dev/null "${BASE}/backend/health"; then up=yes; break; fi
+  sleep 2
+done
+[ -n "$up" ] || fail "the stack did not answer ${BASE}/backend/health within two minutes"
+ui_headers="$(curl -sS -D - -o /dev/null "${BASE}/login")"
+api_headers="$(curl -sS -D - -o /dev/null "${BASE}/backend/health")"
+for want in 'x-frame-options: DENY' 'x-content-type-options: nosniff' 'referrer-policy: no-referrer' "frame-ancestors 'none'"; do
+  echo "$ui_headers" | tr 'A-Z' 'a-z' | grep -qF "$(echo "$want" | tr 'A-Z' 'a-z')" ||
+    fail "the UI served no '${want}'"
+  echo "$api_headers" | tr 'A-Z' 'a-z' | grep -qF "$(echo "$want" | tr 'A-Z' 'a-z')" ||
+    fail "the API served no '${want}'"
+done
+# HSTS is the reverse proxy's to send. This stack is plain HTTP; a max-age from here would pin a
+# host it cannot serve over TLS.
+echo "$ui_headers$api_headers" | tr 'A-Z' 'a-z' | grep -q 'strict-transport-security' &&
+  fail "the app sent HSTS — that belongs to the operator's proxy (docs/install.md)"
+printf '   security headers on the UI and the API\n'
+
 log "2/22  a target database and an S3 destination on the deployment's own networks"
 docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null

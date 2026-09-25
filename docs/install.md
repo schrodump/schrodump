@@ -431,6 +431,8 @@ Do not publish 8080 to anything but loopback. Terminate TLS in front of it.
 ```
 schrodump.example.com {
     reverse_proxy 127.0.0.1:8080
+    # HSTS belongs here, not in the application — see below.
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 ```
 
@@ -443,6 +445,9 @@ server {
 
     ssl_certificate     /etc/letsencrypt/live/schrodump.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/schrodump.example.com/privkey.pem;
+
+    # HSTS belongs here, not in the application — see below.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -458,6 +463,24 @@ server {
 
 Then bind the published port to loopback in `compose.yaml` — `"127.0.0.1:${PORT:-8080}:8080"` — so
 the proxy is the only way in.
+
+#### HSTS is yours, the rest is ours
+
+Schrodump sends the browser-side headers itself — `Content-Security-Policy` with
+`frame-ancestors 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`, on the UI and on the API alike
+([security.md](security.md#a-signed-in-operator-is-one-framed-click-from-a-restore)). You do not
+have to add them at the proxy, and a second `Content-Security-Policy` is worse than none: a browser
+enforces every policy it is sent, so the rule that actually applies becomes the intersection of
+yours and ours, and it moves under you whenever either side changes. If you do add headers of your
+own, note that nginx inherits `add_header` from an outer block only while the inner one declares
+none: a single `add_header` inside `location /` silently drops the `server`-level lines above it.
+
+`Strict-Transport-Security` is the exception, and it is deliberately not sent by the application.
+This container listens on plain HTTP: it cannot promise a browser that the hostname is reachable
+over TLS, and a `max-age` emitted from an installation that is later reached over HTTP locks
+people out of their own backups for a year. The proxy is the only component that knows TLS is
+really there, so the two snippets above send it.
 
 #### Then tell Schrodump about the proxy
 

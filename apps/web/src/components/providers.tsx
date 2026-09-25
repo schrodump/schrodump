@@ -5,7 +5,16 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { z } from "zod";
 import { I18nProvider } from "@/i18n/provider";
+
+// Zod compiles its validators with `new Function` when it can, and decides whether it can by
+// calling `Function("")` inside a try/catch. Our CSP has no 'unsafe-eval' (next.config.ts), so that
+// probe is refused, Zod falls back to the interpreted path — and the browser console carries a
+// security-policy violation on every load of every page, for a call that was never going to
+// succeed and whose failure changes nothing. Saying jitless up front skips the probe. It is set
+// here because this provider is in every client bundle, before any form's schema is built.
+z.config({ jitless: true });
 
 export function Providers({ children }: { children: ReactNode }) {
   // Freshness is the product's whole subject, so the client defaults to telling the truth about it.

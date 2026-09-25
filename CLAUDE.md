@@ -117,6 +117,8 @@ environment set — otherwise they are `describe.skipIf`:
   self-backup, retention actually deleting, a signed notification and an email delivered, every job
   state change reaching the channel that asked, a replica set whose oplog is actually replayed, and
   a postgres backup taken by a role that is not a superuser — what every managed service hands out.
+  Step 1 also reads the security headers off the running image, UI and API alike, because those are
+  configured in two places that no unit test sees together.
   It exists because three defects
   shipped in the seam between the code and `compose.yaml` that no other test could see, and
   covering the rest found six more),
