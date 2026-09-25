@@ -44,6 +44,9 @@ scripts/            # rehearse-recovery.sh (works WITHOUT Schrodump), check-kek.
                     # KEK candidate without booting) + smoke-compose.sh (CI)
 .github/workflows/  # ci, security, release
 compose.yaml        # deployment stack (scratch-init + server + postgres + docker-socket-proxy)
+compose.demo.yaml   # EVALUATION stack: `include:`s compose.yaml and adds MinIO, a bucket and a
+                    # seeded sample database (settings in compose.demo.env, seed in docker/demo/).
+                    # It must never become a second deployment definition — hence the include.
 ```
 
 Each package and app has its **own `CLAUDE.md`**, and that file **takes precedence over this one**

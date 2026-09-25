@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
+
+# Schrodump — EVALUATION STACK. This is not a deployment.
+#
+#   docker compose -f compose.demo.yaml up -d
+#
+# stands up everything needed to reach a first VERIFIED backup on a laptop, with nothing to
+# provision first: Schrodump itself, a MinIO to act as the S3-compatible destination, the bucket
+# inside it, and a small PostgreSQL holding sample data worth backing up.
+#
+# READ THIS BEFORE YOU POINT IT AT ANYTHING REAL:
+#
+#   * The key-encryption key and every password live in compose.demo.env, which is COMMITTED TO
+#     THIS REPOSITORY. Everyone who has ever cloned Schrodump holds them, so every artifact this
+#     stack writes is one any of them can open.
+#   * There is no TLS anywhere — not on the UI, not to MinIO, not to the sample database.
+#   * The bucket lives in a container volume and is destroyed by the teardown below, together with
+#     every backup in it.
+#   * Scratch is /tmp/schrodump-demo/scratch, and it holds dumps in CLEAR while a job runs.
+#
+# So: a laptop, invented data, and nothing published beyond loopback. Everything else starts from
+# compose.yaml and docs/install.md, with keys you generate and keep.
+#
+# Teardown — deletes the containers, the two demo networks, Schrodump's metadata database, the
+# MinIO volume with every backup in it, the sample database, and the scratch directory:
+#
+#   docker compose -f compose.demo.yaml down -v && rm -rf /tmp/schrodump-demo
+#
+# WHY THIS FILE INCLUDES RATHER THAN COPIES compose.yaml
+#
+# A demo stack that redeclared the server, its metadata database and the socket proxy would be a
+# second deployment definition, and the day compose.yaml changed it would quietly stop being the
+# thing newcomers are evaluating. So the shipped file is included verbatim and this one only adds
+# to it. The settings the demo differs on are in compose.demo.env, exactly where an operator's
+# own .env would put them.
+
+# Pinned, and deliberately not `schrodump`: `docker compose down -v` deletes the project's volumes,
+# and a clone that already runs a real stack from compose.yaml must not have its metadata database
+# removed by somebody trying the demo. It is also why compose.demo.env has to set EXECUTOR_NETWORK
+# and SELF_BACKUP_NETWORK — both defaults assume the project is called `schrodump`.
+name: schrodump-demo
+
+include:
+  - path: compose.yaml
+    # Replaces the default `.env` lookup, so the demo runs the same way in a clone that already has
+    # a real .env sitting next to it.
+    env_file: compose.demo.env
+
+services:
+  # The database the demo backs up. On `targets`, the network compose.yaml creates for exactly
+  # this and the one ephemeral executors join, so pg_dump reaches it by the name `sample-db`.
+  sample-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: schrodump-demo
+      POSTGRES_DB: sample
+    volumes:
+      # /var/lib/postgresql, not /var/lib/postgresql/data — see the note in compose.yaml's `db`.
+      - sample-db:/var/lib/postgresql
+      - ./docker/demo/sample-data.sql:/docker-entrypoint-initdb.d/10-sample-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d sample"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - targets
+
+  # The S3-compatible destination, and the same image .github/workflows/ci.yml runs the S3 suite
+  # against — pinned by digest, because a demo that pulls something different from what CI proved
+  # is a demo that can break without a single test going red.
+  #
+  # Neither `minio/minio` nor `quay.io/minio/minio` can be used: both stopped answering anonymous
+  # pulls (Docker Hub on 2026-09-21, quay.io on 2026-09-25), and the first thing a stranger does
+  # with this file is pull it. Chainguard's is the same upstream MinIO, rebuilt, multi-arch.
+  #
+  # `/tmp/data`, not `/data`: the image runs as uid 65532, and `/tmp` is the directory that user
+  # can write. Pointed anywhere else the server exits before it ever listens.
+  #
+  # The digest lives in three places — here, the `Start MinIO` step of .github/workflows/ci.yml,
+  # and scripts/smoke-compose.sh. Keep them in step; ci.yml carries the full history of why this
+  # registry, and the two fallbacks checked pullable if it ever stops resolving.
+  #
+  # On `internal` only. Schrodump uploads and downloads artifacts itself — that is the server's
+  # job, not an executor's — so the bucket has no business being reachable from the network the
+  # database executors run on.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    restart: unless-stopped
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    command: ["server", "/tmp/data"]
+    environment:
+      MINIO_ROOT_USER: schrodump-demo
+      MINIO_ROOT_PASSWORD: schrodump-demo
+    volumes:
+      - minio:/tmp/data
+    networks:
+      - internal
+
+  # One-shot, as root, BEFORE the server — the same shape and the same reason as compose.yaml's
+  # `scratch-init`, and `docker compose ps -a` lists it as `Exited (0)`, which is its success
+  # state rather than a crash.
+  #
+  # Two jobs. First: a named volume mounted at a path the image does not contain is created
+  # root-owned, and MinIO then dies on boot with "unable to create (/tmp/data/.minio.sys/tmp) file
+  # access denied" — Docker chowns neither this nor scratch. Second: it creates the bucket by
+  # creating its DIRECTORY. MinIO's single-drive backend serves every top-level directory of the
+  # data dir as a bucket (verified against this digest: list, put, get and delete all work on it),
+  # which means the demo needs no S3 client, no credentials at build time, and nothing that has to
+  # wait for the server to start listening. If a future digest ever stopped doing that, the
+  # destination's canary would fail with NoSuchBucket and `mc mb` against a running server is the
+  # way back.
+  minio-init:
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    user: "0:0"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - mkdir -p /tmp/data/backups && chown -R 65532:65532 /tmp/data
+    volumes:
+      - minio:/tmp/data
+    network_mode: none
+    restart: "no"
+
+volumes:
+  minio:
+  sample-db:

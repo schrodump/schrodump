@@ -71,6 +71,54 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
 - **Docker primero** — una única imagen sin clientes de base de datos, releases multiarquitectura
   firmadas con un SBOM adjunto.
 
+## Pruébalo en cinco minutos
+
+Antes de aprovisionar nada, ejecuta el producto entero sobre datos desechables en tu portátil. Un
+solo comando levanta Schrodump, un MinIO que hace las veces de tu almacenamiento de objetos, el
+bucket dentro de él y un PostgreSQL con datos de ejemplo que merecen una copia:
+
+```sh
+git clone https://github.com/schrodump/schrodump.git
+cd schrodump
+docker compose -f compose.demo.yaml up -d
+```
+
+No hay cuenta por defecto —ni aquí ni en una instalación real—, así que lee el enlace de
+configuración de un solo uso y ábrelo:
+
+```sh
+docker compose -f compose.demo.yaml logs schrodump | grep setupUrl
+```
+
+Crea el administrador y recorre el flujo guiado con estos valores. Todo lo que nombran ya está en
+marcha:
+
+| Paso | Qué introducir |
+| --- | --- |
+| **Claves de cifrado** | Provisiona las dos, operacional y escrow. Sin ellas no se copia nada. |
+| **Destino** | Endpoint `http://minio:9000`, región `us-east-1`, bucket `backups`, access key `schrodump-demo`, secret `schrodump-demo`, **direccionamiento path-style activado**. Después ejecuta el canary. |
+| **Base de datos a copiar** | PostgreSQL, host `sample-db`, puerto `5432`, usuario `demo`, contraseña `schrodump-demo`, TLS desactivado. **Descubrir bases** y elegir `sample`: el alcance nunca se escribe a mano. Después prueba la conexión. |
+| **Política** | Cualquier horario, nivel de verificación **restauración completa** (el valor por defecto). Después **Copiar ahora**. |
+
+Mira cómo aparece el artefacto y pasa a `VERIFIED`: el trabajo de verificación lo restauró en una
+base desechable y miró dentro. Recorrer el flujo entero lleva unos minutos; el artefacto se pone en
+verde a los pocos segundos de la copia. El primer `up -d` se lleva un par de minutos más
+descargando las imágenes.
+
+**Lo que la demo no es.** No hay TLS en ninguna parte. La key-encryption key y las contraseñas están
+publicadas en este repositorio, así que todo artefacto que escribe es un artefacto que cualquiera
+que lea esta página puede abrir. El bucket vive en un volumen de contenedor y muere con la pila. El
+scratch está en `/tmp` y guarda los volcados en claro mientras corre un trabajo. Sirve para mirar el
+producto en un portátil, con datos inventados, publicado en loopback y en ningún otro sitio. La
+instalación de verdad es la sección siguiente, y empieza con claves que generas y conservas.
+
+Para desmontarlo — borra los contenedores, las dos redes de la demo, la base de metadatos de
+Schrodump, el bucket con todas las copias dentro, la base de ejemplo y el directorio de scratch:
+
+```sh
+docker compose -f compose.demo.yaml down -v && rm -rf /tmp/schrodump-demo
+```
+
 ## Inicio rápido
 
 Necesitas Docker con el plugin Compose. No se instala nada en tus servidores de base de datos.
