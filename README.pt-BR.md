@@ -116,6 +116,33 @@ alvo → teste → política. Passo a passo completo em [docs/install.md](docs/i
 | MariaDB | MinIO · SeaweedFS · Ceph RGW |
 | MongoDB | |
 
+## Como ele se compara — e quando não usar o Schrodump
+
+| No lugar do Schrodump | O que é | Por que você escolheria |
+| --- | --- | --- |
+| **pgBackRest**, **Barman**, **WAL-G** | Backup físico de PostgreSQL com arquivamento contínuo de WAL e point-in-time recovery | Você precisa de um ponto de recuperação medido em segundos, ou tem um cluster grande o bastante para que dump-e-carga não seja um restore plausível. São a resposta madura para esse problema, e o Schrodump não compete com elas. |
+| **restic**, **Backrest** | Backup de arquivos, cifrado e deduplicado, de qualquer coisa em disco | Você quer uma ferramenta só para o host inteiro, não só para os bancos. Vale lembrar: copiar um data directory em uso não é, por si só, um backup consistente de banco — precisa de snapshot de filesystem ou da engine parada. |
+| **postgresus**, **databasus** | `pg_dump` agendado, self-hosted, com painel e notificações | O que há de mais parecido em formato com o Schrodump, e mais simples. Se um job que saiu com `0` é a garantia que você quer, eles entregam isso com menos peças. |
+| **`pg_dump` + cron** | A linha de base de onde todo mundo parte | Nada para implantar, nada novo para confiar. É exatamente o que o Schrodump automatiza — mais a parte em que alguma coisa abre o arquivo depois. |
+| **Backup gerenciado** (RDS, Cloud SQL, Atlas e afins) | Snapshots do provedor, em geral com PITR | São bons, já estão pagos e você quase certamente deve deixá-los ligados. Também moram dentro da conta que pode apagá-los, raramente migram entre provedores e ninguém ensaia o restore. |
+
+**Onde o Schrodump perde.** Ele **não faz PITR nem backup físico**, e isso é estrutural, não
+inacabado: ele alcança seu banco pelo protocolo de client, de um contêiner em outro lugar — é o que
+o torna agentless e também o motivo de nunca conseguir engatar um `archive_command` ou ler um data
+directory. Ou seja: **seu ponto de recuperação é o último dump, e seu tempo de recuperação é o que
+um restore levar** — meça os dois, e se qualquer um dos números for inaceitável, você precisa da
+primeira linha daquela tabela, não desta ferramenta. Dump-e-carga também escala pior que uma cópia
+em nível de arquivo: em banco grande, o restore é a metade cara.
+[docs/roadmap.md](docs/roadmap.md) traz o raciocínio e o que teria de mudar.
+
+**O que ele faz que as outras não fazem.** Ele se recusa a relatar um backup como bom porque um
+processo saiu com `0`. Várias das ferramentas acima checam integridade — `restic check`,
+`pgbackrest verify` — e isso é uma checagem real sobre os bytes; o padrão do Schrodump é mais forte
+e mais estreito: restaurar o artefato num banco descartável da versão certa, confirmar que ele abre
+e, enquanto nada tiver feito isso, mostrá-lo como pergunta em aberto em vez de sucesso. Rodar os
+dois é a configuração sensata — backup físico pelo ponto de recuperação, Schrodump pela evidência de
+que um dump, que você de fato consegue levar embora, restaura.
+
 ## Como funciona
 
 O Schrodump é um monorepo (Node 22, TypeScript, pnpm) dividido por responsabilidade:
