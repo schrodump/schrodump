@@ -1,3 +1,9 @@
+# The deployment stack: `docker compose up -d` with a .env filled in from .env.example. See
+# docs/install.md.
+#
+# To EVALUATE Schrodump without provisioning a bucket and a database first, use compose.demo.yaml
+# instead. It `include:`s this file rather than copying it — so the demo is this deployment plus a
+# MinIO, a bucket and a sample database, and can never drift into a second definition of the stack.
 name: schrodump
 
 services:

@@ -69,6 +69,54 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 - **Docker-first** — uma imagem única sem clients de banco, releases multi-arch assinadas com SBOM
   anexado.
 
+## Experimente em cinco minutos
+
+Antes de provisionar qualquer coisa, rode o produto inteiro sobre dados descartáveis no seu laptop.
+Um comando sobe o Schrodump, um MinIO no lugar do seu object storage, o bucket dentro dele e um
+PostgreSQL com dados de exemplo que valem um backup:
+
+```sh
+git clone https://github.com/schrodump/schrodump.git
+cd schrodump
+docker compose -f compose.demo.yaml up -d
+```
+
+Não existe conta padrão — nem aqui, nem numa instalação de verdade —, então leia o link de setup de
+uso único e abra-o:
+
+```sh
+docker compose -f compose.demo.yaml logs schrodump | grep setupUrl
+```
+
+Crie o administrador e percorra o fluxo guiado com estes valores. Tudo o que eles citam já está no
+ar:
+
+| Passo | O que preencher |
+| --- | --- |
+| **Chaves de criptografia** | Provisione as duas, operacional e escrow. Nada é copiado antes disso. |
+| **Destino** | Endpoint `http://minio:9000`, região `us-east-1`, bucket `backups`, access key `schrodump-demo`, secret `schrodump-demo`, **endereçamento path-style ligado**. Depois rode o canary. |
+| **Alvo** | PostgreSQL, host `sample-db`, porta `5432`, usuário `demo`, senha `schrodump-demo`, TLS desligado. **Descobrir bancos** e escolher `sample` — o escopo nunca é digitado. Depois teste a conexão. |
+| **Política** | Qualquer agendamento, nível de verificação **restauração completa** (o padrão). Depois **Rodar backup agora**. |
+
+Acompanhe o artefato aparecer e virar `VERIFIED` — o job de verificação restaurou o arquivo em um
+banco descartável e olhou dentro. Clicar o fluxo inteiro leva alguns minutos; o artefato em si fica
+verde poucos segundos depois do backup. O primeiro `up -d` gasta mais alguns minutos baixando as
+imagens.
+
+**O que a demo não é.** Não há TLS em lugar nenhum. A key-encryption key e as senhas estão
+commitadas neste repositório, então todo artefato que ela escreve é um artefato que qualquer leitor
+desta página consegue abrir. O bucket vive num volume de container e morre junto com a stack. O
+scratch fica em `/tmp` e guarda dumps em claro enquanto um job roda. Ela serve para olhar o produto
+num laptop, com dados inventados, publicada em loopback e em mais lugar nenhum. A instalação de
+verdade é a próxima seção, e ela começa com chaves que você gera e guarda.
+
+Para derrubar tudo — apaga os containers, as duas redes da demo, o banco de metadados do Schrodump,
+o bucket com todos os backups dentro, o banco de exemplo e o diretório de scratch:
+
+```sh
+docker compose -f compose.demo.yaml down -v && rm -rf /tmp/schrodump-demo
+```
+
 ## Início rápido
 
 Você precisa de Docker com o plugin Compose. Nada é instalado nos seus servidores de banco.

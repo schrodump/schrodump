@@ -14,6 +14,81 @@ Schrodump does **not** need anything installed on the database host. Dumps run i
 containers built from the target's own major version, which is why the server image contains no
 `pg_dump`, `mysqldump` or `mongodump`.
 
+## Evaluate it first: the demo stack
+
+Everything below assumes a bucket and a database you already have. If you have neither yet — or you
+simply want to see what a `VERIFIED` badge costs before spending an afternoon on it — the repository
+ships an evaluation stack that brings its own:
+
+```sh
+git clone https://github.com/schrodump/schrodump.git
+cd schrodump
+docker compose -f compose.demo.yaml up -d
+```
+
+`compose.demo.yaml` **includes** `compose.yaml` rather than copying it, so what you evaluate is the
+deployment this project ships, not a lookalike. On top of it, it adds three services:
+
+| Service      | What it is                                                                      |
+| ------------ | ------------------------------------------------------------------------------- |
+| `minio`      | An S3-compatible endpoint on the internal network, standing in for your bucket  |
+| `minio-init` | One shot, as root: prepares MinIO's volume and the `backups` bucket, then exits |
+| `sample-db`  | PostgreSQL 18 on the `targets` network, seeded with 8 customers and 240 orders  |
+
+It differs from the install below in four ways, and none of them is a detail:
+
+- **The key-encryption key and every password are in `compose.demo.env`, committed to this
+  repository.** A KEK everyone has is a KEK that protects nothing: every artifact this stack writes
+  can be opened by anyone who has cloned Schrodump.
+- **Nothing speaks TLS** — not the UI, not the connection to MinIO, not the connection to the
+  sample database.
+- **The bucket is a container volume.** `down -v` destroys it and every backup in it. A real
+  destination outlives the instance that wrote to it; this one does not.
+- **Scratch is `/tmp/schrodump-demo/scratch`**, which is where it can be shared by Docker Desktop
+  without reconfiguring it. It holds dumps in clear while a job runs, so on a server it belongs on
+  an encrypted filesystem instead — see [Scratch](#scratch).
+
+The project name is pinned to `schrodump-demo`, so the demo can never adopt or delete the volumes
+of a real stack running from `compose.yaml` in the same clone.
+
+There is no default account in the demo either. Read the one-time setup link, open it, create the
+administrator, and then walk [step 5](#5-first-verified-backup) with these values — every one of
+them is already running:
+
+```sh
+docker compose -f compose.demo.yaml logs schrodump | grep setupUrl
+```
+
+| Step            | What to enter                                                                                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Encryption keys | Provision both, operational and escrow                                                                                                                            |
+| Destination     | `http://minio:9000`, region `us-east-1`, bucket `backups`, access key `schrodump-demo`, secret `schrodump-demo`, path-style addressing **on**. Then run the canary |
+| Target          | PostgreSQL, host `sample-db`, port `5432`, user `demo`, password `schrodump-demo`, TLS off. Then **Discover databases**, pick `sample`, and test the connection   |
+| Policy          | Any schedule, verify level **full restore** (the default). Then **Run backup now**                                                                                |
+
+The artifact turns `VERIFIED` in seconds once the images are local. To see that the badge is about
+content rather than about a job exiting `0`, change the data and restore over it — the same
+operation you would run during an incident:
+
+```sh
+docker compose -f compose.demo.yaml exec sample-db \
+  psql -U demo -d sample -c 'DELETE FROM orders'
+# then: Artifacts -> Restore -> Database, and type the database name to confirm
+docker compose -f compose.demo.yaml exec sample-db \
+  psql -U demo -d sample -tAc 'SELECT count(*) FROM orders'   # 240 again
+```
+
+Tear it down with one command. It deletes the containers, the two demo networks, Schrodump's
+metadata database, the MinIO volume with every backup in it, the sample database, and the scratch
+directory:
+
+```sh
+docker compose -f compose.demo.yaml down -v && rm -rf /tmp/schrodump-demo
+```
+
+Nothing else is left behind: the images are the only thing that stays on the host, and they are the
+ones a real install would pull anyway.
+
 ## 1. Get the files
 
 ```sh

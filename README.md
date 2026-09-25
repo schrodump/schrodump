@@ -69,6 +69,54 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 - **Docker-first** — a single image with no database clients, signed multi-arch releases with an
   attached SBOM.
 
+## Try it in five minutes
+
+Before provisioning anything, run the whole product against throwaway data on your laptop. One
+command brings up Schrodump, a MinIO standing in for your object storage, the bucket inside it, and
+a PostgreSQL holding sample data worth backing up:
+
+```sh
+git clone https://github.com/schrodump/schrodump.git
+cd schrodump
+docker compose -f compose.demo.yaml up -d
+```
+
+There is no default account — not here and not in a real install — so read the one-time setup link
+and open it:
+
+```sh
+docker compose -f compose.demo.yaml logs schrodump | grep setupUrl
+```
+
+Create the administrator, then walk the guided flow with these values. Everything they name is
+already running:
+
+| Step | What to enter |
+| --- | --- |
+| **Encryption keys** | Provision both, operational and escrow. Nothing can be backed up before this. |
+| **Destination** | Endpoint `http://minio:9000`, region `us-east-1`, bucket `backups`, access key `schrodump-demo`, secret `schrodump-demo`, **path-style addressing on**. Then run the canary. |
+| **Target** | PostgreSQL, host `sample-db`, port `5432`, user `demo`, password `schrodump-demo`, TLS off. **Discover databases**, pick `sample` — the scope is never typed. Then test the connection. |
+| **Policy** | Any schedule, verify level **full restore** (the default). Then **Run backup now**. |
+
+Watch the artifact appear and turn `VERIFIED` — the verify job restored it into a throwaway
+database and looked inside. Clicking the whole thing through takes a few minutes; the artifact
+itself goes green within seconds of the backup. The first `up -d` spends a couple of minutes more
+pulling images.
+
+**What the demo is not.** No TLS, anywhere. A key-encryption key and passwords committed to this
+repository, so every artifact it writes is one that any reader of this page can open. A bucket that
+lives in a container volume and dies with the stack. Scratch under `/tmp`, holding dumps in clear
+while a job runs. It is for looking at the product on a laptop, with invented data, published on
+loopback and nowhere else. A real install is the next section, and it starts from keys you generate
+and keep.
+
+Teardown — deletes the containers, the two demo networks, Schrodump's metadata database, the bucket
+with every backup in it, the sample database, and the scratch directory:
+
+```sh
+docker compose -f compose.demo.yaml down -v && rm -rf /tmp/schrodump-demo
+```
+
 ## Quick start
 
 You need Docker with the Compose plugin. Nothing is installed on your database servers.
