@@ -150,6 +150,16 @@ echo "$(compose ps --format '{{.Status}}')" | grep -q unhealthy && fail "a servi
 # pages, @fastify/helmet for the API — and they only reach a browser if the shipped image serves
 # them. The restore dialog is one click from writing over a live database, so "the config says
 # DENY" is not the claim that matters; "this container said DENY" is.
+#
+# The app service carries no healthcheck, so `compose up -d` returning says nothing about the two
+# listeners being up; every later step is separated from the boot by the minute step 2 spends
+# standing databases up. This one is not, so it waits for itself.
+up=""
+for _ in $(seq 1 60); do
+  if curl -fsS -o /dev/null "${BASE}/backend/health"; then up=yes; break; fi
+  sleep 2
+done
+[ -n "$up" ] || fail "the stack did not answer ${BASE}/backend/health within two minutes"
 ui_headers="$(curl -sS -D - -o /dev/null "${BASE}/login")"
 api_headers="$(curl -sS -D - -o /dev/null "${BASE}/backend/health")"
 for want in 'x-frame-options: DENY' 'x-content-type-options: nosniff' 'referrer-policy: no-referrer' "frame-ancestors 'none'"; do

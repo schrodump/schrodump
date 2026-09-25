@@ -50,8 +50,8 @@ describe("the UI's security headers", () => {
   it("applies to every route the app serves itself", async () => {
     const pattern = await matcher();
 
-    // Not "/" and not a hand-listed set of pages: a page added next month is covered without
-    // anyone remembering this file.
+    // The rule is a catch-all, not an enumeration of today's pages: a screen added next month is
+    // covered without anyone remembering to add it to the config.
     for (const path of ["/", "/login", "/artifacts", "/jobs", "/settings", "/setup"]) {
       expect(pattern.test(path)).toBe(true);
     }
