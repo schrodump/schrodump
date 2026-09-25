@@ -5,7 +5,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
-import { badRequest } from "./errors.js";
+import type { EgressGuard } from "../egress/guard.js";
+import { badRequest, refusedField } from "./errors.js";
 
 const CreateDestinationSchema = z.object({
   name: z.string().min(1),
@@ -118,6 +119,11 @@ export interface DestinationRoutesDeps {
   store(organizationId: string): DestinationStore;
   // Runs the destination canary (PUT/GET/DELETE health check) for a given destination.
   canary(organizationId: string, destinationId: string): Promise<{ ok: boolean; failedOperation: string | null }>;
+  // `endpoint` is an operator-supplied address, and the canary reports whether something answered
+  // on it — PUT/GET/DELETE against `http://docker-proxy:2375` is a probe with a result. Refused at
+  // the border here; refused again where the driver is built (jobs/destination-driver.ts), which is
+  // what covers a row written before this existed. See egress/guard.ts.
+  egress: EgressGuard;
 }
 
 export function destinationRoutes(deps: DestinationRoutesDeps) {
@@ -128,6 +134,10 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
       async (request, reply) => {
         const parsed = CreateDestinationSchema.safeParse(request.body);
         if (!parsed.success) return badRequest(reply, "invalid destination", parsed.error);
+        if (parsed.data.endpoint !== undefined) {
+          const refusal = await deps.egress.checkUrl(parsed.data.endpoint);
+          if (refusal !== null) return refusedField(reply, "invalid destination", "endpoint", refusal);
+        }
         const created = await deps.store(contextOf(request).organizationId).create({
           name: parsed.data.name,
           ...(parsed.data.endpoint !== undefined ? { endpoint: parsed.data.endpoint } : {}),
@@ -175,6 +185,12 @@ export function destinationRoutes(deps: DestinationRoutesDeps) {
         if (!params.success) return badRequest(reply, "invalid id", params.error);
         const parsed = UpdateDestinationSchema.safeParse(request.body);
         if (!parsed.success) return badRequest(reply, "invalid destination update", parsed.error);
+        if (parsed.data.endpoint !== undefined) {
+          const refusal = await deps.egress.checkUrl(parsed.data.endpoint);
+          if (refusal !== null) {
+            return refusedField(reply, "invalid destination update", "endpoint", refusal);
+          }
+        }
 
         const { secretAccessKey, ...rest } = parsed.data;
         if (secretAccessKey === undefined && Object.keys(rest).length === 0) {

@@ -3,6 +3,7 @@
 
 import type { ProbeConnection, ProbeResult } from "@schrodump/engines/probe/types";
 import { describe, expect, it, vi } from "vitest";
+import { allowAnyEgress, refuseAnyEgress } from "../egress/guard.fixture.js";
 import {
   classify,
   driverCodeOf,
@@ -53,13 +54,13 @@ describe("testTargetConnection", () => {
     };
 
     for (const engine of ["postgres", "mysql", "mariadb", "mongodb"] as const) {
-      await testTargetConnection(target({ engine }), probes);
+      await testTargetConnection(target({ engine }), allowAnyEgress, probes);
     }
     expect(calls).toEqual(["postgres", "mysql", "mariadb", "mongodb"]);
   });
 
   it("reports the server version, which decides the executor image", async () => {
-    const outcome = await testTargetConnection(target(), table(async () => result(160_004)));
+    const outcome = await testTargetConnection(target(), allowAnyEgress, table(async () => result(160_004)));
     expect(outcome).toEqual({
       ok: true,
       serverVersionNum: 160_004,
@@ -72,7 +73,7 @@ describe("testTargetConnection", () => {
 
   it("hands the decrypted password to the probe and nothing else", async () => {
     const probe = vi.fn<ProbeFn>(async () => result(160_004));
-    await testTargetConnection(target(), table(probe));
+    await testTargetConnection(target(), allowAnyEgress, table(probe));
 
     const conn = probe.mock.calls[0]?.[0] as ProbeConnection;
     expect(conn.password).toBe(PASSWORD);
@@ -87,28 +88,28 @@ describe("testTargetConnection", () => {
   it("hands the target's CA to the probe, and none when there is none", async () => {
     const probe = vi.fn<ProbeFn>(async () => result(160_004));
     const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
-    await testTargetConnection(target({ tlsCaCert: pem }), table(probe));
-    await testTargetConnection(target(), table(probe));
+    await testTargetConnection(target({ tlsCaCert: pem }), allowAnyEgress, table(probe));
+    await testTargetConnection(target(), allowAnyEgress, table(probe));
     expect((probe.mock.calls[0]?.[0] as ProbeConnection).tlsCaCert).toBe(pem);
     expect(probe.mock.calls[1]?.[0] as ProbeConnection).not.toHaveProperty("tlsCaCert");
   });
 
   it("connects through the first scoped database for SQL engines", async () => {
     const probe = vi.fn<ProbeFn>(async () => result(160_004));
-    await testTargetConnection(target({ databases: ["shop", "billing"] }), table(probe));
+    await testTargetConnection(target({ databases: ["shop", "billing"] }), allowAnyEgress, table(probe));
     expect((probe.mock.calls[0]?.[0] as ProbeConnection).database).toBe("shop");
   });
 
   it("falls back to the engine's own system database when the scope is empty", async () => {
     const probe = vi.fn<ProbeFn>(async () => result(1));
-    await testTargetConnection(target({ engine: "postgres" }), table(probe));
-    await testTargetConnection(target({ engine: "mysql" }), table(probe));
+    await testTargetConnection(target({ engine: "postgres" }), allowAnyEgress, table(probe));
+    await testTargetConnection(target({ engine: "mysql" }), allowAnyEgress, table(probe));
     expect((probe.mock.calls[0]?.[0] as ProbeConnection).database).toBe("postgres");
   });
 
   it("uses admin for MongoDB, where the field is the auth source and not a backup scope", async () => {
     const probe = vi.fn<ProbeFn>(async () => result(80_000));
-    await testTargetConnection(target({ engine: "mongodb", databases: ["shop"] }), table(probe));
+    await testTargetConnection(target({ engine: "mongodb", databases: ["shop"] }), allowAnyEgress, table(probe));
     expect((probe.mock.calls[0]?.[0] as ProbeConnection).database).toBe("admin");
   });
 
@@ -118,7 +119,7 @@ describe("testTargetConnection", () => {
       new Error(`failed to connect to mongodb://backup:${PASSWORD}@db.internal:27017`),
       { code: 18 },
     );
-    const outcome = await testTargetConnection(target({ engine: "mongodb" }), table(async () => {
+    const outcome = await testTargetConnection(target({ engine: "mongodb" }), allowAnyEgress, table(async () => {
       throw leaky;
     }));
 
@@ -134,6 +135,7 @@ describe("testTargetConnection", () => {
   it("turns a thrown probe into a failure code instead of propagating it", async () => {
     const outcome = await testTargetConnection(
       target(),
+      allowAnyEgress,
       table(async () => {
         throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
       }),
@@ -265,7 +267,7 @@ describe("testTargetConnection reports what the server holds", () => {
   };
 
   it("returns every database by name and size on success", async () => {
-    const outcome = await testTargetConnection(target(), table(async () => rich));
+    const outcome = await testTargetConnection(target(), allowAnyEgress, table(async () => rich));
 
     expect(outcome.databases).toEqual(rich.databases);
   });
@@ -276,7 +278,7 @@ describe("testTargetConnection reports what the server holds", () => {
       facts: { isReplicaSet: true, hasMyisam: false, canReadRolePasswords: false },
     };
 
-    const outcome = await testTargetConnection(target({ engine: "mongodb" }), table(async () => replicaSet));
+    const outcome = await testTargetConnection(target({ engine: "mongodb" }), allowAnyEgress, table(async () => replicaSet));
 
     expect(outcome.isReplicaSet).toBe(true);
   });
@@ -284,6 +286,7 @@ describe("testTargetConnection reports what the server holds", () => {
   it("returns an empty list and an unknown topology on failure, never a stale one", async () => {
     const outcome = await testTargetConnection(
       target(),
+      allowAnyEgress,
       table(async () => {
         throw Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
       }),
@@ -292,5 +295,25 @@ describe("testTargetConnection reports what the server holds", () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.databases).toEqual([]);
     expect(outcome.isReplicaSet).toBeNull();
+  });
+});
+
+describe("the egress guard runs before any driver opens a socket", () => {
+  it("throws rather than probing, so a refused address never becomes a ProbeFailureCode", async () => {
+    // The six codes describe what a DATABASE said. "This server will not dial that address" is not
+    // one of them, and folding it into UNREACHABLE would tell the operator the host is down when it
+    // is the policy that declined. The routes turn this throw into a 400 naming `host`.
+    const probe = vi.fn();
+    await expect(
+      testTargetConnection(target({ host: "docker-proxy", port: 2375 }), refuseAnyEgress, table(probe)),
+    ).rejects.toMatchObject({ name: "EgressRefusedError", field: "host" });
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("probes normally once the address is allowed", async () => {
+    const probe = vi.fn(async () => result(160_004));
+    const outcome = await testTargetConnection(target(), allowAnyEgress, table(probe));
+    expect(outcome.ok).toBe(true);
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 });

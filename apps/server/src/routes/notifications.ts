@@ -11,7 +11,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
-import { badRequest } from "./errors.js";
+import type { EgressGuard } from "../egress/guard.js";
+import { badRequest, refusedField } from "./errors.js";
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
 
 // A channel is one kind or the other, and the schema says so rather than accepting a bag of
@@ -102,6 +103,12 @@ export interface NotificationRoutesDeps {
   // row. Injected so the route stays testable without Prisma or a real relay, exactly as the
   // target probe is — and null when the channel is not this organization's.
   testDelivery(organizationId: string, id: string): Promise<TestDeliveryResult | null>;
+  // A channel's `url` / `smtpHost` is an address this server dials, and the delivery result — the
+  // HTTP status through `lastFailure`, a relay's refusal — comes back to whoever pressed the
+  // button. Refused at the border here, and again at delivery (notifications/webhook.ts,
+  // notifications/smtp.ts), which is what covers a row written before this existed and a redirect
+  // that arrives later. See egress/guard.ts.
+  egress: EgressGuard;
 }
 
 // Everything except the secrets. Explicit field list rather than a spread-minus-N: a field added to
@@ -133,6 +140,18 @@ export function notificationRoutes(deps: NotificationRoutesDeps) {
         const parsed = CreateChannelSchema.safeParse(request.body);
         if (!parsed.success) return badRequest(reply, "invalid channel", parsed.error);
         const input = parsed.data;
+        const refusal =
+          input.kind === "WEBHOOK"
+            ? await deps.egress.checkUrl(input.url)
+            : await deps.egress.check(input.smtpHost, input.smtpPort);
+        if (refusal !== null) {
+          return refusedField(
+            reply,
+            "invalid channel",
+            input.kind === "WEBHOOK" ? "url" : "smtpHost",
+            refusal,
+          );
+        }
         const store = deps.store(contextOf(request).organizationId);
 
         const data: CreateChannelData =

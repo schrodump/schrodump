@@ -200,6 +200,8 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 | `SELF_BACKUP_NETWORK`              | no       | Network the self-backup executor joins (default `schrodump_internal`) — not the executor network                                 |
 | `SCHRODUMP_TRUSTED_PROXIES`        | no       | CIDRs of the hops in front of this server. Read the TLS section — unset behind a proxy locks out every user                      |
 | `SCHRODUMP_SMTP_CA_FILE`           | no       | PEM of a CA to trust for an email notification relay whose certificate the system store does not carry. See below                |
+| `SCHRODUMP_EGRESS_DENY`            | no       | CIDRs the server may **not** connect to, on top of the built-in refusals. Empty by default. See below                            |
+| `SCHRODUMP_EGRESS_ALLOW`           | no       | CIDRs that override every refusal, the built-in ones included. Empty by default. See below                                       |
 
 > **On `SCHRODUMP_STAGED_THRESHOLD_BYTES`.** It has no default, and that is deliberate rather
 > than an oversight. A STAGED dump is parallel and faster on a large database, but it needs the
@@ -218,6 +220,23 @@ Everything lives in `.env`. The defaults are in `.env.example`.
 > next run on the viewer's own clock. Changing it moves every policy's schedule at once, on the
 > next restart — and the first tick after it dispatches each policy's most recent window on the
 > new clock if that window has no job yet, exactly as it does for a policy just created.
+
+> **On `SCHRODUMP_EGRESS_DENY` / `SCHRODUMP_EGRESS_ALLOW`.** Four fields in the interface name an
+> address Schrodump then connects to — a webhook URL, an S3 endpoint, an SMTP relay, a database
+> target's host — and each of them tells you whether something answered. With both variables unset
+> the server refuses only what can never be a legitimate destination: loopback, link-local
+> (`169.254.169.254` is the cloud metadata service), the unspecified address, and **this
+> deployment's own services** (`db`, `docker-proxy` and the API itself, by name and by the address
+> they resolve to). **Your private network is deliberately left alone** — a database on `10.0.0.5`
+> or a MinIO on `192.168.1.10` is the normal shape of a self-hosted install, and refusing it by
+> default would break more deployments than it protected. If every database you back up is public,
+> or is reached only by the executors on their own network, you can shut the private ranges:
+> `SCHRODUMP_EGRESS_DENY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7`. `..._ALLOW` overrides
+> every refusal, including the built-in ones; the case it exists for is a deployment whose metadata
+> PostgreSQL also holds a database you back up. Both take a comma-separated list of CIDRs (a bare
+> address means that one host), and an entry that is neither stops the boot naming the variable.
+> [security.md](security.md#what-the-server-will-and-will-not-connect-to) states exactly what is
+> refused, and what this does and does not protect against.
 
 ### Email notifications to an internal relay
 

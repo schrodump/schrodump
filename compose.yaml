@@ -48,6 +48,16 @@ services:
       # CIDRs of the hops in front of this server. Decides which address the login rate limit
       # counts. Unset behind a proxy puts every client in one shared bucket; see docs/security.md.
       SCHRODUMP_TRUSTED_PROXIES:
+      # Where the server may open a connection to an address an operator typed — a webhook URL, an
+      # S3 endpoint, an SMTP relay, a database target. Unset, it refuses only what can never be a
+      # legitimate destination: loopback, link-local (169.254.169.254, the cloud metadata service),
+      # the unspecified address, and this deployment's own services — `db`, `docker-proxy` and this
+      # API, by name AND by the address they currently resolve to. Your LAN is deliberately left
+      # alone: on a self-hosted backup tool a database on 10.0.0.5 is the normal case, not the
+      # attack. DENY adds CIDRs, ALLOW overrides every refusal. Both passed through only when set.
+      # See docs/security.md.
+      SCHRODUMP_EGRESS_DENY:
+      SCHRODUMP_EGRESS_ALLOW:
       # Documented in docs/install.md and, until now, never passed through: an operator who set
       # either in .env got the server default and no indication the value had been ignored.
       SCHRODUMP_STAGED_THRESHOLD_BYTES:

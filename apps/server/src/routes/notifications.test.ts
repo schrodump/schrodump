@@ -6,6 +6,13 @@ import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
 import {
+  allowAnyEgress,
+  defaultPolicyGuard,
+  refuseAnyEgress,
+  REFUSAL,
+} from "../egress/guard.fixture.js";
+import type { EgressGuard } from "../egress/guard.js";
+import {
   notificationRoutes,
   type ChannelRecord,
   type ChannelStore,
@@ -46,6 +53,7 @@ async function appWith(
   role: Role | null,
   over: Partial<ChannelStore> = {},
   testDelivery: NotificationRoutesDeps["testDelivery"] = () => Promise.resolve(DELIVERED),
+  egress: EgressGuard = allowAnyEgress,
 ) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
@@ -55,6 +63,7 @@ async function appWith(
       kek: randomBytes(32),
       store: () => ({ ...STORE, ...over }),
       testDelivery,
+      egress,
     })(instance);
     return Promise.resolve();
   });
@@ -373,5 +382,82 @@ describe("notification channels — the job firehose is opt-in", () => {
     const res = await app.inject({ method: "GET", url: "/notification-channels" });
     expect(res.body).toContain('"deliverJobEvents":true');
     await app.close();
+  });
+});
+
+describe("a channel names an address this server will actually dial", () => {
+  it("refuses a webhook URL pointed at the deployment's own control plane", async () => {
+    // The finding's sharpest case: the socket proxy accepts a body-less POST to
+    // /containers/prune, and CONTAINERS + POST is enough for it to run.
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: {
+        kind: "WEBHOOK",
+        url: "http://docker-proxy:2375/containers/prune",
+        secret: "a-signing-secret-long-enough",
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid channel", field: "url", detail: REFUSAL });
+  });
+
+  it("refuses an SMTP host pointed at the metadata database, naming smtpHost and not url", async () => {
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: {
+        kind: "SMTP",
+        smtpHost: "db",
+        smtpPort: 5432,
+        smtpUsername: "u",
+        smtpPassword: "p",
+        fromAddress: "schrodump@example.com",
+        toAddresses: ["ops@example.com"],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid channel", field: "smtpHost" });
+  });
+
+  it("refuses a URL whose scheme is not http(s), which z.url() accepts on its own", async () => {
+    // Judged by the real default guard, because this refusal comes out of the guard's URL parsing
+    // rather than out of any address rule.
+    const app = await appWith("operator", {}, undefined, defaultPolicyGuard());
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: { kind: "WEBHOOK", url: "file:///etc/passwd", secret: "a-signing-secret-long-enough" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(String(res.json().detail)).toMatch(/must be http:\/\/ or https:\/\//);
+  });
+
+  it("accepts a receiver on the operator's own network under the DEFAULT policy", async () => {
+    const created: CreateChannelData[] = [];
+    const app = await appWith(
+      "operator",
+      {
+        create: (data) => {
+          created.push(data);
+          return Promise.resolve(RECORD);
+        },
+      },
+      undefined,
+      defaultPolicyGuard({ "alerts.internal": ["192.168.1.30"] }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/notification-channels",
+      payload: {
+        kind: "WEBHOOK",
+        url: "http://alerts.internal:9000/hook",
+        secret: "a-signing-secret-long-enough",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(created[0]?.url).toBe("http://alerts.internal:9000/hook");
   });
 });

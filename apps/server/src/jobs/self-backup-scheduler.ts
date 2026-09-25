@@ -6,6 +6,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import type { CredentialAuditSink } from "../crypto/credential-access.js";
+import type { EgressGuard } from "../egress/guard.js";
 import { createDockerRunner } from "@schrodump/runner/runner";
 import { isSelfBackupDue, runSelfBackup } from "./self-backup.js";
 import { createSelfBackupPorts, resolveSelfBackupContext } from "./self-backup-wiring.js";
@@ -19,6 +20,8 @@ export interface SelfBackupTickDeps {
   prisma: PrismaClient;
   kek: Buffer;
   audit: CredentialAuditSink;
+  // Threaded so the self-backup's own upload is checked by the same guard every other job's is.
+  egress: EgressGuard;
   databaseUrl: string;
   destinationId: string;
   network: string;
@@ -70,6 +73,7 @@ export async function runScheduledSelfBackup(deps: SelfBackupTickDeps): Promise<
       prisma: deps.prisma,
       kek: deps.kek,
       audit: deps.audit,
+      egress: deps.egress,
       databaseUrl: deps.databaseUrl,
       destinationId: deps.destinationId,
       network: deps.network,

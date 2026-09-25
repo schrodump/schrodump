@@ -29,6 +29,8 @@ import { assertKekFingerprint, kekBuffer } from "./crypto/kek.js";
 import { createCredentialAuditSink } from "./observability/audit.js";
 import type { CredentialAuditSink } from "./crypto/credential-access.js";
 import { createAdvisoryLockPrismaClient, createPrismaClient, type PrismaClient } from "./db.js";
+import { createEgressGuardFromEnv } from "./egress/wiring.js";
+import type { EgressGuard } from "./egress/guard.js";
 import { loadEnv } from "./env.js";
 import { serverVersion } from "./version.js";
 import { createLogger, newCorrelationId } from "./observability/pino.js";
@@ -53,11 +55,13 @@ async function destinationCanary(
   prisma: PrismaClient,
   kek: Buffer,
   audit: CredentialAuditSink,
+  egress: EgressGuard,
   organizationId: string,
   destinationId: string,
 ): Promise<{ ok: boolean; failedOperation: string | null }> {
   const target = await driverForDestination(prisma, kek, organizationId, destinationId, {
     audit,
+    egress,
     purpose: "canary: exercise put/get/delete against the destination",
     correlationId: `canary:${destinationId}`,
   });
@@ -70,11 +74,13 @@ async function runRebuild(
   prisma: PrismaClient,
   kek: Buffer,
   audit: CredentialAuditSink,
+  egress: EgressGuard,
   organizationId: string,
   destinationId: string,
 ): Promise<{ scanned: number; imported: string[]; skipped: string[] }> {
   const target = await driverForDestination(prisma, kek, organizationId, destinationId, {
     audit,
+    egress,
     purpose: "catalog rebuild: scan the destination for manifests",
     correlationId: `rebuild:${destinationId}`,
   });
@@ -98,12 +104,17 @@ export async function main(): Promise<void> {
   // Every credential decryption in this process is recorded through this sink. It is threaded
   // rather than reached for globally so that a call site cannot decrypt without one.
   const credentialAudit = createCredentialAuditSink(prisma, logger);
+  // One guard, built once from the configuration that already names this deployment's own
+  // control plane (DATABASE_URL, DOCKER_HOST, SCHRODUMP_URL), and handed to every path that
+  // dials an operator-supplied address. See egress/guard.ts for what it refuses by default,
+  // and why that is narrower than it could be.
+  const egress = createEgressGuardFromEnv(env);
   // Read once at boot, and loudly: a deployment that named a CA file and got a silent fallback to
   // the system store would fail every email later, from a line nowhere near this one.
   // Empty is absent, not a path: compose writes "" for an unset variable, and taking that
   // literally would fail the boot of every deployment that never asked for an extra CA.
   const smtpCaFile = env.SCHRODUMP_SMTP_CA_FILE ?? "";
-  const smtp = smtpDeps(smtpCaFile === "" ? null : readFileSync(smtpCaFile, "utf8"));
+  const smtp = smtpDeps(smtpCaFile === "" ? null : readFileSync(smtpCaFile, "utf8"), egress);
 
   // Scratch before the KEK: both are boot-time refusals, and this one is cheap and local.
   if (env.SCHRODUMP_SCRATCH_PATH !== undefined) {
@@ -152,21 +163,21 @@ export async function main(): Promise<void> {
     targetStore: (organizationId) => prismaTargetStore(prisma, organizationId),
     destinationStore: (organizationId) => prismaDestinationStore(prisma, organizationId),
     destinationCanary: (organizationId, destinationId) =>
-      destinationCanary(prisma, kek, credentialAudit, organizationId, destinationId),
+      destinationCanary(prisma, kek, credentialAudit, egress, organizationId, destinationId),
     policyStore: (organizationId) => prismaPolicyStore(prisma, organizationId),
     notificationChannelStore: (organizationId) =>
       prismaNotificationChannelStore(prisma, organizationId),
     notificationTestDelivery: (organizationId, id) =>
       testChannelDelivery(
         prisma,
-        { kek, audit: credentialAudit, fetch, smtp },
+        { kek, audit: credentialAudit, fetch, smtp, egress },
         () => new Date(),
         organizationId,
         id,
       ),
-    jobsService: createJobsService(prisma, kek, credentialAudit),
+    jobsService: createJobsService(prisma, kek, credentialAudit, egress),
     catalogRebuild: (organizationId, destinationId) =>
-      runRebuild(prisma, kek, credentialAudit, organizationId, destinationId),
+      runRebuild(prisma, kek, credentialAudit, egress, organizationId, destinationId),
     prisma,
     encryptionKeys: createEncryptionKeyService(prisma, kek),
     selfBackupDestinationId: env.SCHRODUMP_SELF_BACKUP_DESTINATION_ID ?? null,
@@ -186,6 +197,7 @@ export async function main(): Promise<void> {
     }),
     kek,
     timeZone: env.SCHRODUMP_TZ,
+    egress,
   });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
@@ -224,6 +236,7 @@ export async function main(): Promise<void> {
     prisma,
     kek,
     audit: credentialAudit,
+    egress,
     env,
     signal: shutdownController.signal,
     log: logger,
@@ -272,6 +285,7 @@ export async function main(): Promise<void> {
                   prisma,
                   kek,
                   audit: credentialAudit,
+                  egress,
                   now: () => new Date(),
                   fetch,
                   smtp,
@@ -291,6 +305,7 @@ export async function main(): Promise<void> {
                   prisma,
                   kek,
                   audit: credentialAudit,
+                  egress,
                   now: () => new Date(),
                   fetch,
                   smtp,
@@ -332,6 +347,7 @@ export async function main(): Promise<void> {
             prisma,
             kek,
             audit: credentialAudit,
+            egress,
             databaseUrl: env.DATABASE_URL,
             destinationId: selfBackupDestinationId,
             network: env.SCHRODUMP_SELF_BACKUP_NETWORK,

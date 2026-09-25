@@ -2,6 +2,34 @@
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
 import { z } from "zod";
+import { parseCidr } from "./egress/guard.js";
+
+// A comma-separated CIDR list (a bare address counts as a single host). Validated here, on the
+// same reasoning as SCHRODUMP_TZ: a typo in a deny list is a rule that silently does not apply, and
+// the only moment anybody would notice is the incident it was written for. Empty is absent — see
+// the compose "passed through only when set" note; `environment: KEY: ${VAR}` writes "" for an
+// unset variable, and a literal "" must not be an invalid value.
+function cidrList(variable: string) {
+  return z
+    .string()
+    .default("")
+    .transform((value, ctx) => {
+      const entries = value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== "");
+      for (const entry of entries) {
+        if (parseCidr(entry) === null) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${variable} must be a comma-separated list of CIDRs or addresses; "${entry}" is neither`,
+          });
+          return z.NEVER;
+        }
+      }
+      return entries;
+    });
+}
 
 // The canonical spelling of an IANA zone, or null when the runtime does not know it. Intl is the
 // zone database cron-parser reads through Luxon and the one the browser renders with, so a name it
@@ -103,6 +131,20 @@ const EnvSchema = z.object({
   // the login rate limit buckets on the real client address or on something an attacker controls.
   // See auth.ts. Unset -> nothing trusted, and the server warns at boot.
   SCHRODUMP_TRUSTED_PROXIES: z.string().optional(),
+  // Where this server may open a connection to an address an operator typed — a webhook URL, an S3
+  // endpoint, an SMTP relay, a database target. See egress/guard.ts for what is refused with both
+  // unset, and why the default deliberately leaves RFC-1918 alone: on a self-hosted backup tool a
+  // database on 10.0.0.5 is the normal case, not the attack. What is refused by default is only
+  // what can never be a legitimate destination — loopback, link-local (the cloud metadata service),
+  // the unspecified address, and this deployment's own services.
+  //
+  // DENY adds CIDRs to that. A deployment whose databases are all public or all reached through the
+  // executor network can shut the private ranges entirely:
+  //   SCHRODUMP_EGRESS_DENY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7
+  // ALLOW overrides every refusal, the built-in ones included — the escape hatch for the deployment
+  // whose metadata postgres also holds a database somebody backs up.
+  SCHRODUMP_EGRESS_DENY: cidrList("SCHRODUMP_EGRESS_DENY"),
+  SCHRODUMP_EGRESS_ALLOW: cidrList("SCHRODUMP_EGRESS_ALLOW"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

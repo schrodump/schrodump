@@ -11,6 +11,7 @@ import type { PrismaClient } from "../db.js";
 import type { CredentialAuditSink } from "../crypto/credential-access.js";
 import { deliverToChannel } from "./deliver.js";
 import { evaluateNotifications, type DeliveredState, type FleetSnapshot } from "./evaluate.js";
+import type { EgressGuard } from "../egress/guard.js";
 import type { SmtpDeps } from "./smtp.js";
 
 export interface NotificationDeps {
@@ -18,6 +19,8 @@ export interface NotificationDeps {
   kek: Buffer;
   // Every decryption below is an art. 37 access. See crypto/credential-access.ts.
   audit: CredentialAuditSink;
+  // Where a channel may deliver, for both kinds. See egress/guard.ts.
+  egress: EgressGuard;
   now: () => Date;
   fetch: typeof fetch;
   smtp: SmtpDeps;

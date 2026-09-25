@@ -44,6 +44,7 @@ import { createBackupPorts, type BackupWiringDeps } from "./backup-wiring.js";
 import { runBackupJob, type BackupContext, type ProbeResult } from "./backup.js";
 import { claimNextJob } from "./claim.js";
 import { driverForDestination } from "./destination-driver.js";
+import type { EgressGuard } from "../egress/guard.js";
 import type { ExecutionMode } from "./execution-mode.js";
 import {
   artifactBelongsToOrg,
@@ -655,6 +656,10 @@ export interface JobExecutorDeps {
   // optional: an executor that cannot record what it read should not be reading it.
   audit: CredentialAuditSink;
   env: Env;
+  // Where this executor may open a connection. Required for the same reason `audit` is: every S3
+  // endpoint it dials comes from a row an operator wrote, and a job that could reach the socket
+  // proxy or the metadata database is the pivot egress/guard.ts exists to close.
+  egress: EgressGuard;
   // Required for the same reason `audit` is: an executor that cannot say WHY a verify was
   // inconclusive should not be running verifies. The catch below defaults every unrecognized throw
   // to INCONCLUSIVE — correct, because condemning an artifact on a surprise is worse — but that
@@ -735,7 +740,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       policy.destinationId,
-      { audit: deps.audit, purpose: "backup: upload the artifact to the destination bucket", correlationId: job.id },
+      { audit: deps.audit, egress: deps.egress, purpose: "backup: upload the artifact to the destination bucket", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "backup destination unavailable");
@@ -1076,7 +1081,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       artifact.destinationId,
-      { audit: deps.audit, purpose: "verify: download the artifact to check it", correlationId: job.id },
+      { audit: deps.audit, egress: deps.egress, purpose: "verify: download the artifact to check it", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "verify destination unavailable");
@@ -1443,7 +1448,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       artifact.destinationId,
-      { audit: deps.audit, purpose: "restore: download the artifact to restore it", correlationId: job.id },
+      { audit: deps.audit, egress: deps.egress, purpose: "restore: download the artifact to restore it", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "restore destination unavailable");
@@ -1680,7 +1685,7 @@ export function createJobExecutor(deps: JobExecutorDeps): JobExecutor {
       deps.kek,
       job.organizationId,
       policy.destinationId,
-      { audit: deps.audit, purpose: "retention: delete artifacts the policy no longer keeps", correlationId: job.id },
+      { audit: deps.audit, egress: deps.egress, purpose: "retention: delete artifacts the policy no longer keeps", correlationId: job.id },
     );
     if (destination === null) {
       await failJob(job.id, "retention destination unavailable");

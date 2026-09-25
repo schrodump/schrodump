@@ -36,6 +36,7 @@ import {
   VERIFY_INCONCLUSIVE_LOG,
 } from "./worker-wiring.js";
 import type { ClaimedJob } from "./worker.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 
 describe("toRetentionPolicy", () => {
   // Prisma hands back minAgeBeforeDeleteMs as BigInt; core's RetentionPolicy is all numbers, and
@@ -446,7 +447,7 @@ describe("runVerify org-scoping guard", () => {
     (prisma as unknown as { artifact: { findUnique: unknown } }).artifact.findUnique = vi.fn(
       async () => null,
     );
-    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, env, log: { warn: () => undefined } });
+    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, egress: allowAnyEgress, env, log: { warn: () => undefined } });
 
     await executor.runVerify({
       id: "job-1",
@@ -475,7 +476,7 @@ describe("runVerify org-scoping guard", () => {
     } = fakePrisma({
       organizationId: "org-other",
     });
-    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, env, log: { warn: () => undefined } });
+    const executor = createJobExecutor({ prisma, kek: Buffer.alloc(32), audit: { record: () => undefined }, egress: allowAnyEgress, env, log: { warn: () => undefined } });
     const job: ClaimedJob = {
       id: "job-1",
       organizationId: "org-mine",

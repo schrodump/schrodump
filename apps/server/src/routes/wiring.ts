@@ -11,6 +11,7 @@ import { definedOnly } from "../data/patch.js";
 import type { Auth } from "../auth/auth.js";
 import type { Role } from "../auth/rbac.js";
 import { scopedPrisma } from "../data/scope.js";
+import type { EgressGuard } from "../egress/guard.js";
 import type { MemberRecord, MemberStore } from "./members.js";
 import { encryptCredential } from "../crypto/envelope.js";
 import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
@@ -215,6 +216,7 @@ async function probeTarget(
   prisma: PrismaClient,
   kek: Buffer,
   audit: CredentialAuditSink,
+  egress: EgressGuard,
   organizationId: string,
   targetId: string,
 ): Promise<TestConnectionResult> {
@@ -233,22 +235,25 @@ async function probeTarget(
   }
 
   const scope = ScopeSchema.safeParse(row.scope);
-  return testTargetConnection({
-    engine: row.engine as EngineName,
-    host: row.host,
-    port: row.port,
-    username: row.username,
-    password: readCredential({ kek, audit }, row.encryptedCredential, {
-      organizationId,
-      resource: "target",
-      resourceId: row.id,
-      purpose: "test connection: probe the target on the operator's request",
-      correlationId: `probe:${row.id}`,
-    }),
-    tls: row.tls,
-    tlsCaCert: row.tlsCaCert,
-    databases: scope.success ? scope.data.databases : [],
-  });
+  return testTargetConnection(
+    {
+      engine: row.engine as EngineName,
+      host: row.host,
+      port: row.port,
+      username: row.username,
+      password: readCredential({ kek, audit }, row.encryptedCredential, {
+        organizationId,
+        resource: "target",
+        resourceId: row.id,
+        purpose: "test connection: probe the target on the operator's request",
+        correlationId: `probe:${row.id}`,
+      }),
+      tls: row.tls,
+      tlsCaCert: row.tlsCaCert,
+      databases: scope.success ? scope.data.databases : [],
+    },
+    egress,
+  );
 }
 
 // BigInt -> number: the DB stores artifact sizes as BigInt, which Fastify cannot serialize (it
@@ -458,6 +463,7 @@ export function createJobsService(
   prisma: PrismaClient,
   kek: Buffer,
   audit: CredentialAuditSink,
+  egress: EgressGuard,
 ): JobsService {
   const enqueue = async (
     organizationId: string,
@@ -615,6 +621,7 @@ export function createJobsService(
       // correlationId, mirroring how retention and the worker attribute credential access.
       const resolved = await driverForDestination(prisma, kek, organizationId, artifact.destinationId, {
         audit,
+        egress,
         purpose: `delete artifact ${artifactId}`,
         correlationId: `delete:${artifactId}`,
       });
@@ -649,7 +656,7 @@ export function createJobsService(
       return job.id;
     },
     testConnection: (organizationId, targetId) =>
-      probeTarget(prisma, kek, audit, organizationId, targetId),
+      probeTarget(prisma, kek, audit, egress, organizationId, targetId),
     // updateMany with organizationId in the filter: a target in another organization is a miss,
     // not a cross-tenant write. Only the CODE is stored — `driverCode` and the driver's message
     // stay out of the row, because this column is returned to every viewer and a driver error

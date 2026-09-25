@@ -5,6 +5,7 @@ import type { DatabaseSize, ProbeConnection, ProbeResult } from "@schrodump/engi
 import { probeMongodb } from "@schrodump/engines/probe/mongodb";
 import { probeMysql } from "@schrodump/engines/probe/mysql";
 import { probePostgres } from "@schrodump/engines/probe/postgres";
+import type { EgressGuard } from "../egress/guard.js";
 
 export type EngineName = "postgres" | "mysql" | "mariadb" | "mongodb";
 
@@ -233,10 +234,19 @@ export function driverCodeOf(error: unknown): string | null {
 // Probes a target and reports whether it answered, plus the server version — the number that
 // decides which executor image can dump and restore it. It returns codes, never credentials and
 // never driver prose.
+//
+// The guard runs BEFORE the try, and its refusal is thrown rather than folded into a
+// `ProbeFailureCode`. The six codes describe what a database said; "this server will not dial that
+// address" is not one of them, and squeezing it into UNREACHABLE would tell the operator the host
+// is down when it is the policy that refused. The callers turn the throw into a 400 naming `host`
+// (routes/targets.ts, routes/jobs.ts).
 export async function testTargetConnection(
   target: ProbeTarget,
+  egress: EgressGuard,
   probes: ProbeTable = DEFAULT_PROBES,
 ): Promise<TestConnectionResult> {
+  await egress.assert("host", target.host, target.port);
+
   const connection: ProbeConnection = {
     host: target.host,
     port: target.port,

@@ -22,6 +22,7 @@ import {
   type SelfBackupUpload,
 } from "./self-backup.js";
 import type { CredentialAuditSink } from "../crypto/credential-access.js";
+import type { EgressGuard } from "../egress/guard.js";
 import { driverForDestination } from "./destination-driver.js";
 
 const PART_SIZE = 64 * 1024 * 1024;
@@ -61,6 +62,9 @@ export interface SelfBackupWiringDeps {
   // The self-backup decrypts the destination's S3 secret like any other upload; recorded like any
   // other access. See crypto/credential-access.ts.
   audit: CredentialAuditSink;
+  // The self-backup uploads through the same S3 endpoint check every other job takes. See
+  // egress/guard.ts.
+  egress: EgressGuard;
   databaseUrl: string;
   destinationId: string;
   network: string;
@@ -81,7 +85,7 @@ export interface SelfBackupContext {
 // Resolves everything the dump needs BEFORE a row is written, so a misconfiguration (unknown
 // destination, no escrow key) is a boot-time complaint rather than a FAILED row every interval.
 export async function resolveSelfBackupContext(
-  deps: Pick<SelfBackupWiringDeps, "prisma" | "kek" | "destinationId" | "audit">,
+  deps: Pick<SelfBackupWiringDeps, "prisma" | "kek" | "destinationId" | "audit" | "egress">,
 ): Promise<SelfBackupContext> {
   // Unscoped by design: this is instance-level configuration, named by an operator with server
   // env access, and the deployment has no "current organization" at scheduler time.
@@ -106,6 +110,7 @@ export async function resolveSelfBackupContext(
     deps.destinationId,
     {
       audit: deps.audit,
+      egress: deps.egress,
       purpose: "self-backup: upload this deployment's metadata dump",
       correlationId: `self-backup:${deps.destinationId}`,
     },

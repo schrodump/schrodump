@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decryptStream, generateAgeKeyPair } from "../crypto/artifact.js";
 import { encryptCredential } from "../crypto/envelope.js";
 import { runScheduledSelfBackup } from "./self-backup-scheduler.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 
 const s3Endpoint = process.env.SCHRODUMP_TEST_S3_ENDPOINT;
 const enabled = process.env.SCHRODUMP_TEST_INTEGRATION === "1" && s3Endpoint !== undefined;
@@ -147,6 +148,7 @@ describe.skipIf(!enabled)("self-backup end to end (integration)", () => {
       prisma,
       kek,
       audit: { record: () => undefined },
+      egress: allowAnyEgress,
       // The alias, not localhost — this is the assertion that the executor's own networking works.
       databaseUrl: `postgresql://schrodump:schrodump@${DB_ALIAS}:5432/app`,
       destinationId,
@@ -176,6 +178,7 @@ describe.skipIf(!enabled)("self-backup end to end (integration)", () => {
         prisma,
         kek,
         audit: { record: () => undefined },
+        egress: allowAnyEgress,
         databaseUrl: `postgresql://schrodump:schrodump@${DB_ALIAS}:5432/app`,
         destinationId,
         network: network.getName(),

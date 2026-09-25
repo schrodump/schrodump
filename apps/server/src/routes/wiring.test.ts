@@ -4,6 +4,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { LIST_PAGE_SIZE } from "./jobs.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 import { generateAgeKeyPair } from "../crypto/artifact.js";
 import {
   createEncryptionKeyService,
@@ -195,7 +196,7 @@ describe("createJobsService.deleteArtifact", () => {
     return { calls, prisma: base as unknown as PrismaClient };
   }
   const svc = (prisma: PrismaClient) =>
-    createJobsService(prisma, Buffer.alloc(32), { record: () => undefined });
+    createJobsService(prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress);
   const deletedRow = (calls: { model: string; operation: string }[]) =>
     calls.some((c) => c.model === "Artifact" && c.operation === "delete");
 
@@ -288,7 +289,7 @@ describe("createJobsService list bounds", () => {
     // deployment with no policies rather than like a bug.
     const spy = spyPrisma();
 
-    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs(
+    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress).listJobs(
       "org-1",
     );
 
@@ -298,7 +299,7 @@ describe("createJobsService list bounds", () => {
 
   it("bounds the artifact list and asks the database for the counts", async () => {
     const spy = spyPrisma();
-    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listArtifacts("org-1");
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress).listArtifacts("org-1");
     const call = spy.calls.find((c) => c.model === "Artifact" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
@@ -311,7 +312,7 @@ describe("createJobsService list bounds", () => {
 
   it("answers the catalog header from the table: how the verified were verified, how many buckets, the oldest open question", async () => {
     const spy = spyPrisma();
-    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listArtifacts("org-1");
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress).listArtifacts("org-1");
 
     const groups = spy.calls.filter((c) => c.model === "Artifact" && c.operation === "groupBy");
     expect(groups.map((c) => (c.args as { by: string[] }).by)).toEqual([["state"], ["verifiedLevel"], ["destinationId"]]);
@@ -327,7 +328,7 @@ describe("createJobsService list bounds", () => {
 
   it("bounds the job list", async () => {
     const spy = spyPrisma();
-    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs("org-1");
+    await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress).listJobs("org-1");
     const call = spy.calls.find((c) => c.model === "BackupJob" && c.operation === "findMany");
     expect((call?.args as { where?: { organizationId?: string } }).where?.organizationId).toBe("org-1");
     expect((call?.args as { take?: number } | undefined)?.take).toBe(LIST_PAGE_SIZE);
@@ -335,7 +336,7 @@ describe("createJobsService list bounds", () => {
 
   it("asks the database, not the page, for the job counts and the header stats", async () => {
     const spy = spyPrisma();
-    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }).listJobs("org-1");
+    const result = await createJobsService(spy.prisma, Buffer.alloc(32), { record: () => undefined }, allowAnyEgress).listJobs("org-1");
 
     // One groupBy per axis, both scoped to the organization.
     const groups = spy.calls.filter((c) => c.model === "BackupJob" && c.operation === "groupBy");

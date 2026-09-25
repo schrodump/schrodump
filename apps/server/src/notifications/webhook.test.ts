@@ -4,6 +4,8 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { deliverWebhook, signBody } from "./webhook.js";
+import { allowAnyEgress, refuseAnyEgress, REFUSAL } from "../egress/guard.fixture.js";
+import { EgressRefusedError, type EgressGuard } from "../egress/guard.js";
 import type { Notification } from "./evaluate.js";
 
 const NOTIFICATION: Notification = {
@@ -33,7 +35,7 @@ describe("deliverWebhook", () => {
     });
 
     await deliverWebhook(
-      { fetch: fakeFetch as unknown as typeof fetch },
+      { fetch: fakeFetch as unknown as typeof fetch, egress: allowAnyEgress },
       { url: "https://hooks.example/schrodump", secret: "s3cret" },
       NOTIFICATION,
     );
@@ -55,8 +57,8 @@ describe("deliverWebhook", () => {
       return new Response(null, { status: 204 });
     });
     const target = { url: "https://hooks.example/x", secret: "s" };
-    await deliverWebhook({ fetch: fakeFetch as unknown as typeof fetch }, target, NOTIFICATION);
-    await deliverWebhook({ fetch: fakeFetch as unknown as typeof fetch }, target, NOTIFICATION);
+    await deliverWebhook({ fetch: fakeFetch as unknown as typeof fetch, egress: allowAnyEgress }, target, NOTIFICATION);
+    await deliverWebhook({ fetch: fakeFetch as unknown as typeof fetch, egress: allowAnyEgress }, target, NOTIFICATION);
     expect(seen[0]).toBe(seen[1]);
     expect(seen[0]).not.toBe("");
   });
@@ -65,7 +67,7 @@ describe("deliverWebhook", () => {
     const fakeFetch = vi.fn(async () => new Response("nope", { status: 500 }));
     await expect(
       deliverWebhook(
-        { fetch: fakeFetch as unknown as typeof fetch },
+        { fetch: fakeFetch as unknown as typeof fetch, egress: allowAnyEgress },
         { url: "https://hooks.example/x", secret: "s" },
         NOTIFICATION,
       ),
@@ -79,7 +81,7 @@ describe("deliverWebhook", () => {
       return new Response(null, { status: 200 });
     });
     await deliverWebhook(
-      { fetch: fakeFetch as unknown as typeof fetch },
+      { fetch: fakeFetch as unknown as typeof fetch, egress: allowAnyEgress },
       { url: "https://hooks.example/x", secret: "super-secret-value" },
       NOTIFICATION,
     );
@@ -93,7 +95,7 @@ describe("a receiver that never answers", () => {
     // Same reason as the SMTP timeouts: this now runs inside an operator's HTTP request, not only
     // inside a scheduler tick. Node's fetch has no default timeout at all.
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    await deliverWebhook({ fetch: fetchMock }, { url: "https://hooks.example/x", secret: "s" }, NOTIFICATION);
+    await deliverWebhook({ fetch: fetchMock, egress: allowAnyEgress }, { url: "https://hooks.example/x", secret: "s" }, NOTIFICATION);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
@@ -105,7 +107,7 @@ describe("a job event on the wire", () => {
     // somebody improves the wording.
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     await deliverWebhook(
-      { fetch: fetchMock },
+      { fetch: fetchMock, egress: allowAnyEgress },
       { url: "https://hooks.example/x", secret: "s" },
       {
         trigger: "JOB_STATE",
@@ -128,7 +130,7 @@ describe("a job event on the wire", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     for (const state of ["PENDING", "RUNNING", "SUCCEEDED"]) {
       await deliverWebhook(
-        { fetch: fetchMock },
+        { fetch: fetchMock, egress: allowAnyEgress },
         { url: "https://hooks.example/x", secret: "s" },
         {
           trigger: "JOB_STATE",
@@ -152,7 +154,7 @@ describe("a job event on the wire", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     for (let i = 0; i < 2; i += 1) {
       await deliverWebhook(
-        { fetch: fetchMock },
+        { fetch: fetchMock, egress: allowAnyEgress },
         { url: "https://hooks.example/x", secret: "s" },
         NOTIFICATION,
       );
@@ -162,5 +164,100 @@ describe("a job event on the wire", () => {
         ((call[1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"],
     );
     expect(new Set(keys).size).toBe(1);
+  });
+});
+
+describe("the egress guard stands between the channel and the wire", () => {
+  it("refuses a denied URL without making the request at all", async () => {
+    // The point of the guard is that nothing is dialled. A refusal after the socket opened would
+    // still have answered the question the operator was asking — does something listen there.
+    const fetchMock = vi.fn();
+    await expect(
+      deliverWebhook(
+        { fetch: fetchMock as unknown as typeof fetch, egress: refuseAnyEgress },
+        { url: "http://docker-proxy:2375/containers/prune", secret: "s" },
+        NOTIFICATION,
+      ),
+    ).rejects.toThrow(REFUSAL);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("re-checks after a redirect, because the second hop is an address nobody validated", async () => {
+    // The saved URL points at a host the operator owns; its 302 points at the socket proxy. A guard
+    // that ran only on the stored value would wave the whole chain through, and `redirect: "follow"`
+    // would hide the hop entirely inside undici.
+    const seen: string[] = [];
+    const egress: EgressGuard = {
+      ...allowAnyEgress,
+      checkUrl: (raw) => Promise.resolve(raw.includes("docker-proxy") ? REFUSAL : null),
+      assertUrl: (field, raw) => {
+        seen.push(raw);
+        return raw.includes("docker-proxy")
+          ? Promise.reject(new EgressRefusedError(field, REFUSAL))
+          : Promise.resolve();
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://docker-proxy:2375/containers/prune" },
+      }),
+    );
+
+    await expect(
+      deliverWebhook(
+        { fetch: fetchMock as unknown as typeof fetch, egress },
+        { url: "https://hooks.example/schrodump", secret: "s" },
+        NOTIFICATION,
+      ),
+    ).rejects.toThrow(REFUSAL);
+
+    // The first hop was allowed and made; the second was checked and never requested.
+    expect(seen).toEqual([
+      "https://hooks.example/schrodump",
+      "http://docker-proxy:2375/containers/prune",
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a redirect it is allowed to follow, so an http->https receiver still works", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 301, headers: { location: "https://hooks.example/moved" } }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await deliverWebhook(
+      { fetch: fetchMock as unknown as typeof fetch, egress: allowAnyEgress },
+      { url: "http://hooks.example/schrodump", secret: "s" },
+      NOTIFICATION,
+    );
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://hooks.example/moved");
+    // 301 is not a 307: the follow-up is a GET with no body, which is what every other client on
+    // the web does with a redirected POST.
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe("GET");
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBeUndefined();
+  });
+
+  it("keeps the method and the signed body across a 308", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, { status: 308, headers: { location: "https://hooks.example/moved" } }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await deliverWebhook(
+      { fetch: fetchMock as unknown as typeof fetch, egress: allowAnyEgress },
+      { url: "https://hooks.example/schrodump", secret: "s" },
+      NOTIFICATION,
+    );
+
+    const second = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(second.method).toBe("POST");
+    const headers = second.headers as Record<string, string>;
+    expect(headers["X-Schrodump-Signature"]).toBe(signBody("s", second.body as string));
   });
 });
