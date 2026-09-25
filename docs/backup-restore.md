@@ -134,6 +134,14 @@ backup. The jobs list shows it as its own state so the two are never read as the
 
 Restore is deliberately harder to trigger than backup.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/restore-dialog-dark.png">
+  <img alt="The restore dialog for a PostgreSQL artefact. Full cluster and Database are selectable; Schema and Table are disabled, each with the reason written out — the target names no schema, so there is nothing to confine the restore to. A panel names where it writes: the target, its host and port, and the database. Overwriting an existing database is off." src="assets/restore-dialog-light.png">
+</picture>
+
+Every refusal in that dialog is the server's rule, shown before the request rather than after the
+refusal — and the disabled scopes carry the reason instead of being hidden.
+
 - **Only operators and administrators can restore.** A viewer does not see the control, and the
   server rejects the request regardless of what the browser sends. The interface hiding a button
   is a convenience; the server refusing the call is the control.
