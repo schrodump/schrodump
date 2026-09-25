@@ -190,7 +190,9 @@ tested. Restore covers both single-stream and staged (directory) artifacts, and 
 engine provides a mechanism for it: PostgreSQL to a schema or a table, MongoDB to a database or a
 collection. A MongoDB replica set is dumped with its oplog, and a full-cluster restore replays it,
 so every collection lands on a single instant. Physical/PITR backups are on the roadmap.
-[docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1.
+[docs/roadmap.md](docs/roadmap.md) states exactly what is and isn't in v1, and
+[CHANGELOG.md](CHANGELOG.md) lists every release candidate published so far and what each one
+changed.
 
 ## Contributing
 

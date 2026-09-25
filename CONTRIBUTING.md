@@ -102,9 +102,56 @@ It needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, alo
 so an absent secret costs seconds and publishes nothing, rather than surfacing as a
 `docker/login-action` failure minutes deep in a multi-arch build.
 
+### Writing the release notes
+
+`release.yml` writes the mechanical half by itself: the commit range since the previous tag, the
+image digest, the install line, the `cosign verify` command, and a link to `CHANGELOG.md` at that
+tag. The human half goes in `CHANGELOG.md`, **before** the tag is pushed, because the generated
+notes link it and because a commit subject stops meaning anything about six months after it is
+written.
+
+Add a section at the top of `CHANGELOG.md`, under `## [Unreleased]`, in this shape:
+
+````markdown
+## [X.Y.Z] — YYYY-MM-DD
+
+One or two sentences saying what this release is for. If it fixes a defect that was live, say so
+in the first line: that is the reason to upgrade, and burying it under a heading hides it.
+
+### Breaking changes
+
+What an operator has to do by hand, before or after pulling the tag — a renamed environment
+variable, a migration that does not reverse, a default that moved, an artifact written by an
+older version that now reads differently. **"None." is a complete answer and writing it is not
+optional**: an absent heading reads as an oversight, not as nothing to report.
+
+### Security / Added / Changed / Fixed / Removed
+
+Only the headings that have entries, in that order. One bullet per change, written as what an
+operator observes rather than as what the diff did, with the pull request number at the end.
+
+### Installing this version
+
+```sh
+SCHRODUMP_IMAGE=schrodump/schrodump:X.Y.Z
+```
+
+`latest` follows a stable tag only, so a candidate has to be named exactly. Pin the exact version
+in production either way.
+````
+
+Then hold the notes to the standard the rest of this project is held to:
+
+- **Name what was live.** A defect that shipped, was found and is now fixed is more useful to a
+  reader than a feature, and it is the only thing that makes "should I upgrade" answerable.
+- **Say what proved it.** "Verified" and "hardened" are claims; the compose smoke step, the
+  integration test or the measurement that backs them is evidence. Cite the second.
+- **Do not make the reader reconstruct the release from `git log`.** Producing that summary is the
+  work these notes exist to have already done.
+
 ### Before a stable tag: the soak
 
-The `image` job in `ci.yml` drives the shipped `compose.yaml` through eighteen steps and is the
+The `image` job in `ci.yml` drives the shipped `compose.yaml` through twenty-two steps and is the
 strongest test in this repository. Every one of them happens inside a single synchronous run: the
 scheduler is ticked at `SCHRODUMP_SCHEDULER_TICK_MS=5000` and dispatches the most recent window
 that has already passed. Nothing there ever waits for a future one.

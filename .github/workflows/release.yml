@@ -264,6 +264,10 @@ jobs:
             fi
             echo
             echo
+            # The commit list above is the machine's account of the range. CHANGELOG.md is the
+            # written one, and it is pinned at this tag so the link keeps meaning what it meant.
+            echo "Full changelog: <https://github.com/schrodump/schrodump/blob/${TAG}/CHANGELOG.md>"
+            echo
             echo "Image digest: \`${DIGEST}\`"
             echo
             echo "Install this exact version by naming it in \`.env\`:"

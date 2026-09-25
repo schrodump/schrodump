@@ -196,7 +196,8 @@ assinada estão implementados e testados. O restore cobre artefatos single-strea
 tabela, MongoDB até banco ou coleção. Um replica set MongoDB tem o oplog incluído no dump, e um
 restore full-cluster o reaplica, de modo que todas as coleções chegam a um único instante. Backup
 físico/PITR está no roadmap. [docs/roadmap.md](docs/roadmap.md) diz exatamente o que está e o que
-não está no v1.
+não está no v1, e o [CHANGELOG.md](CHANGELOG.md) lista todos os release candidates publicados até
+aqui e o que cada um mudou.
 
 ## Contribuindo
 
