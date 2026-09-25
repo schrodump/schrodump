@@ -123,7 +123,7 @@ canary → target → test → policy. Full walkthrough in [docs/install.md](doc
 | **restic**, **Backrest** | Encrypted, deduplicated file-level backup of whatever is on a disk | You want one tool for the whole host, not only its databases. Note that copying a running data directory is not a consistent database backup on its own — it needs a filesystem snapshot or a stopped engine. |
 | **postgresus**, **databasus** | Self-hosted scheduled `pg_dump` with a dashboard and notifications | Closest in shape to Schrodump, and simpler. If a job that exited `0` is the assurance you want, they give it to you with fewer moving parts. |
 | **`pg_dump` + cron** | The baseline everyone starts from | Nothing to deploy, nothing new to trust. It is precisely what Schrodump automates — plus the part where something opens the file afterwards. |
-| **Hosted backups** (RDS, Cloud SQL, Atlas, and the rest) | Provider-managed snapshots, usually with PITR | They are good, they are already paid for, and you should almost certainly leave them switched on. They also live inside the account that can delete them, they rarely move between providers, and nobody rehearses the restore. |
+| **Hosted backups** (RDS, Cloud SQL, Atlas, and the rest) | Provider-managed snapshots, usually with PITR | They are good, they are already paid for, and you should almost certainly leave them switched on. They also live inside the account that can delete them, they rarely move between providers, and nothing in them asks you to rehearse the restore. |
 
 **Where Schrodump loses.** It has **no PITR and no physical backups**, and that is structural rather
 than unfinished: it reaches your database over the client protocol from a container somewhere else,

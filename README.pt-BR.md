@@ -124,7 +124,7 @@ alvo → teste → política. Passo a passo completo em [docs/install.md](docs/i
 | **restic**, **Backrest** | Backup de arquivos, cifrado e deduplicado, de qualquer coisa em disco | Você quer uma ferramenta só para o host inteiro, não só para os bancos. Vale lembrar: copiar um data directory em uso não é, por si só, um backup consistente de banco — precisa de snapshot de filesystem ou da engine parada. |
 | **postgresus**, **databasus** | `pg_dump` agendado, self-hosted, com painel e notificações | O que há de mais parecido em formato com o Schrodump, e mais simples. Se um job que saiu com `0` é a garantia que você quer, eles entregam isso com menos peças. |
 | **`pg_dump` + cron** | A linha de base de onde todo mundo parte | Nada para implantar, nada novo para confiar. É exatamente o que o Schrodump automatiza — mais a parte em que alguma coisa abre o arquivo depois. |
-| **Backup gerenciado** (RDS, Cloud SQL, Atlas e afins) | Snapshots do provedor, em geral com PITR | São bons, já estão pagos e você quase certamente deve deixá-los ligados. Também moram dentro da conta que pode apagá-los, raramente migram entre provedores e ninguém ensaia o restore. |
+| **Backup gerenciado** (RDS, Cloud SQL, Atlas e afins) | Snapshots do provedor, em geral com PITR | São bons, já estão pagos e você quase certamente deve deixá-los ligados. Também moram dentro da conta que pode apagá-los, raramente migram entre provedores e nada neles pede que você ensaie o restore. |
 
 **Onde o Schrodump perde.** Ele **não faz PITR nem backup físico**, e isso é estrutural, não
 inacabado: ele alcança seu banco pelo protocolo de client, de um contêiner em outro lugar — é o que

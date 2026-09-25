@@ -127,7 +127,7 @@ origen distinto de `SCHRODUMP_URL`—, crea el administrador y sigue el flujo gu
 | **restic**, **Backrest** | Copia de archivos, cifrada y deduplicada, de lo que haya en un disco | Quieres una sola herramienta para el host entero, no solo para sus bases de datos. Ojo: copiar un directorio de datos en uso no es por sí solo una copia consistente de base de datos — hace falta un snapshot del sistema de archivos o el motor parado. |
 | **postgresus**, **databasus** | `pg_dump` programado, autoalojado, con panel y notificaciones | Lo más parecido en forma a Schrodump, y más simple. Si un trabajo que terminó en `0` es la garantía que buscas, te la dan con menos piezas. |
 | **`pg_dump` + cron** | La línea de base de la que parte todo el mundo | Nada que desplegar, nada nuevo en lo que confiar. Es exactamente lo que Schrodump automatiza — más la parte en la que algo abre el archivo después. |
-| **Copias gestionadas** (RDS, Cloud SQL, Atlas y compañía) | Snapshots del proveedor, normalmente con PITR | Son buenas, ya están pagadas y casi con seguridad deberías dejarlas activadas. También viven dentro de la cuenta que puede borrarlas, rara vez se mueven entre proveedores y nadie ensaya la restauración. |
+| **Copias gestionadas** (RDS, Cloud SQL, Atlas y compañía) | Snapshots del proveedor, normalmente con PITR | Son buenas, ya están pagadas y casi con seguridad deberías dejarlas activadas. También viven dentro de la cuenta que puede borrarlas, rara vez se mueven entre proveedores y nada en ellas te pide que ensayes la restauración. |
 
 **Dónde pierde Schrodump.** **No hace PITR ni copias físicas**, y eso es estructural, no algo a
 medio terminar: llega a tu base de datos por el protocolo de cliente, desde un contenedor que está
