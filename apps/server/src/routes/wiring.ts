@@ -855,9 +855,13 @@ export function createEncryptionKeyService(
 //
 // The cost of that choice, stated rather than discovered: User.email stays globally unique and
 // taken, so a removed member cannot be re-added under the same address. Attaching a fresh
-// membership to the surviving account would be the fix, and it is deliberately NOT done here while
-// Better-Auth's sign-up endpoint is open — someone could register an address BEFORE an admin adds
-// it and receive the membership meant for its real owner.
+// membership to the surviving account would be the fix. One of the two reasons not to is now gone —
+// Better-Auth's sign-up endpoint is blocked (see BLOCKED_AUTH_PATHS in auth/auth.ts), so a stranger
+// can no longer register an address before an admin adds it and receive the membership meant for
+// its real owner. The remaining one is the account itself: `remove` deletes the membership and
+// leaves the User and its Account row, password hash included, so re-attaching a membership hands
+// access back under the password the removed person still knows. Re-add is therefore a feature —
+// attach plus a forced credential reset — and not the one-line change it looks like.
 export function prismaMemberStore(
   prisma: PrismaClient,
   auth: Auth,

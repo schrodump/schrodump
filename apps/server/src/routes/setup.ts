@@ -7,7 +7,9 @@ import { hashSetupToken, isSetupTokenUsable, type SetupTokenRecord } from "../bo
 import { badRequest } from "./errors.js";
 
 export interface SetupDeps {
-  userExists(): Promise<boolean>;
+  // An admin MEMBERSHIP, not any User row: see BootstrapDeps.adminExists. /setup closing on a row
+  // that can reach nothing is how a deployment ends up with no administrator and no way to make one.
+  adminExists(): Promise<boolean>;
   findSetupToken(tokenHash: string): Promise<SetupTokenRecord | null>;
   consumeAndCreateAdmin(input: { tokenHash: string; email: string; password: string }): Promise<void>;
   now(): Date;
@@ -27,14 +29,14 @@ const BodySchema = z.object({
 export function setupRoutes(deps: SetupDeps) {
   return (app: FastifyInstance): void => {
     app.get("/setup", async (_request, reply) => {
-      if (await deps.userExists()) {
+      if (await deps.adminExists()) {
         return reply.status(404).send({ error: "not found" });
       }
       return reply.send({ setupRequired: true });
     });
 
     app.post("/setup", async (request, reply) => {
-      if (await deps.userExists()) {
+      if (await deps.adminExists()) {
         return reply.status(404).send({ error: "not found" });
       }
       const parsed = BodySchema.safeParse(request.body);

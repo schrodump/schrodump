@@ -87,8 +87,9 @@ export function createAuth(prisma: PrismaClient, opts: AuthOptions) {
         // grind, so the window that matters is minutes, not seconds: 5 attempts per five minutes
         // per address costs a legitimate operator who fat-fingers a password nothing, and costs an
         // attacker three orders of magnitude.
+        // No rule for /sign-up/email: that route is not rate-limited, it is unreachable. See
+        // BLOCKED_AUTH_PATHS below.
         "/sign-in/email": { window: 300, max: 5 },
-        "/sign-up/email": { window: 300, max: 5 },
       },
     },
     advanced: {
@@ -153,12 +154,30 @@ export function betterAuthResolver(auth: Auth, prisma: PrismaClient): SessionRes
 }
 
 // Mounts the Better-Auth request handler at /api/auth/*.
+// Better-Auth's own sign-up endpoint, which this product has no use for: every account is created
+// by the bootstrap or by an admin through POST /members. Left reachable, it let a stranger create a
+// User row (rate-limited, 5 per five minutes, but unauthenticated), and two of those rows are worse
+// than clutter: an address registered before an admin adds it takes that email forever, so POST
+// /members answers 409 and the colleague can never be invited; and a sign-up BEFORE the first admin
+// exists makes `/setup` — which 404s once any user exists — close permanently on a deployment that
+// has no administrator and no way to create one.
+//
+// Blocked here, in the HTTP forwarder, rather than with Better-Auth's `disableSignUp`: that option
+// refuses inside the handler itself (api/routes/sign-up.mjs checks it before anything else), so it
+// would also refuse `auth.api.signUpEmail`, which is exactly how the bootstrap and POST /members
+// create their accounts. The route is what must be unreachable, not the function.
+const BLOCKED_AUTH_PATHS = new Set(["/api/auth/sign-up/email"]);
+
 export function registerAuthHandler(app: FastifyInstance, auth: Auth): void {
   app.route({
     method: ["GET", "POST"],
     url: "/api/auth/*",
     async handler(request, reply) {
       const url = new URL(request.url, `${request.protocol}://${request.host}`);
+      // 404, not 403: an endpoint that answers "forbidden" still tells a stranger it is there.
+      if (BLOCKED_AUTH_PATHS.has(url.pathname)) {
+        return reply.status(404).send({ error: "not found" });
+      }
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       const init: RequestInit = {
         method: request.method,

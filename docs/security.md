@@ -192,6 +192,18 @@ with the rotation form rather than showing a banner over controls that would all
 
 Rotating revokes other sessions. The old password may already have opened one.
 
+### Nobody can give themselves an account
+
+There is no public sign-up. Better-Auth ships one and it is blocked at the route — `POST
+/api/auth/sign-up/email` answers **404**, before the library sees the request. Every account is
+created by the bootstrap or by an administrator through `POST /members`.
+
+It was never a way in: an account created that way carried no membership, so every guarded route
+answered 401. It was a way to take something. `User.email` is globally unique, so a stranger who
+registered a colleague's address held it — an admin adding that person got a 409, permanently. And a
+sign-up before the first administrator existed closed the setup link on a deployment that then had
+no administrator and no way to create one.
+
 ### The login rate limit depends on knowing who is asking
 
 Sign-in is limited to 5 attempts per address per five minutes, counted in Postgres so the limit is

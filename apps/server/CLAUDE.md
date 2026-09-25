@@ -480,10 +480,30 @@ the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_
 
 Better-Auth's rate limiting is configured explicitly rather than left to its defaults: `storage:
 "database"` (the `RateLimit` model — in-memory counters reset on every restart and are per-process),
-a global 100 requests / 10s, and `customRules` of 5 attempts per 300s on `/sign-in/email` and
-`/sign-up/email`. Credential stuffing is a slow grind, so the window that matters is minutes, not
-seconds. The bucket key depends on `advanced.ipAddress.trustedProxies` — see
-`SCHRODUMP_TRUSTED_PROXIES` above.
+a global 100 requests / 10s, and a `customRule` of 5 attempts per 300s on `/sign-in/email`.
+Credential stuffing is a slow grind, so the window that matters is minutes, not seconds. The bucket
+key depends on `advanced.ipAddress.trustedProxies` — see `SCHRODUMP_TRUSTED_PROXIES` above.
+`/sign-up/email` carried the same rule and no longer does: the route is not rate-limited, it is
+unreachable (next section). A rule for an endpoint that answers 404 documents a control that does
+not exist.
+
+## Sign-up is blocked at the route, not disabled in the library (`auth/auth.ts`)
+
+`registerAuthHandler` answers **404** for `/api/auth/sign-up/email` before the request reaches
+Better-Auth. Every account in this product is created by the bootstrap or by an admin through
+`POST /members`; the public endpoint had no legitimate caller and two consequences. An address
+registered by a stranger is taken forever, because `User.email` is globally unique — `POST /members`
+then answers 409 and that colleague can never be invited. And a sign-up **before** the first admin
+existed closed `/setup` permanently, on a deployment with no administrator and no way to make one
+(hence `adminExists`, below).
+
+Two details that are load-bearing:
+
+- **Not `disableSignUp`.** Better-Auth's option refuses inside the handler itself
+  (`api/routes/sign-up.mjs` checks it first), so it would equally refuse `auth.api.signUpEmail` —
+  which is exactly how the bootstrap and `POST /members` create their accounts. The **route** must
+  be unreachable, not the function.
+- **404, not 403.** An endpoint that answers "forbidden" still tells a stranger it is there.
 
 ## Lists are bounded, counters are not
 
@@ -555,6 +575,20 @@ If `SCHRODUMP_ADMIN_EMAIL`/`_PASSWORD` are absent, the first boot mints a setup 
 bytes, **only the SHA-256 hash is persisted**, single-use, 60-minute TTL. The raw token exists in
 the boot log line and in the operator's URL, nowhere else — so a leaked database does not hand over
 an admin-creation link, and an old log line stops working after an hour.
+
+**The question asked is `adminExists`, not "is there a user".** Both the boot gate and `/setup`
+count administrators — a `Membership` with role `admin` — because a `User` row on its own proves
+nothing about whether this deployment can be administered. Counting users let a single stray
+account (a sign-up, or a creation that failed halfway) close the setup link forever.
+
+**Creating the admin is idempotent, because its three writes cannot share a transaction** —
+Better-Auth writes the `User` and `Account` through its own adapter. The organization is an
+`upsert` on the slug, sign-up is skipped when the address already exists, and the membership is an
+`upsert`. A failure between the writes used to leave the organization behind, and every retry then
+died on the slug's unique constraint. **The setup token is spent last**, after the admin is real:
+spending it first burned the one link the deployment had, and the next boot mints a token only when
+there is no admin — which there still was not. Re-using a token that produced nothing is the lesser
+risk; it is single-use, an hour old at most, and the window is one failed request wide.
 
 ## Known gaps (see `docs/roadmap.md`)
 

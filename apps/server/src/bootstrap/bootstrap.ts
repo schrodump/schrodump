@@ -6,7 +6,14 @@ import { generateSetupToken, setupTokenExpiry } from "./setup-token.js";
 
 // Dependencies are injected so the idempotent logic is unit tested without a database or auth.
 export interface BootstrapDeps {
-  userCount(): Promise<number>;
+  // Whether this deployment already has an administrator — an admin MEMBERSHIP, not merely a User
+  // row. A user without one can reach nothing (betterAuthResolver returns null and every guarded
+  // route answers 401), so treating any row as "initialized" closed the only door left: the
+  // bootstrap reported already-initialized and /setup answered 404, on a deployment with no
+  // administrator and no way to create one. Better-Auth's public sign-up endpoint (now blocked in
+  // registerAuthHandler) made that state reachable by a stranger; a bootstrap that failed halfway
+  // reached it by accident.
+  adminExists(): Promise<boolean>;
   // Creates the admin user + default org + admin membership, flagged for mandatory password change.
   createAdmin(input: { email: string; password: string }): Promise<void>;
   createSetupToken(input: { tokenHash: string; expiresAt: Date }): Promise<void>;
@@ -22,8 +29,8 @@ export type BootstrapResult =
 
 // Idempotent: runs on every start.
 export async function bootstrap(deps: BootstrapDeps, env: Env): Promise<BootstrapResult> {
-  // 1. If any user exists, do nothing.
-  if ((await deps.userCount()) > 0) {
+  // 1. If an administrator exists, do nothing.
+  if (await deps.adminExists()) {
     return { kind: "already-initialized" };
   }
 

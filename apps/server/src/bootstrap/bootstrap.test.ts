@@ -38,7 +38,7 @@ function makeDeps(over: Partial<BootstrapDeps> = {}): BootstrapDeps & Recorder {
   const rec: Recorder = { admins: [], tokens: [], logs: [] };
   return {
     ...rec,
-    userCount: () => Promise.resolve(0),
+    adminExists: () => Promise.resolve(false),
     createAdmin: (input) => {
       rec.admins.push(input);
       return Promise.resolve();
@@ -59,8 +59,19 @@ function makeDeps(over: Partial<BootstrapDeps> = {}): BootstrapDeps & Recorder {
 }
 
 describe("bootstrap", () => {
-  it("does nothing when a user already exists", async () => {
-    const deps = makeDeps({ userCount: () => Promise.resolve(1) });
+  // A User row is not an administrator: without an admin membership that account reaches nothing,
+  // and treating it as "initialized" is how a deployment ends up with no administrator and a
+  // /setup that answers 404 — reachable through Better-Auth's public sign-up until it was blocked,
+  // and by accident whenever a bootstrap failed halfway.
+  it("still offers setup when a user row exists but no administrator does", async () => {
+    const deps = makeDeps({ adminExists: () => Promise.resolve(false) });
+    const result = await bootstrap(deps, baseEnv());
+    expect(result).toEqual({ kind: "setup-token-issued" });
+    expect(deps.tokens).toHaveLength(1);
+  });
+
+  it("does nothing when an administrator already exists", async () => {
+    const deps = makeDeps({ adminExists: () => Promise.resolve(true) });
     const result = await bootstrap(deps, baseEnv());
     expect(result).toEqual({ kind: "already-initialized" });
     expect(deps.admins).toHaveLength(0);
@@ -69,12 +80,12 @@ describe("bootstrap", () => {
 
   it("is idempotent across repeated runs — the admin is created exactly once", async () => {
     const admins: unknown[] = [];
-    let users = 0;
+    let admin = false;
     const deps: BootstrapDeps = {
-      userCount: () => Promise.resolve(users),
+      adminExists: () => Promise.resolve(admin),
       createAdmin: (input) => {
         admins.push(input);
-        users = 1;
+        admin = true;
         return Promise.resolve();
       },
       createSetupToken: () => Promise.resolve(),

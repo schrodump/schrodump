@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
+import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
-import { loopbackTwinOrigins, parseTrustedProxies } from "./auth.js";
+import { loopbackTwinOrigins, parseTrustedProxies, registerAuthHandler, type Auth } from "./auth.js";
 
 describe("parseTrustedProxies", () => {
   // Unset must mean "trust nothing", never "trust everything". Getting this backwards would make
@@ -54,5 +55,53 @@ describe("loopbackTwinOrigins", () => {
 
   it("adds nothing for a value that is not a URL", () => {
     expect(loopbackTwinOrigins("not a url")).toEqual([]);
+  });
+});
+
+describe("registerAuthHandler", () => {
+  // Every account in this product is created by the bootstrap or by an admin through POST /members.
+  // Better-Auth's own sign-up endpoint had no legitimate caller and two consequences: an address
+  // registered by a stranger is taken forever (POST /members then answers 409), and a sign-up before
+  // the first admin used to close /setup permanently. It is blocked here rather than with
+  // Better-Auth's `disableSignUp`, which refuses inside the handler and would also refuse
+  // auth.api.signUpEmail — the call the bootstrap and POST /members make.
+  async function appWithHandler(): Promise<{ app: ReturnType<typeof Fastify>; seen: string[] }> {
+    const seen: string[] = [];
+    const auth = {
+      handler: (request: Request) => {
+        seen.push(new URL(request.url).pathname);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      },
+    } as unknown as Auth;
+    const app = Fastify();
+    registerAuthHandler(app, auth);
+    await app.ready();
+    return { app, seen };
+  }
+
+  it("answers 404 for the public sign-up endpoint, and never reaches Better-Auth", async () => {
+    const { app, seen } = await appWithHandler();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up/email",
+      payload: { email: "stranger@example.com", password: "a-long-enough-password" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(seen).toEqual([]);
+    await app.close();
+  });
+
+  it("still forwards the endpoints the product uses", async () => {
+    const { app, seen } = await appWithHandler();
+    const signIn = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-in/email",
+      payload: { email: "admin@example.com", password: "a-long-enough-password" },
+    });
+    const session = await app.inject({ method: "GET", url: "/api/auth/get-session" });
+    expect(signIn.statusCode).toBe(200);
+    expect(session.statusCode).toBe(200);
+    expect(seen).toEqual(["/api/auth/sign-in/email", "/api/auth/get-session"]);
+    await app.close();
   });
 });
