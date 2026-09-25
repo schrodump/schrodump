@@ -311,6 +311,34 @@ export function createDockerRunner(docker?: Docker): DockerRunner {
   return new DockerRunner(new DockerodeEngine(docker ?? dockerFromEnv()));
 }
 
+// Removes every container this runner created that is still on the host — running or exited, with
+// its anonymous volume. Returns the ids removed, for the boot log.
+//
+// Only containers carrying MANAGED_LABEL, so it can never touch something the operator started.
+// The CALLER decides it is safe to run: in the server it happens under the same advisory lock that
+// gates orphan recovery, because a container that is still running may belong to a LIVE replica
+// mid rolling-restart, and reaping that one would abort a backup nobody asked to abort.
+//
+// A container that will not remove is logged past, not thrown on: one stuck container must not be
+// the reason a deployment cannot boot.
+export async function sweepManagedContainers(docker?: Docker): Promise<string[]> {
+  const engine = docker ?? dockerFromEnv();
+  const listed = await engine.listContainers({
+    all: true,
+    filters: { label: [`${MANAGED_LABEL}=1`] },
+  });
+  const removed: string[] = [];
+  for (const info of listed) {
+    try {
+      await removeWithVolumes(engine.getContainer(info.Id));
+      removed.push(info.Id.slice(0, 12));
+    } catch {
+      // Left for the next boot rather than failing this one.
+    }
+  }
+  return removed;
+}
+
 // DB client errors frequently echo host, user and sometimes the password. Redact before the
 // stderr is persisted or logged.
 const CREDENTIAL_KEY = /pass|pwd|secret|token/i;
@@ -410,11 +438,21 @@ export const SERVICE_LOG_CONFIG = {
 // below is not exported and the unit tests replace it wholesale with a fake, so until these existed
 // nothing could see what was passed to createContainer — which is exactly where the defect above
 // lived, invisible, for every release so far.
+// Every container this runner creates carries it, and nothing else on the host does. It is what
+// makes the boot sweep possible: removal happens in `finally` blocks, so a process that is SIGKILLed
+// — OOM, a host crash, `docker kill` — leaves its executor or its verify sandbox running, on the
+// executor network, holding an anonymous volume that for a FULL_RESTORE verify IS the restored
+// database in clear. Nothing reaped them, because nothing could tell them from a container the
+// operator started.
+export const MANAGED_LABEL = "com.schrodump.managed";
+const MANAGED_LABELS = { [MANAGED_LABEL]: "1" } as const;
+
 export function executorCreateOptions(spec: ContainerSpec): Docker.ContainerCreateOptions {
   return {
     Image: spec.image,
     Cmd: spec.command,
     Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+    Labels: { ...MANAGED_LABELS },
     Tty: false,
     AttachStdout: true,
     AttachStderr: true,
@@ -432,6 +470,7 @@ export function serviceCreateOptions(spec: EphemeralServiceSpec): Docker.Contain
   return {
     Image: spec.image,
     Env: Object.entries(spec.env).map(([key, value]) => `${key}=${value}`),
+    Labels: { ...MANAGED_LABELS },
     HostConfig: {
       NetworkMode: spec.network,
       AutoRemove: false,

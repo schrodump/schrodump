@@ -8,6 +8,9 @@ export interface GracefulShutdownDeps {
   // dispatch — a self-backup tick holds an executor container and a multipart upload, so it is
   // awaited alongside the worker drain rather than merely stopped.
   selfBackup?: { stop(): void; whenIdle(): Promise<void> };
+  // Stopped like the scheduler, not awaited: a sweep tick lists containers and removes what no
+  // live job owns, so cutting it short loses nothing the next boot's sweep will not redo.
+  sweep?: { stop(): void };
   controller: { abort(reason?: unknown): void };
   disconnect(): Promise<void>;
   graceMs: number;
@@ -29,6 +32,7 @@ export async function runGracefulShutdown(deps: GracefulShutdownDeps): Promise<v
   deps.handle.stop();
   deps.scheduler.stop();
   deps.selfBackup?.stop();
+  deps.sweep?.stop();
   deps.controller.abort(new Error("shutdown"));
   // Clear the grace timer when whenIdle() wins, so a resolved shutdown never leaves an 8s timer
   // pending (which would keep the event loop alive and delay a clean exit).

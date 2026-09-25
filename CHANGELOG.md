@@ -39,6 +39,17 @@ Candidates publish to `:next`, and an exact version is what production should pi
   same way, because every verdict is set explicitly before it and a database blip after a green one
   used to flip a verified backup to red (#173).
 
+- **What a crashed process left behind is now swept at boot.** Every removal in this codebase
+  happens in a `finally`, which covers a job that crashed and not a **process** that was SIGKILLed
+  — an OOM, a host crash, `docker kill`. That left the executor or the verify sandbox still
+  running on the executor network, holding the anonymous volume that for a full-restore verify *is*
+  the restored database in clear, and left the job's scratch directory on disk with the dump in
+  clear. `docs/security.md` said the scratch sweep ran at boot and periodically;
+  `ScratchManager.gc()` had **no caller anywhere**. It is now called at boot and hourly, under the
+  worker's advisory lock so a live replica's work is never reaped, and every container this runner
+  creates carries a label so the sweep can only ever remove its own. Step 1 of the compose smoke
+  plants an abandoned directory and a fresh one and asserts exactly one survives (#174).
+
 ## [0.1.0-rc.20] — 2026-09-25
 
 The second pass of the pre-launch audit, and the last one before a stable tag: eleven pull requests

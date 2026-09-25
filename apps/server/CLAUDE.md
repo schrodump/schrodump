@@ -97,6 +97,20 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   where an artifact written by an earlier version actually went. Both spellings are passed to
   `delete` — `DeleteObjects` treats an absent key as a successful delete, so naming one that was
   never written costs nothing and naming the one that was is the entire point.
+- **Nothing survives the process that made it.** Every removal in this codebase is in a `finally`,
+  which covers a job that crashed and not a PROCESS that was SIGKILLed — an OOM, a host crash,
+  `docker kill`. That left the executor or the verify sandbox running on the executor network,
+  holding the anonymous volume that for a FULL_RESTORE verify IS the restored database in clear, and
+  the job's scratch directory on disk with the dump in clear. `ScratchManager.gc()` had **no
+  caller** while `docs/security.md`, `shutdown.ts` and `entrypoint.sh` all assumed it ran.
+  `sweepAbandonedWith` is now called at boot and hourly from `server.ts`, **under the worker's
+  advisory lock** — a running container may belong to a live replica mid rolling-restart, and
+  reaping it would abort a backup nobody asked to abort. Containers carry `MANAGED_LABEL`, so the
+  sweep can never touch one the operator started; `gc()`'s 24h age ceiling is the second guard, far
+  longer than any executor timeout. The two halves run in separate `try`s because they fail for
+  unrelated reasons, and the first to throw must not cancel the other. Step 1 of the compose smoke
+  plants an old directory and a fresh one and asserts exactly one survives — no unit test reaches
+  the boot sequence that wires this.
 - **A verify that could not run is `INCONCLUSIVE`, not `FAILED`.** `FAILED` is a process that ran
   and broke; `INCONCLUSIVE` is `runVerifyJob` reporting that our own sandbox or runner never got to
   look — the artifact stays `UNOBSERVED`, which was always true. It became its own `JobState`
