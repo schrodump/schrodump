@@ -14,6 +14,15 @@ Candidates publish to `:next`, and an exact version is what production should pi
 
 ### Fixed
 
+- **A self-backup whose `pg_dump` failed is no longer recorded as succeeded.** The runner reports a
+  tool's exit code by *resolving* with it, and the self-backup upload checked only whether the
+  promise rejected — so a dump that died partway and exited 1 having written some bytes was stored
+  and marked `SUCCEEDED`, truncated. The artifact path has checked the exit code since the 9.4 GB
+  dump that reached the bucket as 877 bytes. This is the fast recovery path for a lost metadata
+  database, so a truncated one marked good is the copy an operator reaches for on the worst day.
+  The failure now carries the tool's own stderr, and the object is removed rather than orphaned
+  (#175).
+
 - **Retention deletes the artifact, not just its manifest and its row.** Every object a backup
   writes now goes through one key builder. It used to be two: the write path interpolated
   `${prefix}/${org}/${job}/${name}` while the manifest and every delete used
