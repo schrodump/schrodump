@@ -55,6 +55,12 @@ good backup on age alone, without ever consulting its verification state.
 
 **Client-side** encryption with multiple recipients (operational + escrow); the `keyId` is written
 into the manifest so that rotation is possible.
-— Encrypting before anything leaves the executor keeps the destination zero-knowledge; multiple
-recipients avoid a single point of key loss; and the `keyId` in the manifest makes rotation
-possible without reprocessing old backups.
+— Encryption runs **in the server process** — `apps/server/src/crypto/artifact.ts`, on the
+`age-encryption` library — after compression and before a single byte is uploaded, so the
+destination is zero-knowledge. **Client-side** here means before the upload, not before the dump
+leaves the executor: the stream reaches the server in clear, which is why scratch and the Docker
+socket are part of the threat model ([docs/security.md](docs/security.md)). An earlier design ran
+`age` in an executor of its own and piped the stream over the runner's stdin; the hijacked Docker
+attach corrupted it intermittently, so both directions moved in-process and that executor was
+deleted. Multiple recipients avoid a single point of key loss, and the `keyId` in the manifest makes
+rotation possible without reprocessing old backups.

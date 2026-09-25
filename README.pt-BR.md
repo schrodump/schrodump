@@ -17,6 +17,19 @@ Um backup que um restore não provou não é um backup — é um palpite.
 
 ---
 
+> **Beta: pré-1.0, um mantenedor.** Dezenove release candidates, nenhuma release estável ainda.
+>
+> **O que está provado.** Todo pull request sobe o `compose.yaml` que a gente publica e passa vinte
+> e dois passos por ele: as quatro engines nos dois modos de execução, cada uma verificada por um
+> restore de verdade, três delas restauradas por cima de dados vivos, um catálogo reconstruído só a
+> partir do bucket, uma rotação de chave com o artefato anterior ainda legível, a retenção apagando
+> de fato, uma notificação assinada e um e-mail entregues.
+>
+> **O que não está.** Nada foi marcado como estável, então ainda não há promessa sobre atualizar de
+> uma versão para a seguinte, e o v1 sai com arestas conhecidas — todas escritas em
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Leia essa lista antes de
+> depender disto.
+
 ## Por que Schrodump
 
 Um job de backup que sai com código `0` provou uma coisa só: um processo rodou sem reclamar. **Não**
@@ -43,10 +56,13 @@ Não existe "OK". O painel lidera pelo número de backups **não observados** �
 - **Agentless** — nada é instalado no host do seu banco. Os dumps rodam em contêineres efêmeros
   construídos a partir da major version do próprio alvo.
 - **Cifrado em repouso** — todo artefato é cifrado com [`age`](https://age-encryption.org) para dois
-  recipients (operacional + escrow); as chaves são envelopadas por uma KEK que vive fora do host.
+  recipients (operacional + escrow); essas duas chaves são envelopadas por uma KEK que pertence a um
+  gerenciador de segredos, injetada no start. O início rápido abaixo escreve a KEK no `.env` do
+  host para você subir, e tirá-la de lá é a primeira coisa a fazer.
 - **Destinos S3-compatible** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Agendamento com retenção GFS** — avô-pai-filho, ciente das cadeias full/incremental, e nunca
-  apaga a cópia verificada mais recente de uma política.
+- **Agendamento com retenção GFS** — avô-pai-filho por contagem e por janela de calendário, rodando
+  só quando um backup novo da mesma política entrou, e nunca apaga a cópia verificada mais recente
+  de uma política.
 - **Atrito de restore de propósito** — restrito por papel, limitado por uma matriz de capacidade da
   engine, e sobrescrever um banco exige digitar o nome dele.
 - **Interface web** — um painel construído em torno dos três estados, em inglês, português e espanhol.

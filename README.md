@@ -17,6 +17,19 @@ A backup a restore hasn't proven isn't a backup — it's a guess.
 
 ---
 
+> **Beta: pre-1.0, one maintainer.** Nineteen release candidates, no stable release yet.
+>
+> **What is proven.** Every pull request stands the shipped `compose.yaml` up and drives
+> twenty-two steps through it: all four engines in both execution modes, each verified by a real
+> restore, three of them restored over live data, a catalog rebuilt from the bucket alone, a key
+> rotation with the pre-rotation artifact still readable, retention observed actually deleting, a
+> signed notification and an email delivered.
+>
+> **What is not.** Nothing has been tagged stable, so nothing is promised yet about upgrading from
+> one version to the next, and v1 ships with known sharp edges — every one of them written down in
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Read that list before you
+> depend on this.
+
 ## Why Schrodump
 
 A backup job that exits `0` has proven one thing: a process ran without complaining. It has **not**
@@ -43,10 +56,13 @@ questions — not the number of jobs that succeeded. That inversion is the whole
 - **Agentless** — nothing is installed on your database host. Dumps run in ephemeral containers
   built from the target's own major version.
 - **Encrypted at rest** — every artifact is encrypted with [`age`](https://age-encryption.org) to
-  two recipients (operational + escrow); keys are wrapped by a KEK that lives outside the host.
+  two recipients (operational + escrow); those two keys are wrapped by a KEK that belongs in a
+  secrets manager and injected at start. The quick start below writes it into `.env` on the host to
+  get you running, which is the first thing to move.
 - **S3-compatible destinations** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Scheduling with GFS retention** — grandfather-father-son, aware of full/incremental chains,
-  and it never deletes a policy's newest verified copy.
+- **Scheduling with GFS retention** — grandfather-father-son by count and by calendar bucket, run
+  only when a fresh backup of the same policy has landed, and it never deletes a policy's newest
+  verified copy.
 - **Deliberate restore friction** — role-gated, scoped by an engine capability matrix, and an
   overwrite requires typing the database name.
 - **Web UI** — a dashboard built around the three states, in English, Portuguese and Spanish.

@@ -17,6 +17,20 @@ Una copia que una restauración no ha probado no es una copia — es una suposic
 
 ---
 
+> **Beta: pre-1.0, un solo mantenedor.** Diecinueve release candidates, ninguna versión estable
+> todavía.
+>
+> **Lo que está probado.** Cada pull request levanta el `compose.yaml` que publicamos y le hace
+> pasar veintidós pasos: los cuatro motores en ambos modos de ejecución, cada uno verificado con una
+> restauración real, tres de ellos restaurados sobre datos vivos, un catálogo reconstruido solo
+> desde el bucket, una rotación de clave con el artefacto anterior aún legible, la retención
+> borrando de verdad, una notificación firmada y un correo entregados.
+>
+> **Lo que no.** No hay nada etiquetado como estable, así que todavía no se promete nada sobre
+> actualizar de una versión a la siguiente, y v1 sale con aristas conocidas — todas escritas en
+> [docs/roadmap.md](docs/roadmap.md#known-limitations-shipping-in-v1). Lee esa lista antes de
+> depender de esto.
+
 ## Por qué Schrodump
 
 Un trabajo de copia que termina con código `0` ha probado una sola cosa: un proceso se ejecutó sin
@@ -44,10 +58,13 @@ abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión e
 - **Sin agente** — no se instala nada en el host de tu base de datos. Los volcados se ejecutan en
   contenedores efímeros construidos a partir de la versión mayor del propio destino.
 - **Cifrado en reposo** — cada artefacto se cifra con [`age`](https://age-encryption.org) para dos
-  destinatarios (operacional + escrow); las claves se envuelven con una KEK que vive fuera del host.
+  destinatarios (operacional + escrow); esas dos claves se envuelven con una KEK que pertenece a un
+  gestor de secretos y se inyecta al arrancar. El inicio rápido de abajo la escribe en el `.env` del
+  host para que puedas empezar, y sacarla de ahí es lo primero que hay que hacer.
 - **Destinos compatibles con S3** — AWS S3, Cloudflare R2, Backblaze B2, MinIO, SeaweedFS, Ceph RGW.
-- **Programación con retención GFS** — abuelo-padre-hijo, consciente de las cadenas
-  completa/incremental, y nunca borra la copia verificada más reciente de una política.
+- **Programación con retención GFS** — abuelo-padre-hijo por recuento y por ventana de calendario,
+  que solo se ejecuta cuando ha entrado una copia nueva de la misma política, y nunca borra la copia
+  verificada más reciente de una política.
 - **Fricción de restauración deliberada** — restringida por rol, acotada por una matriz de
   capacidad del motor, y sobrescribir una base exige escribir su nombre.
 - **Interfaz web** — un panel construido en torno a los tres estados, en inglés, portugués y español.
