@@ -14,6 +14,150 @@ Candidates publish to `:next`, and an exact version is what production should pi
 
 Nothing yet.
 
+## [0.1.0-rc.20] — 2026-09-25
+
+The second pass of the pre-launch audit, and the last one before a stable tag: eleven pull requests
+(#160–#170) closing the two remaining steps of the launch gate. One of them fixes a defect that was
+live in every deployment — **nothing on screen refreshed itself**, so the jobs ledger ticked a
+one-second clock over a list fetched once and the catalog stayed amber after the verify that had
+already turned it green. Another is not in this codebase at all: MinIO withdrew its community images
+from every anonymous registry, which had turned every branch of this repository red.
+
+### Breaking changes
+
+- **Public sign-up is gone.** `POST /api/auth/sign-up/email` answers **404**. Nothing in the product
+  called it — accounts come from the bootstrap or from an administrator through `POST /members` —
+  but an external script that used it stops working (#160).
+- **The egress guard can refuse an address an existing row already holds.** A webhook URL, an S3
+  endpoint, an SMTP host or a database target's host that resolves to loopback, to a link-local
+  address, or to one of this deployment's own services (`db`, `docker-proxy`, `schrodump`, and
+  whatever `DATABASE_URL`, `DOCKER_HOST` and `SCHRODUMP_URL` name) is now refused — at the route
+  when it is saved, and at the moment of connecting for a row saved earlier. **RFC-1918 and ULA are
+  deliberately not refused**, so an ordinary self-hosted install is unaffected. The one real case is
+  a deployment whose metadata PostgreSQL also holds a database it backs up: name that address in
+  `SCHRODUMP_EGRESS_ALLOW`, which wins over every rule including the built-in ones (#166).
+- **A notification channel URL whose scheme is not `http(s)` is refused on create** — `201` became
+  `400`. `z.url()` accepted anything `new URL()` does, so a channel could be stored as
+  `file:///etc/passwd` and only fail, unreadably, at delivery (#166).
+- **The UI sends `Content-Security-Policy: … frame-ancestors 'none'` and `X-Frame-Options: DENY`.**
+  A deployment that embedded Schrodump in an iframe no longer can. Neither side sends HSTS: this
+  container listens on plain HTTP and the operator terminates TLS in front of it — the `max-age`
+  belongs in the proxy, and `docs/install.md` now carries it in the Caddy and nginx snippets (#167).
+
+### Security
+
+- **One egress guard for every address an operator types.** Four fields name a host this process
+  then dials, and each of them reports back whether something answered — the webhook's status
+  through `lastFailure`, the canary's `failedOperation`, the probe's `ProbeFailureCode`. That is a
+  port scanner with a credential form in front of it, and the server sits on the `internal` network
+  beside the metadata database and the Docker socket proxy: an **operator**, a role deliberately
+  denied both, could point a channel at `docker-proxy:2375`, press "send a test" and read the
+  reflected status. The guard judges the **resolved** address, not the name, comparing bytes so
+  `::ffff:127.0.0.1` is the same loopback as `127.0.0.1`, and webhook redirects are followed by hand
+  and re-checked on every hop. DNS rebinding is not covered and `docs/security.md` says so (#166).
+- **Nobody can give themselves an account.** Better-Auth's sign-up endpoint was never a way *in* —
+  the account it created carried no membership, so every guarded route answered 401 — but it was a
+  way to take something: `User.email` is globally unique, so a stranger who registered a colleague's
+  address held it permanently, and a sign-up **before the first administrator existed** closed
+  `/setup` for good on a deployment that then had no administrator and no way to create one. It is
+  blocked at the route rather than with Better-Auth's `disableSignUp`, which would equally refuse
+  the call the bootstrap itself makes (#160).
+- **The UI and the API both send security headers.** `@fastify/helmet` had been a declared
+  dependency for months and was never registered, and `next.config.ts` had no `headers()`: no CSP,
+  no `frame-ancestors`, no `nosniff`, no `Referrer-Policy`. The session cookie makes the browser the
+  operator, and the two most destructive controls in the product are one click each — the restore
+  dialog writes over a live database, the delete dialog destroys a VERIFIED artifact (#167).
+- **Every direct dependency is at a version with no open advisory.** `pnpm audit` reported 31, and
+  CI was green because the gate is set at critical on purpose. Almost every fix was already inside
+  the range the manifests declared — a stale lockfile, not a missing patch. `fastify` and
+  `nodemailer` needed their floors raised; the rest was a refresh. **31 → 4**, and the four that
+  remain are listed in `docs/security.md` with what each reaches and why it stays (#162).
+
+### Added
+
+- **A demo stack that reaches a first VERIFIED backup in one command.** `compose.demo.yaml`
+  `include:`s the shipped `compose.yaml` rather than copying it, and adds a sample database, a MinIO
+  and a one-shot initialiser. Measured on a clean host: **5 min 43 s** from `up -d` to a green
+  artifact, clicking through the UI as documented (#164).
+- **A CHANGELOG**, reconstructed from the tags and the commit range between each, so nineteen
+  release candidates read as a history rather than as churn. `CONTRIBUTING.md` carries the template
+  for the next one, and `release.yml` links this file pinned at the tag (#161).
+- **Screenshots, one capture per language.** Each README shows the artifact catalog as it renders,
+  from a real stack: nine artifacts over ten days, three never opened, and one FAILED that was
+  earned — its object in the bucket was overwritten and re-verified. Both themes ship, selected by
+  `prefers-color-scheme`. `docs/backup-restore.md` gains the restore dialog beside the paragraph
+  that describes it (#170).
+- **A comparison with the tools a reader is already holding this against** — pgBackRest, Barman,
+  WAL-G, restic, postgresus, `pg_dump` + cron, managed snapshots — and where Schrodump loses: no
+  PITR, no physical backup, a recovery point no better than the last dump. That is structural, not
+  unfinished (#161).
+- **`SCHRODUMP_EGRESS_DENY` and `SCHRODUMP_EGRESS_ALLOW`**, both validated at boot, so a typo stops
+  the start naming the variable rather than leaving a rule that silently does not apply (#166).
+
+### Changed
+
+- **The READMEs lead with what this is and is not.** A beta callout sits directly under the tagline
+  in all three — one maintainer, twenty candidates, no stable release — saying what the
+  twenty-two-step compose gate proves and what it does not, and pointing at the known limitations
+  before anyone depends on this. It used to be the eighth section down (#161).
+- **`COPYRIGHT` says contributions are certified by the DCO**, not by a Contributor License
+  Agreement that never existed. No copyright is assigned; the contributor keeps theirs (#161).
+- **Three claims were withdrawn because the code does not support them**: retention is not aware of
+  full/incremental chains (there are no incremental backups — `dependsOn` is written `[]` on every
+  artifact), the KEK does not live outside the host if you follow the quick start (it writes it to
+  `.env`, and moving it is the first thing to do), and encryption does not happen "before anything
+  leaves the executor" — it runs in the server process, after compression and before the upload,
+  which is exactly why scratch and the Docker socket are in the threat model (#161).
+
+### Fixed
+
+- **The screen refreshes itself.** There was no `refetchInterval` anywhere and `refetchOnWindowFocus`
+  was off, so a job that finished at one minute went on reading "running 47m" and the catalog stayed
+  amber after the verify had turned it green. Both looked broken, and a live clock over stale data is
+  worse than no clock. Now: 4 s while work is in flight, 30 s when it is not, and **no timer at all**
+  while the tab is hidden. "In flight" comes from the server's counts over the whole table, never
+  from the page — a ledger that went quiet because the running job fell off the two-hundred-row page
+  would go quiet at the one moment it must not. Every mutation invalidates what it actually changed:
+  a restore invalidated nothing before, and a green "Canary passed" could sit directly above a row
+  reading "never checked" (#165).
+- **The language menu changes the dates too.** Every `Intl` call passed `undefined` as the locale,
+  which resolves to the **browser's** — a different setting from the app's, and the only one the menu
+  does not touch. A Portuguese screen read `NÃO OBSERVADO · 2 days ago` and grouped rows under
+  `HOJE` and `SEP 23, 2026`. The four date formatters now take the locale as a required first
+  argument. Byte sizes, durations and server versions stay locale-independent on purpose: `850.0 KB`
+  is a machine value, and a decimal comma there would be a change of meaning (#169).
+- **The bootstrap finishes what a failed attempt started.** Creating the first administrator is
+  three writes that cannot share a transaction, because Better-Auth writes the `User` and `Account`
+  through its own adapter — so a failure between them left the organization behind and every retry
+  died on the slug's unique constraint, with the setup token already spent. The organization is now
+  an upsert, sign-up is skipped when the address exists, the membership is an upsert, and **the token
+  is spent last**, once the administrator is real. The boot gate also counts **administrators**
+  rather than users: one stray row used to close the setup link forever (#160).
+- **CI can pull an S3 server again.** MinIO withdrew its community images from Docker Hub on
+  2026-09-21 — the repository is gone from its API entirely — and from quay.io on 2026-09-25, which
+  between them turned every open branch of this repository red at the same step, twice, for a reason
+  none of them caused. The integration job and the compose smoke now pull `cgr.dev/chainguard/minio`
+  **by digest**: the same upstream binary, rebuilt, served anonymously. Two fallbacks are named in
+  the workflow with the date they were checked pullable, because this was the second registry move
+  in five days (#163).
+- **The compose smoke no longer reports a false red.** Two of its counters matched the literal
+  `"VERIFIED":1`; creating a policy also dispatches its most recent past cron window, so a step that
+  triggers one backup can produce two artifacts — and the detector then waited out its five-minute
+  clock and failed saying nothing reached VERIFIED, above a dump in which everything had. A false red
+  is worse than no check, because it teaches people to rerun (#168).
+- **A restore's disabled scopes say why.** Unchanged code, but now visible: the dialog screenshot in
+  `docs/backup-restore.md` shows Schema and Table carrying their reason in place of the control
+  (#170).
+
+### Installing this version
+
+```sh
+SCHRODUMP_IMAGE=schrodump/schrodump:0.1.0-rc.20
+```
+
+`latest` follows a stable tag only, and none exists yet. `:next` also moves to this candidate, which
+is what `.env.example` points at until v0.1.0 ships.
+
 ## [0.1.0-rc.19] — 2026-09-21
 
 The first pass of the pre-launch audit: thirteen pull requests (#147–#159) carrying sixteen fixes.
@@ -345,7 +489,8 @@ restore that mattered (#78), no MariaDB 11 artifact could ever be verified (#79)
 backup could never be verified or restored (#80), and retention was deleting two thirds of every
 backup, orphaning the role password hashes outside the configured window (#81).
 
-[Unreleased]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.19...HEAD
+[Unreleased]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.20...HEAD
+[0.1.0-rc.20]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.19...v0.1.0-rc.20
 [0.1.0-rc.19]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.18...v0.1.0-rc.19
 [0.1.0-rc.18]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.17...v0.1.0-rc.18
 [0.1.0-rc.17]: https://github.com/schrodump/schrodump/compare/v0.1.0-rc.16...v0.1.0-rc.17
