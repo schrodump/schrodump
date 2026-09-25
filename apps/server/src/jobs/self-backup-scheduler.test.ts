@@ -4,6 +4,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { runScheduledSelfBackup } from "./self-backup-scheduler.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 
 const NOW = new Date("2026-09-01T12:00:00Z");
 const DAY = 86_400_000;
@@ -53,6 +54,7 @@ function harness(opts: { lastSucceededAt?: Date; destination?: unknown; keys?: u
     databaseUrl: "postgresql://u:p@db:5432/schrodump",
     destinationId: "dest-1",
     network: "schrodump_internal",
+    egress: allowAnyEgress,
     intervalMs: DAY,
     now: () => NOW,
     log,

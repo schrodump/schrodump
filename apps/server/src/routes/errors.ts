@@ -36,6 +36,19 @@ function fieldOf(issue: z.core.$ZodIssue): string | undefined {
   return undefined;
 }
 
+// The same body, for a refusal Zod did not produce. The egress guard is the first of these: whether
+// this server may open a connection to an address is not a question a schema can answer (it needs
+// DNS), but the answer owes the operator exactly what a schema's would — the field, and why. Kept
+// here rather than written out at each route so the shape cannot drift between them.
+export function refusedField(
+  reply: FastifyReply,
+  error: string,
+  field: string,
+  detail: string,
+): FastifyReply {
+  return reply.status(400).send({ error, field, detail } satisfies BadRequestBody);
+}
+
 // The first issue, not all of them. A form fixes one field at a time, and the alternative — a list
 // that grows as earlier fields are corrected — reads like the request got worse.
 export function badRequest<T>(

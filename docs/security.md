@@ -94,6 +94,72 @@ kills the executor on expiry, which ends the attach and settles the wait. `socke
 reproduces the cut against a short timeout and proves that disabling it is what lets a long job's
 wait return.
 
+## What the server will and will not connect to
+
+Four fields in the API name an address that Schrodump then dials: a notification channel's
+**webhook URL**, a destination's **S3 endpoint**, an SMTP channel's **host and port**, and a
+database target's **host and port**. Each of them reports back whether something answered — the
+webhook's HTTP status through the channel's last failure, the canary's failed operation, the
+probe's failure code. That combination is a port scanner with a credential form in front of it,
+and the interesting side of the scan is not the internet: the server sits on the `internal`
+network beside the metadata database (`db:5432`) and the Docker socket proxy
+(`docker-proxy:2375`). An `operator` — a role that is deliberately not given access to the host or
+to the metadata database — could otherwise point a channel at the socket proxy, press **Send a
+test**, and read the reflected status. The webhook path is a `POST`, and the proxy's permissions
+accept Docker's body-less prune endpoints, so the same button is also a way to delete containers
+and images.
+
+One guard, in the server, checks all four. It resolves the host name first and judges the
+**resolved address**, so a name an attacker controls pointed at `127.0.0.1` is refused the same
+way the literal is.
+
+**Refused with nothing configured:**
+
+| Refused                                        | Why it can never be a legitimate destination           |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `127.0.0.0/8`, `::1`                            | Loopback: it can only be this container itself         |
+| `169.254.0.0/16`, `fe80::/10`                   | Link-local. `169.254.169.254` is the cloud instance metadata service, which hands out credentials |
+| `0.0.0.0/8`, `::`                               | Not a routable destination                             |
+| `db`, `docker-proxy`, `schrodump`, `scratch-init` | The compose stack's own services, by name — any port |
+| Whatever `DATABASE_URL`, `DOCKER_HOST` and `SCHRODUMP_URL` name | The same three pieces of the control plane, read off your own configuration |
+| The addresses those names currently resolve to, and every address this process is bound to | So that a name-based block is not walked around with the container's bridge address, and so that "the API's own port" holds however it is reached |
+
+**Not refused, and that is the decision.** Private ranges — `10/8`, `172.16/12`, `192.168/16`,
+`fc00::/7` — are allowed. Schrodump is self-hosted: a PostgreSQL on `10.0.0.5` and a MinIO on
+`192.168.1.10` are the normal case for this product, not the attack. A default that blocked them
+would break more real deployments than it protected, and would be switched off by the first
+operator it inconvenienced. **The guard's job here is to stop a pivot onto the deployment's own
+control plane, not to firewall your LAN.**
+
+Two variables move the line, both comma-separated lists of CIDRs (a bare address means that one
+host). An unparseable entry stops the boot naming the variable, rather than becoming a rule that
+silently does not apply.
+
+- **`SCHRODUMP_EGRESS_DENY`** adds to the refusals. If every database you back up is public, or is
+  reached only by the executors on their own network, shut the private ranges:
+  `SCHRODUMP_EGRESS_DENY=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7`.
+- **`SCHRODUMP_EGRESS_ALLOW`** overrides every refusal, the built-in ones included. It exists for
+  the case the self-service rule gets wrong on purpose: a deployment whose metadata PostgreSQL also
+  holds a database somebody backs up.
+
+A refusal is a `400` from the route that took the address, naming the field and saying why, and a
+recorded job or channel failure where it is only discovered later — a target row written before
+this existed, or one the deny list was tightened under.
+
+Two limits worth stating plainly:
+
+- **Webhook redirects are followed by hand and re-checked on every hop.** A saved URL pointing at a
+  host you own, whose `302` points at `docker-proxy:2375`, is the obvious way around a check made
+  before the request. The chain is capped and each hop goes through the guard.
+- **DNS rebinding is not covered.** A name that resolves to an allowed address for the check and to
+  a refused one for the socket would get through. Closing that needs the connection to be pinned to
+  the address that was checked, which the database drivers and the S3 SDK do not offer. It is a
+  narrower hole than the one this closes, and it is written here rather than pretended away.
+
+The **executors** are not affected by any of this. They join their own network and reach your
+databases on the host's connectivity, not the server container's; the guard governs connections
+this process makes.
+
 ## Scratch holds your data in clear
 
 `STAGED` backups write the dump to the scratch directory first, then compress, then encrypt, then upload.

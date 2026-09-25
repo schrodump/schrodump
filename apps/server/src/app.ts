@@ -4,6 +4,7 @@
 import Fastify, { type FastifyBaseLogger } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { registerAuthHandler, type Auth } from "./auth/auth.js";
+import type { EgressGuard } from "./egress/guard.js";
 import type { SessionResolver } from "./auth/rbac.js";
 import { registerAuditTrail } from "./observability/audit.js";
 import { registerErrorHandler } from "./observability/errors.js";
@@ -61,6 +62,10 @@ export interface AppDeps {
   // SCHRODUMP_TZ: the zone every cron is read in. GET /me tells the UI; the policy routes validate
   // and compute nextRunAt in it.
   timeZone: string;
+  // Where this server may open a connection to an address an operator typed. One guard for the four
+  // fields that carry one — a target's host, a destination's endpoint, a webhook url, an SMTP host.
+  // See egress/guard.ts.
+  egress: EgressGuard;
 }
 
 export function buildApp(deps: AppDeps) {
@@ -117,7 +122,8 @@ export function buildApp(deps: AppDeps) {
       resolver: deps.resolver,
       kek: deps.kek,
       store: deps.targetStore,
-      probe: testTargetConnection,
+      probe: (target) => testTargetConnection(target, deps.egress),
+      egress: deps.egress,
     })(instance);
     return Promise.resolve();
   });
@@ -127,6 +133,7 @@ export function buildApp(deps: AppDeps) {
       kek: deps.kek,
       store: deps.destinationStore,
       canary: deps.destinationCanary,
+      egress: deps.egress,
     })(instance);
     return Promise.resolve();
   });
@@ -144,6 +151,7 @@ export function buildApp(deps: AppDeps) {
       kek: deps.kek,
       store: deps.notificationChannelStore,
       testDelivery: deps.notificationTestDelivery,
+      egress: deps.egress,
     })(instance);
     return Promise.resolve();
   });

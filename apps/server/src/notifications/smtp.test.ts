@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { deliverEmail, type SmtpTarget } from "./smtp.js";
+import { allowAnyEgress, refuseAnyEgress, REFUSAL } from "../egress/guard.fixture.js";
 import type { Notification } from "./evaluate.js";
 
 const TARGET: SmtpTarget = {
@@ -29,6 +30,7 @@ function fakeMailer() {
     created,
     deps: {
       ca: null as string | null,
+      egress: allowAnyEgress,
       createTransport: (opts: Record<string, unknown>) => {
         created.push(opts);
         return {
@@ -78,6 +80,7 @@ describe("deliverEmail", () => {
   it("propagates a send failure so the caller can record the channel as failing", async () => {
     const deps = {
       ca: null,
+      egress: allowAnyEgress,
       createTransport: () => ({
         sendMail: async () => {
           throw new Error("connection refused");
@@ -147,5 +150,25 @@ describe("a job event by email", () => {
     });
     expect(String(m.sent[0]?.subject)).toMatch(/BACKUP.*RUNNING/);
     expect(String(m.sent[0]?.subject)).not.toMatch(/quiet/i);
+  });
+});
+
+describe("the egress guard stands between the channel and the relay", () => {
+  it("refuses a denied host before a transport is even built", async () => {
+    // nodemailer opens the socket on the first sendMail, so the guard has to run before
+    // createTransport — checking afterwards would be checking an address already dialled.
+    const created: Record<string, unknown>[] = [];
+    const deps = {
+      ca: null,
+      egress: refuseAnyEgress,
+      createTransport: (opts: Record<string, unknown>) => {
+        created.push(opts);
+        return { sendMail: () => Promise.resolve({}) };
+      },
+    };
+    await expect(deliverEmail(deps, { ...TARGET, host: "db", port: 5432 }, FAILED)).rejects.toThrow(
+      REFUSAL,
+    );
+    expect(created).toHaveLength(0);
   });
 });

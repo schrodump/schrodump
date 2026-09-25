@@ -9,8 +9,9 @@ import { authenticate, contextOf, requireRole, type SessionResolver } from "../a
 import { encryptCredential, type EncryptedCredential } from "../crypto/envelope.js";
 import { definedOnly } from "../data/patch.js";
 import { scopedPrisma } from "../data/scope.js";
+import { EgressRefusedError, type EgressGuard } from "../egress/guard.js";
 import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
-import { badRequest, type BadRequestBody } from "./errors.js";
+import { badRequest, refusedField, type BadRequestBody } from "./errors.js";
 
 const EngineSchema = z.enum(["postgres", "mysql", "mariadb", "mongodb"]);
 const ScopeSchema = z.object({
@@ -273,7 +274,13 @@ export interface TargetRoutesDeps {
   // Opens a real connection with the given credentials and reports what is there. Injected so the
   // route is testable without a database, exactly as the store is.
   probe(target: ProbeTarget): Promise<TestConnectionResult>;
+  // Where this server may open a connection. `host` is the field an operator types, and the probe
+  // reports back whether something answered on it — so it is refused at the border as well as at
+  // the socket. See egress/guard.ts.
+  egress: EgressGuard;
 }
+
+
 
 export function targetRoutes(deps: TargetRoutesDeps) {
   return (app: FastifyInstance): void => {
@@ -285,6 +292,13 @@ export function targetRoutes(deps: TargetRoutesDeps) {
         if (!parsed.success) return badRequest(reply, "invalid target", parsed.error);
         const problem = scopeProblem(parsed.data.engine, parsed.data.scope);
         if (problem !== null) return reply.status(400).send({ error: problem });
+        // Refused here, where the operator is looking at the form, rather than only at the probe:
+        // a target nothing may connect to is a row that would never work, and storing it would put
+        // the refusal on every backup instead of on the request that asked for it.
+        const refusal = await deps.egress.check(parsed.data.host, parsed.data.port);
+        if (refusal !== null) {
+          return refusedField(reply, "invalid target", "host", refusal);
+        }
         const created = await deps.store(contextOf(request).organizationId).create({
           name: parsed.data.name,
           engine: parsed.data.engine,
@@ -311,8 +325,17 @@ export function targetRoutes(deps: TargetRoutesDeps) {
       async (request, reply) => {
         const parsed = DiscoverSchema.safeParse(request.body);
         if (!parsed.success) return badRequest(reply, "invalid connection", parsed.error);
-        const result = await deps.probe({ ...parsed.data, databases: [] });
-        return reply.send(result);
+        try {
+          return reply.send(await deps.probe({ ...parsed.data, databases: [] }));
+        } catch (err) {
+          // The probe refuses the address before it opens anything; that is a rejected request,
+          // not a failed probe, and answering it as a ProbeFailureCode would tell the operator the
+          // host is down when it is this server that declined.
+          if (err instanceof EgressRefusedError) {
+            return refusedField(reply, "invalid connection", err.field, err.message);
+          }
+          throw err;
+        }
       },
     );
 
@@ -357,11 +380,22 @@ export function targetRoutes(deps: TargetRoutesDeps) {
         // Two rules need the row: the engine is not in a patch — it cannot be changed — so the scope
         // rule reads it off the row, and a CA sent without `tls` is judged against the row's own
         // `tls`. One extra query, only when one of them applies.
+        // A patch that moves the address is checked against the pair the row will END UP with: a
+        // patch of `port` alone still has to be judged against the stored host, and the reverse.
+        const movesAddress = rest.host !== undefined || rest.port !== undefined;
         const needsRow =
-          rest.scope !== undefined || (typeof rest.tlsCaCert === "string" && rest.tls === undefined);
+          movesAddress ||
+          rest.scope !== undefined ||
+          (typeof rest.tlsCaCert === "string" && rest.tls === undefined);
         if (needsRow) {
           const current = await store.get(params.data.id);
           if (current === null) return reply.status(404).send({ error: "not found" });
+          if (movesAddress) {
+            const refusal = await deps.egress.check(rest.host ?? current.host, rest.port ?? current.port);
+            if (refusal !== null) {
+              return refusedField(reply, "invalid target update", "host", refusal);
+            }
+          }
           if (rest.scope !== undefined) {
             const problem = scopeProblem(current.engine as EngineName, rest.scope);
             if (problem !== null) return reply.status(400).send({ error: problem });

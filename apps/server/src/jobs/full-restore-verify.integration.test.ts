@@ -27,6 +27,7 @@ import { generateAgeKeyPair } from "../crypto/artifact.js";
 import { encryptCredential } from "../crypto/envelope.js";
 import type { Env } from "../env.js";
 import { createJobExecutor } from "./worker-wiring.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 import type { ClaimedJob } from "./worker.js";
 
 const s3Endpoint = process.env.SCHRODUMP_TEST_S3_ENDPOINT;
@@ -252,6 +253,8 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
       SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
       SCHRODUMP_SELF_BACKUP_INTERVAL_MS: 86400000,
       SCHRODUMP_SELF_BACKUP_NETWORK: "schrodump_internal",
+      SCHRODUMP_EGRESS_DENY: [],
+      SCHRODUMP_EGRESS_ALLOW: [],
     };
   }, 300_000);
 
@@ -265,7 +268,7 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
   // Runs the REAL backup pipeline (createJobExecutor.runBackup) against the throwaway origin,
   // producing a genuine gzip+age-encrypted postgres artifact in MinIO. Returns its id.
   async function seedArtifact(): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, egress: allowAnyEgress, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,
@@ -297,7 +300,7 @@ describe.skipIf(!enabled)("FULL_RESTORE verify (integration smoke)", () => {
   // Runs the REAL verify pipeline (createJobExecutor.runVerify) against a seeded artifact. Returns
   // the VERIFY job's id so the caller can assert its terminal state/reason.
   async function verifyArtifact(artifactId: string): Promise<string> {
-    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, env, log: { warn: () => undefined } });
+    const executor = createJobExecutor({ prisma, kek, audit: { record: () => undefined }, egress: allowAnyEgress, env, log: { warn: () => undefined } });
     const job = await prisma.backupJob.create({
       data: {
         organizationId: orgId,

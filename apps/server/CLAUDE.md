@@ -35,7 +35,8 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
     scheduler cannot read is measured at the one-minute cadence floor by the notification pass, so
     POLICY_QUIET says it has stopped producing backups instead of the pass throwing.
 - `crypto/` — the three crypto domains (below) plus key provisioning. `probe/` — real connection
-  testing.
+  testing. `egress/` — the one guard every outbound connection to an operator-supplied address
+  passes through (below).
 - `auth/` — better-auth (`auth.ts`) + RBAC (`rbac.ts`). `data/scope.ts` — `scopedPrisma`;
   `data/patch.ts` — the shared `PATCH` semantics.
 - `notifications/` — a pure evaluator, webhook and SMTP delivery, and the job-event outbox drain (below).
@@ -168,6 +169,67 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   probe". It exists so the form can offer the scope as a choice over what the server actually
   holds instead of a typed name.
 
+## Egress: one guard for every address an operator types (`egress/guard.ts`)
+
+- **Four fields name an address this process then dials** — a webhook channel's `url`, a
+  destination's S3 `endpoint`, an SMTP channel's `smtpHost`, a target's `host` — and every one of
+  them reports back whether something answered: the webhook's status through `lastFailure`, the
+  canary's `failedOperation`, the probe's `ProbeFailureCode` + `driverCode`. That is a port scanner
+  with a credential form in front of it, and the server sits on `internal` beside `db:5432` and
+  `docker-proxy:2375`. An **operator** — a role deliberately denied the host and the metadata
+  database — could point a channel at the proxy, press "send a test" and read the status; the
+  webhook path is a POST and the proxy's CONTAINERS/IMAGES/NETWORKS + POST accepts Docker's
+  body-less prune endpoints, so it is a DoS primitive too. (It cannot forge a container create: the
+  body is the fixed notification JSON.)
+- **The default is narrow on purpose, and the narrowness IS the decision.** Refused: loopback,
+  link-local (`169.254.169.254`, the metadata service), the unspecified address, and this
+  deployment's own services — the compose aliases plus whatever `DATABASE_URL`, `DOCKER_HOST` and
+  `SCHRODUMP_URL` name, by name AND by the address they resolve to, plus every address this process
+  is bound to (which is what makes "the API's own port" hold over the bridge, not only over
+  loopback). **RFC-1918 and ULA are ALLOWED.** A database on `10.0.0.5` and a MinIO on
+  `192.168.1.10` are the normal case for a self-hosted backup tool; a default that blocked them
+  would break more deployments than it protected and be switched off by the first operator it
+  inconvenienced. `SCHRODUMP_EGRESS_DENY` adds CIDRs; `SCHRODUMP_EGRESS_ALLOW` overrides every
+  refusal including the built-ins, for the one case the self-service rule gets wrong on purpose (a
+  metadata postgres that also holds a backed-up database). Both are validated in `env.ts`, so a
+  typo is a boot failure naming the variable rather than a rule that silently does not apply.
+- **It judges the RESOLVED address, not the name.** `internal.example.com` with an A record of
+  `127.0.0.1` is the oldest way past a name-based block. Addresses are compared as BYTES, so
+  `::ffff:127.0.0.1` and `::ffff:7f00:1` are the same loopback as `127.0.0.1` — text matching
+  catches one of the three. A name that does not resolve is **allowed**: there is no address to
+  pivot to, and refusing would turn a typo into a policy complaint instead of `UNREACHABLE`.
+- **Required, never optional, at every seam** — `WebhookDeps`, `SmtpDeps`, `testTargetConnection`'s
+  second argument, `driverForDestination`'s `access`. Same shape as `readCredential`'s mandatory
+  context: a call site that can be written without one is a call site the tenth author writes
+  without one. `driverForDestination` is where the S3 endpoint is checked because every S3 use in
+  the product — canary, backup upload, verify download, retention delete, catalog rebuild — goes
+  through it, and it checks **before** `readCredential`, so an address we will not dial never
+  unwraps a secret or writes an art. 37 access row.
+- **The probe THROWS `EgressRefusedError`; it does not return a seventh `ProbeFailureCode`.** The
+  six codes describe what a database said. "This server will not dial that address" is not one of
+  them, and folding it into `UNREACHABLE` would tell the operator the host is down when it is the
+  policy that declined. `/targets/discover` and `/targets/:id/test-connection` catch it and answer
+  400 naming `host`; `test-connection` records **no** probe, on the same reasoning as INCONCLUSIVE
+  — nothing looked, and overwriting `lastProbeFailure` would replace the last real answer about the
+  database with one about our own configuration.
+- **Webhook redirects are followed by hand and re-checked on every hop.** A stored URL on a host the
+  operator owns, whose 302 points at `docker-proxy:2375`, walks straight past a check made before
+  the request — and `redirect: "follow"` hands the whole chain to undici, where there is no seam to
+  check anything. 301/302/303 become GET without a body, 307/308 keep the signed POST, and one
+  15 s timeout covers the chain rather than one per hop.
+- **`checkUrl` also refuses a non-http(s) scheme.** `z.url()` accepts anything `new URL()` does, so
+  without it a channel could be stored as `file:///etc/passwd` and the refusal would arrive at
+  delivery as a fetch error nobody can read.
+- **What is NOT covered: DNS rebinding.** A name that resolves to an allowed address for the check
+  and a refused one for the socket gets through. Pinning the connection to the checked address is
+  not something the database drivers or the S3 SDK offer. Written down in `docs/security.md` rather
+  than pretended away.
+- **`egress/guard.fixture.ts` is test-only** (`allowAnyEgress`, `refuseAnyEgress`,
+  `defaultPolicyGuard`) and nothing in the running server imports it. `defaultPolicyGuard` builds
+  the REAL guard with the shipped defaults over a stub resolver — the "a private address still
+  works" cases are asserted against it, because a permissive stub would prove nothing about the
+  half of this feature most likely to break a deployment.
+
 ## Target TLS: three modes, one reading (`DatabaseTarget.tlsCaCert`)
 
 - **`tls` was a boolean the probe and the tools read differently.** The probe verified strictly
@@ -218,8 +280,9 @@ the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_
 `SCHRODUMP_MAX_CONCURRENT_STAGED`, `SCHRODUMP_EXECUTOR_NETWORK`, `WORKER_POLL_MS`,
 `SCHRODUMP_SCHEDULER_TICK_MS`, `SCHRODUMP_SHUTDOWN_GRACE_MS`,
 `SCHRODUMP_STAGED_THRESHOLD_BYTES`, `SCHRODUMP_NOTIFY_MIN_GAP_MS`, `SCHRODUMP_TRUSTED_PROXIES`,
-`SCHRODUMP_TZ`, and the self-backup trio (`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`,
-`_NETWORK`). An absent scratch path ⇒ STREAM-only (no staged/parallel).
+`SCHRODUMP_TZ`, `SCHRODUMP_EGRESS_DENY`/`_ALLOW`, and the self-backup trio
+(`SCHRODUMP_SELF_BACKUP_DESTINATION_ID`, `_INTERVAL_MS`, `_NETWORK`). An absent scratch path ⇒
+STREAM-only (no staged/parallel).
 
 > **`SCHRODUMP_TZ` is the one clock every cron is read on (default `UTC`), and it is per
 > instance, not per policy or per viewer.** Validated with Intl — the zone database cron-parser
@@ -251,8 +314,18 @@ the worker/executor configuration: `SCHRODUMP_SCRATCH_PATH`, `SCHRODUMP_SCRATCH_
 > trusted and the server warns at boot — because the alternative, trusting a forwarded header by
 > default, buckets the limit on a value the attacker sets.
 
+> **`SCHRODUMP_EGRESS_DENY` / `SCHRODUMP_EGRESS_ALLOW` are comma-separated CIDR lists, empty by
+> default.** They move a line that is already drawn: see "Egress" above for what is refused without
+> them and why RFC-1918 is not. Validated here — an entry that is not a CIDR (or a bare address)
+> stops the boot naming the variable and quoting the entry, on the same reasoning as
+> `SCHRODUMP_TZ`: a typo in a deny list is a rule that silently does not apply, and the moment
+> anybody notices is the incident it was written for. Empty is absent, because compose passes them
+> through as `""`.
+
 > **Note:** `DOCKER_HOST` does not go through `env.ts` — the runner (dockerode) reads it straight
-> from the environment.
+> from the environment. The egress guard does read it (`egress/wiring.ts`, passed in rather than
+> reached for), because a `tcp://` value names the socket proxy and that is precisely the host this
+> server must never be talked into dialling.
 
 ## Prisma
 

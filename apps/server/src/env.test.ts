@@ -96,3 +96,44 @@ describe("SCHRODUMP_ADMIN_PASSWORD floor", () => {
     expect(loadEnv(base).SCHRODUMP_ADMIN_PASSWORD).toBeUndefined();
   });
 });
+
+describe("SCHRODUMP_EGRESS_DENY / _ALLOW", () => {
+  const base = {
+    DATABASE_URL: "postgresql://x",
+    SCHRODUMP_KEK: "kek",
+  };
+
+  it("defaults to empty, which is the narrow-by-design policy in egress/guard.ts", () => {
+    const env = loadEnv(base);
+    expect(env.SCHRODUMP_EGRESS_DENY).toEqual([]);
+    expect(env.SCHRODUMP_EGRESS_ALLOW).toEqual([]);
+  });
+
+  it("splits a comma-separated list and trims it", () => {
+    const env = loadEnv({
+      ...base,
+      SCHRODUMP_EGRESS_DENY: "10.0.0.0/8, 172.16.0.0/12 ,192.168.0.0/16,fc00::/7",
+    });
+    expect(env.SCHRODUMP_EGRESS_DENY).toEqual([
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "fc00::/7",
+    ]);
+  });
+
+  it("treats empty as absent, because compose writes \"\" for an unset variable", () => {
+    expect(loadEnv({ ...base, SCHRODUMP_EGRESS_DENY: "", SCHRODUMP_EGRESS_ALLOW: "" }).SCHRODUMP_EGRESS_DENY).toEqual([]);
+  });
+
+  it("stops the boot naming the variable and the entry when one is not a CIDR", () => {
+    // A typo in a deny list is a rule that silently does not apply, and the only moment anybody
+    // would notice is the incident it was written for. Same reasoning as SCHRODUMP_TZ.
+    expect(() => loadEnv({ ...base, SCHRODUMP_EGRESS_DENY: "10.0.0.0/8,not-a-cidr" })).toThrow(
+      /SCHRODUMP_EGRESS_DENY/,
+    );
+    expect(() => loadEnv({ ...base, SCHRODUMP_EGRESS_ALLOW: "10.0.0.0/33" })).toThrow(
+      /SCHRODUMP_EGRESS_ALLOW/,
+    );
+  });
+});

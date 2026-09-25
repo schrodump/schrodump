@@ -5,7 +5,19 @@ import { randomBytes } from "node:crypto";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
-import { destinationRoutes, type DestinationRecord, type DestinationStore } from "./destinations.js";
+import {
+  destinationRoutes,
+  type CreateDestinationData,
+  type DestinationRecord,
+  type DestinationStore,
+} from "./destinations.js";
+import {
+  allowAnyEgress,
+  defaultPolicyGuard,
+  refuseAnyEgress,
+  REFUSAL,
+} from "../egress/guard.fixture.js";
+import type { EgressGuard } from "../egress/guard.js";
 
 const RECORD: DestinationRecord = {
   id: "d1",
@@ -35,6 +47,7 @@ async function appWith(
   role: Role | null,
   over: Partial<DestinationStore> = {},
   canaryResult: { ok: boolean; failedOperation: string | null } = { ok: true, failedOperation: null },
+  egress: EgressGuard = allowAnyEgress,
 ) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
@@ -44,6 +57,7 @@ async function appWith(
       kek: randomBytes(32),
       store: () => ({ ...STORE, ...over }),
       canary: () => Promise.resolve(canaryResult),
+      egress,
     })(instance);
     return Promise.resolve();
   });
@@ -252,5 +266,63 @@ describe("destinations — the canary outcome is recorded, not only returned", (
     const res = await app.inject({ method: "POST", url: "/destinations/d1/canary" });
     expect(res.json()).toEqual({ ok: false, failedOperation: "delete" });
     await app.close();
+  });
+});
+
+describe("a destination names an endpoint this server will actually dial", () => {
+  const VALID = {
+    name: "minio",
+    endpoint: "http://docker-proxy:2375",
+    region: "us-east-1",
+    bucket: "backups",
+    prefix: "s",
+    accessKeyId: "minio",
+    secretAccessKey: "minio123",
+    forcePathStyle: true,
+  };
+
+  it("refuses a denied endpoint on create with a 400 that names the field", async () => {
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({ method: "POST", url: "/destinations", payload: VALID });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "invalid destination",
+      field: "endpoint",
+      detail: REFUSAL,
+    });
+  });
+
+  it("refuses a denied endpoint on PATCH too", async () => {
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/destinations/d1",
+      payload: { endpoint: "http://docker-proxy:2375" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid destination update", field: "endpoint" });
+  });
+
+  it("accepts a MinIO on a private address under the DEFAULT policy", async () => {
+    // The shape `scripts/smoke-compose.sh` creates and the shape most self-hosted deployments have.
+    const created: CreateDestinationData[] = [];
+    const app = await appWith(
+      "operator",
+      {
+        create: (data) => {
+          created.push(data);
+          return Promise.resolve(RECORD);
+        },
+      },
+      undefined,
+      defaultPolicyGuard({ "smoke-minio": ["172.20.0.8"] }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/destinations",
+      payload: { ...VALID, endpoint: "http://smoke-minio:9000" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(created[0]?.endpoint).toBe("http://smoke-minio:9000");
   });
 });

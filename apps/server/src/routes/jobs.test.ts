@@ -4,6 +4,8 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
+import { REFUSAL } from "../egress/guard.fixture.js";
+import { EgressRefusedError } from "../egress/guard.js";
 import { jobsRoutes, LIST_PAGE_SIZE, type JobsService } from "./jobs.js";
 
 const service: JobsService = {
@@ -224,6 +226,28 @@ describe("test-connection — the probe outcome is recorded", () => {
       failure: null,
       driverCode: null,
     });
+    await app.close();
+  });
+});
+
+describe("test-connection on a target the egress policy refuses", () => {
+  it("answers 400 naming the field, and records nothing", async () => {
+    // A stored row can reach this state after an upgrade, or after SCHRODUMP_EGRESS_DENY was
+    // tightened under it. Nothing probed, so nothing is recorded — the same distinction a verify
+    // draws with INCONCLUSIVE. Overwriting lastProbeFailure here would replace the last real answer
+    // about the database with one about our own configuration.
+    const recorded: unknown[] = [];
+    const app = await appWith("operator", {
+      testConnection: () => Promise.reject(new EgressRefusedError("host", REFUSAL)),
+      recordProbe: (_organizationId, _targetId, result) => {
+        recorded.push(result);
+        return Promise.resolve();
+      },
+    });
+    const res = await app.inject({ method: "POST", url: "/targets/t1/test-connection" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid target", field: "host", detail: REFUSAL });
+    expect(recorded).toEqual([]);
     await app.close();
   });
 });

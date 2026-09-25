@@ -24,6 +24,8 @@ function baseEnv(over: Partial<Env> = {}): Env {
     SCHRODUMP_TZ: "UTC",
     SCHRODUMP_NOTIFY_MIN_GAP_MS: 900000,
     SCHRODUMP_SHUTDOWN_GRACE_MS: 8000,
+    SCHRODUMP_EGRESS_DENY: [],
+    SCHRODUMP_EGRESS_ALLOW: [],
     ...over,
   };
 }

@@ -5,7 +5,8 @@ import type { JobKind, JobState } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate, contextOf, requireRole, type SessionResolver } from "../auth/rbac.js";
-import { badRequest } from "./errors.js";
+import { EgressRefusedError } from "../egress/guard.js";
+import { badRequest, refusedField } from "./errors.js";
 
 // The API shape of an artifact. Mirrors the DB row but with BigInt sizes narrowed to number, and
 // without internal columns (organizationId, updatedAt). Fastify cannot serialize BigInt, so the
@@ -281,7 +282,20 @@ export function jobsRoutes(deps: JobsRoutesDeps) {
         const params = IdParams.safeParse(request.params);
         if (!params.success) return badRequest(reply, "invalid id", params.error);
         const organizationId = contextOf(request).organizationId;
-        const result = await deps.service.testConnection(organizationId, params.data.id);
+        let result;
+        try {
+          result = await deps.service.testConnection(organizationId, params.data.id);
+        } catch (err) {
+          // The egress guard refused the stored host before anything was dialled. Nothing probed,
+          // so nothing is recorded — the same distinction a verify draws with INCONCLUSIVE: "we did
+          // not look" is not "we looked and it is bad", and overwriting lastProbeFailure here would
+          // erase the last real answer with one about our own configuration. A target can reach
+          // this state after an upgrade or after SCHRODUMP_EGRESS_DENY was tightened under it.
+          if (err instanceof EgressRefusedError) {
+            return refusedField(reply, "invalid target", err.field, err.message);
+          }
+          throw err;
+        }
         // Recorded on a refusal as well: "probed and refused" and "never probed" are different
         // answers, and the setup checklist only stops asking for one of them.
         await deps.service.recordProbe(organizationId, params.data.id, result);

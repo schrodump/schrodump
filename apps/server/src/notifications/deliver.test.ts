@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { encryptCredential } from "../crypto/envelope.js";
 import { deliverToChannel, TEST_NOTIFICATION, type StoredChannel } from "./deliver.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 
 const KEK = Buffer.alloc(32, 7);
 const SIGNING_KEY = "example-example-example";
@@ -19,8 +20,9 @@ const SIGNING_KEY = "example-example-example";
 const DEPS = {
   kek: KEK,
   audit: { record: () => undefined },
+  egress: allowAnyEgress,
   fetch: vi.fn(),
-  smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
+  smtp: { ca: null, egress: allowAnyEgress, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
 };
 
 const WEBHOOK_CHANNEL: StoredChannel = {
@@ -64,7 +66,7 @@ describe("deliverToChannel — the one path to the wire", () => {
   it("sends the email, and never puts the SMTP password in the message", async () => {
     const sendMail = vi.fn().mockResolvedValue({});
     await deliverToChannel(
-      { ...DEPS, smtp: { ca: null, createTransport: () => ({ sendMail }) } },
+      { ...DEPS, smtp: { ca: null, egress: allowAnyEgress, createTransport: () => ({ sendMail }) } },
       SMTP_CHANNEL,
       TEST_NOTIFICATION,
     );
@@ -95,7 +97,7 @@ describe("a test delivery is unmistakably a test", () => {
   it("says so in the subject line an operator actually reads", async () => {
     const sendMail = vi.fn().mockResolvedValue({});
     await deliverToChannel(
-      { ...DEPS, smtp: { ca: null, createTransport: () => ({ sendMail }) } },
+      { ...DEPS, smtp: { ca: null, egress: allowAnyEgress, createTransport: () => ({ sendMail }) } },
       SMTP_CHANNEL,
       TEST_NOTIFICATION,
     );

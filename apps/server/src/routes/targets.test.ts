@@ -3,9 +3,16 @@
 
 import { randomBytes } from "node:crypto";
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthContext, Role } from "../auth/rbac.js";
 import type { ProbeTarget, TestConnectionResult } from "../probe/test-connection.js";
+import {
+  allowAnyEgress,
+  defaultPolicyGuard,
+  refuseAnyEgress,
+  REFUSAL,
+} from "../egress/guard.fixture.js";
+import { EgressRefusedError, type EgressGuard } from "../egress/guard.js";
 import {
   parseTlsCaCert,
   scopeProblem,
@@ -84,6 +91,7 @@ async function appWith(
   role: Role | null,
   over: Partial<TargetStore> = {},
   probe: (target: ProbeTarget) => Promise<TestConnectionResult> = () => Promise.resolve(DISCOVERED),
+  egress: EgressGuard = allowAnyEgress,
 ) {
   const app = Fastify();
   const ctx: AuthContext | null = role === null ? null : { userId: "u", organizationId: "o", role , mustChangePassword: false };
@@ -93,6 +101,7 @@ async function appWith(
       kek: randomBytes(32),
       store: () => ({ ...STORE, ...over }),
       probe,
+      egress,
     })(instance);
     return Promise.resolve();
   });
@@ -622,5 +631,83 @@ describe("targets — the CA certificate", () => {
     expect(seen?.tlsCaCert).toBe(CA_PEM);
     expect(seen?.tls).toBe(true);
     await app.close();
+  });
+});
+
+describe("a target names an address this server will actually dial", () => {
+  const VALID = {
+    name: "shop",
+    engine: "postgres",
+    host: "db",
+    port: 5432,
+    username: "backup",
+    password: "pw",
+    tls: false,
+    scope: { databases: ["shop"], schemas: [], collections: [] },
+  };
+
+  it("refuses a denied host on create with a 400 that names the field", async () => {
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({ method: "POST", url: "/targets", payload: VALID });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid target", field: "host", detail: REFUSAL });
+  });
+
+  it("refuses a PATCH that moves the address, judged on the pair the row ends up with", async () => {
+    // A patch of `port` alone still moves the address. Judging only the fields present would let
+    // `{"port": 2375}` past on a row whose host is already the socket proxy's.
+    const app = await appWith("operator", {}, undefined, refuseAnyEgress);
+    const res = await app.inject({ method: "PATCH", url: "/targets/t1", payload: { port: 2375 } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid target update", field: "host" });
+  });
+
+  it("refuses a denied host on /targets/discover, as a rejected request and not a probe failure", async () => {
+    // A ProbeFailureCode would say the host is down. It is not: this server declined to look.
+    const probe = vi.fn(() => Promise.reject(new EgressRefusedError("host", REFUSAL)));
+    const app = await appWith("operator", {}, probe as unknown as (t: ProbeTarget) => Promise<TestConnectionResult>);
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets/discover",
+      payload: { engine: "postgres", host: "docker-proxy", port: 2375, username: "u", password: "p" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid connection", field: "host", detail: REFUSAL });
+  });
+
+  it("creates a target on a private address under the DEFAULT policy, because that is the normal case", async () => {
+    // The guard the shipped deployment builds, with nothing configured. A database on 10.0.0.5 is
+    // what this product is for; a default that refused it would be a regression dressed as a fix.
+    const created: CreateTargetData[] = [];
+    const app = await appWith(
+      "operator",
+      {
+        create: (data) => {
+          created.push(data);
+          return Promise.resolve(RECORD);
+        },
+      },
+      undefined,
+      defaultPolicyGuard(),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets",
+      payload: { ...VALID, host: "10.0.0.5" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(created[0]?.host).toBe("10.0.0.5");
+  });
+
+  it("refuses loopback under that same default policy", async () => {
+    const app = await appWith("operator", {}, undefined, defaultPolicyGuard());
+    const res = await app.inject({
+      method: "POST",
+      url: "/targets",
+      payload: { ...VALID, host: "127.0.0.1" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ field: "host" });
+    expect(String(res.json().detail)).toMatch(/loopback/);
   });
 });

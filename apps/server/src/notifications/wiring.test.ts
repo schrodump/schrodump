@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { encryptCredential } from "../crypto/envelope.js";
 import { runNotifications } from "./wiring.js";
+import { allowAnyEgress } from "../egress/guard.fixture.js";
 
 const KEK = Buffer.alloc(32, 3);
 const NOW = new Date("2026-09-10T12:00:00.000Z");
@@ -65,9 +66,10 @@ function depsWith(prisma: ReturnType<typeof fakePrisma>, fetchImpl: typeof fetch
     prisma: prisma.client as never,
     kek: KEK,
     audit: { record: () => undefined },
+    egress: allowAnyEgress,
     now: () => NOW,
     fetch: fetchImpl,
-    smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
+    smtp: { ca: null, egress: allowAnyEgress, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
     log: { info: () => undefined, error: () => undefined },
     minEvaluationGapMs: 900_000,
     timeZone: "UTC",
@@ -144,9 +146,10 @@ describe("VERIFICATION_BEHIND — the anchor has to be allowed to age", () => {
         prisma: prisma as never,
         kek: KEK,
         audit: { record: () => undefined },
+        egress: allowAnyEgress,
         now: () => new Date(clock),
         fetch: fetchMock,
-        smtp: { ca: null, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
+        smtp: { ca: null, egress: allowAnyEgress, createTransport: () => ({ sendMail: () => Promise.resolve({}) }) },
         log: { info: () => undefined, error: () => undefined },
         minEvaluationGapMs: 900_000,
         timeZone: "UTC",

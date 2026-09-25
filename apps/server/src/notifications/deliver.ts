@@ -11,6 +11,7 @@
 // every pure unit around it passed.
 
 import { readCredential, type CredentialAuditSink } from "../crypto/credential-access.js";
+import type { EgressGuard } from "../egress/guard.js";
 import type { NotificationTrigger } from "./evaluate.js";
 import { deliverEmail, type SmtpDeps } from "./smtp.js";
 import { deliverWebhook } from "./webhook.js";
@@ -71,6 +72,10 @@ export interface ChannelDeliveryDeps {
   readonly audit: CredentialAuditSink;
   readonly fetch: typeof fetch;
   readonly smtp: SmtpDeps;
+  // Where a channel may deliver. Both kinds take it: an SMTP relay and a webhook receiver are the
+  // same thing to egress/guard.ts — an address an operator typed, which this process then dials
+  // from inside the network the metadata database and the Docker socket proxy live on.
+  readonly egress: EgressGuard;
 }
 
 // NotificationChannel stores its two credentials in String columns, not Json like every other
@@ -126,7 +131,7 @@ export async function deliverToChannel(
     throw new Error("webhook channel is missing its url or signing secret");
   }
   await deliverWebhook(
-    { fetch: deps.fetch },
+    { fetch: deps.fetch, egress: deps.egress },
     {
       url,
       secret: readCredential(deps, envelopeFrom(encryptedSecret), {

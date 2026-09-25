@@ -8,6 +8,7 @@
 // appears in a message.
 
 import nodemailer from "nodemailer";
+import type { EgressGuard } from "../egress/guard.js";
 import type { DeliverableNotification } from "./deliver.js";
 
 // Long enough for a slow relay on a bad link, short enough that an operator waiting on the "send a
@@ -34,14 +35,19 @@ export interface SmtpDeps {
   // rather than per-channel: whose certificates this process trusts is a property of where it runs,
   // not of who is being emailed.
   readonly ca: string | null;
+  // `smtpHost`/`smtpPort` are an operator-supplied address like any other, and a relay that either
+  // accepts or refuses the TCP connection answers the same question a port scan asks. See
+  // egress/guard.ts.
+  readonly egress: EgressGuard;
 }
 
 // `ca` ADDS trust; it never removes any. There is deliberately no way to reach
 // `rejectUnauthorized: false` from configuration — an operator who cannot produce their CA must
 // not be one keystroke away from sending the fleet's state to whoever answers on port 587.
-export function smtpDeps(ca: string | null): SmtpDeps {
+export function smtpDeps(ca: string | null, egress: EgressGuard): SmtpDeps {
   return {
     ca,
+    egress,
     createTransport: (options) => nodemailer.createTransport(options) as unknown as SmtpTransport,
   };
 }
@@ -73,6 +79,9 @@ export async function deliverEmail(
   target: SmtpTarget,
   notification: DeliverableNotification,
 ): Promise<void> {
+  // Before the transport exists, not after: nodemailer opens the socket on the first sendMail, and
+  // a guard placed after that would be checking an address the process had already dialled.
+  await deps.egress.assert("smtpHost", target.host, target.port);
   const transport = deps.createTransport({
     host: target.host,
     port: target.port,
