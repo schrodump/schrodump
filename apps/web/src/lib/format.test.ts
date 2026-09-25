@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   dayGroupOf,
   formatBytes,
+  formatDate,
   formatDateTime,
   formatDuration,
   formatRelative,
@@ -46,19 +47,30 @@ describe("formatServerVersion", () => {
 
 describe("formatDateTime / formatTime", () => {
   it("returns empty string for an unparseable value, so the caller renders the absence", () => {
-    expect(formatDateTime("not-a-date")).toBe("");
-    expect(formatDateTime("")).toBe("");
-    expect(formatTime("nope")).toBe("");
+    expect(formatDateTime("en", "not-a-date")).toBe("");
+    expect(formatDateTime("en", "")).toBe("");
+    expect(formatTime("en", "nope")).toBe("");
   });
 
-  it("renders a real ISO timestamp in the viewer's locale/zone (non-empty, not the raw string)", () => {
+  it("renders a real ISO timestamp in the viewer's zone (non-empty, not the raw string)", () => {
     // The bug: rows sliced the ISO string (UTC), so a São Paulo operator saw a job's UTC time.
     // We assert it does NOT echo the raw ISO and is non-empty — the exact text is the viewer's
-    // locale/zone and must not be pinned here.
-    const out = formatDateTime("2026-01-02T03:04:05.000Z");
+    // ZONE and must not be pinned here.
+    const out = formatDateTime("en", "2026-01-02T03:04:05.000Z");
     expect(out.length).toBeGreaterThan(0);
     expect(out).not.toContain("T03:04:05");
-    expect(formatTime("2026-01-02T03:04:05.000Z").length).toBeGreaterThan(0);
+    expect(formatTime("en", "2026-01-02T03:04:05.000Z").length).toBeGreaterThan(0);
+  });
+
+  // The locale is the APP's, not the browser's. Switching the interface to Portuguese used to
+  // translate every label and leave every date in whatever the browser was set to.
+  it("writes the date the way the chosen locale writes it, not the way the browser does", () => {
+    const iso = "2026-01-02T03:04:05.000Z";
+    expect(formatDate("en", iso)).not.toBe(formatDate("pt-BR", iso));
+    // "Jan 2, 2026" vs "2 de jan. de 2026" — the marker is the Portuguese connective, which the
+    // English form never contains.
+    expect(formatDate("pt-BR", iso)).toContain(" de ");
+    expect(formatDate("en", iso)).not.toContain(" de ");
   });
 });
 
@@ -82,16 +94,29 @@ describe("formatRelative", () => {
   const now = new Date("2026-01-10T00:00:00.000Z");
 
   it("returns empty string for an unparseable value", () => {
-    expect(formatRelative("nope", now)).toBe("");
+    expect(formatRelative("en", "nope", now)).toBe("");
   });
 
   it("picks the unit by magnitude — the selection is the logic, the wording is the locale's", () => {
-    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+    const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
     // 3 days before `now` lands in the day division as -3; 90 minutes lands in the hour division.
-    expect(formatRelative("2026-01-07T00:00:00.000Z", now)).toBe(rtf.format(-3, "day"));
-    expect(formatRelative("2026-01-09T22:30:00.000Z", now)).toBe(rtf.format(-1, "hour"));
+    expect(formatRelative("en", "2026-01-07T00:00:00.000Z", now)).toBe(rtf.format(-3, "day"));
+    expect(formatRelative("en", "2026-01-09T22:30:00.000Z", now)).toBe(rtf.format(-1, "hour"));
     // A few seconds ago stays in the second division rather than rounding up to a minute.
-    expect(formatRelative("2026-01-09T23:59:55.000Z", now)).toBe(rtf.format(-5, "second"));
+    expect(formatRelative("en", "2026-01-09T23:59:55.000Z", now)).toBe(rtf.format(-5, "second"));
+  });
+
+  // "2 days ago" under a Portuguese interface was the visible half of the defect: the amber row
+  // said "NÃO OBSERVADO" and the age beside it stayed English.
+  it("speaks the chosen locale, and each of the three says it differently", () => {
+    const threeDays = "2026-01-07T00:00:00.000Z";
+    expect(formatRelative("en", threeDays, now)).toBe("3 days ago");
+    expect(formatRelative("pt-BR", threeDays, now)).toBe("há 3 dias");
+    expect(formatRelative("es", threeDays, now)).toBe("hace 3 días");
+    // `numeric: "auto"` is what gives each locale its word for the day before, rather than "1 day
+    // ago" in three languages.
+    expect(formatRelative("pt-BR", "2026-01-09T00:00:00.000Z", now)).toBe("ontem");
+    expect(formatRelative("es", "2026-01-09T00:00:00.000Z", now)).toBe("ayer");
   });
 });
 

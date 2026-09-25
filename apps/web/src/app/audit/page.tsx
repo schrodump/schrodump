@@ -13,7 +13,8 @@ import { useCurrentRole } from "@/hooks/use-current-role";
 import { useAuditLog } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import { dayGroupOf, formatDate, formatTime, timeZoneNote } from "@/lib/format";
+import { dayGroupOf, timeZoneNote } from "@/lib/format";
+import { useFormat, type Format } from "@/lib/use-format";
 import type { AuditEntry, AuditList } from "@/lib/types";
 
 const ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.2fr)_minmax(0,1fr)_4.5rem_6.5rem]";
@@ -22,6 +23,7 @@ const ROW_GRID = "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.1fr)_m
 // Exported so a row can be asserted directly.
 export function AuditRow({ entry }: { entry: AuditEntry }) {
   const t = useT();
+  const fmt = useFormat();
   return (
     <div className={cn("grid items-baseline gap-x-4 gap-y-1 border-b border-border px-[18px] py-2", ROW_GRID)}>
       <span className="truncate font-mono text-[12.5px] font-medium">{entry.action}</span>
@@ -33,7 +35,7 @@ export function AuditRow({ entry }: { entry: AuditEntry }) {
       <span className="truncate font-mono text-[11.5px] text-muted-foreground">
         {entry.targetType !== null ? `${entry.targetType}${entry.targetId !== null ? `:${entry.targetId.slice(0, 8)}` : ""}` : ""}
       </span>
-      <span className="hidden font-mono text-[11.5px] text-subtle-foreground tabular-nums sm:block">{formatTime(entry.createdAt)}</span>
+      <span className="hidden font-mono text-[11.5px] text-subtle-foreground tabular-nums sm:block">{fmt.time(entry.createdAt)}</span>
       <code className="hidden truncate rounded-sm border border-border px-1.5 py-0.5 font-mono text-[10.5px] text-subtle-foreground sm:block">
         {entry.correlationId}
       </code>
@@ -60,6 +62,7 @@ function groupByDay(items: AuditEntry[], now: Date): Group[] {
 // the footer can be tested against a fixture without a session or a query client around them.
 export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?: Date }) {
   const t = useT();
+  const fmt = useFormat();
   const [action, setAction] = useState("all");
   const [actor, setActor] = useState("all");
 
@@ -125,9 +128,9 @@ export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?:
             <EmptyState message={t("audit.noneInFilter")} />
           ) : (
             groups.map((group) => (
-              <section key={group.key} aria-label={groupLabel(group, t)}>
+              <section key={group.key} aria-label={groupLabel(group, t, fmt)}>
                 <GroupHeader
-                  label={groupLabel(group, t)}
+                  label={groupLabel(group, t, fmt)}
                   count={group.items.length === 1 ? t("audit.groupCount.one") : t("audit.groupCount", { count: String(group.items.length) })}
                 />
                 {group.items.map((entry) => (
@@ -152,8 +155,8 @@ export function AuditLedger({ list, now = new Date() }: { list: AuditList; now?:
   );
 }
 
-function groupLabel(group: Group, t: ReturnType<typeof useT>): string {
-  return group.label === "today" ? t("group.today") : group.label === "yesterday" ? t("group.yesterday") : formatDate(group.sample);
+function groupLabel(group: Group, t: ReturnType<typeof useT>, fmt: Format): string {
+  return group.label === "today" ? t("group.today") : group.label === "yesterday" ? t("group.yesterday") : fmt.date(group.sample);
 }
 
 export default function AuditPage() {

@@ -367,10 +367,22 @@ VERIFIED artifact, one click each, and a signed-in operator carries the cookie i
   `formatBytes`.
 - **Timestamps render in the viewer's zone, never sliced from the ISO string.** They travel as UTC
   ISO; `formatDateTime` / `formatTime` / `formatRelative` (`lib/format.ts`) render them at the
-  browser's locale and timezone. The old `at.slice(11, 16)` showed UTC, so a São Paulo operator read
-  a 02:00 job as 05:00 — the quiet mismatch that makes a person distrust the whole screen. Freshness
+  browser's **timezone**. The old `at.slice(11, 16)` showed UTC, so a São Paulo operator read a
+  02:00 job as 05:00 — the quiet mismatch that makes a person distrust the whole screen. Freshness
   ("verified 3 days ago") uses `formatRelative`; it answers the question the dashboard is really
   asking better than an absolute stamp.
+- **The LOCALE is the app's, and it is a required argument — components get it from `useFormat()`.**
+  The zone is the browser's; the language is not. `Intl` with `undefined` resolves to the BROWSER's
+  locale, which is a different setting from the one the language menu changes, so switching the
+  interface to Portuguese translated every label and left every date and every "2 days ago" in
+  whatever the browser was set to: an amber row reading `NÃO OBSERVADO · 2 days ago`. The four
+  formatters now take a `Locale` FIRST — a call site that can be written without one is the call
+  site the next author writes without one — and `lib/use-format.ts` binds them to the active locale,
+  sitting beside `useT()` in every component that renders a timestamp. A helper called below a
+  component (a group label, a cron sentence) takes `fmt: Format` the same way it already takes `t`.
+  `formatBytes`, `formatDuration` and `formatServerVersion` stay locale-independent on purpose:
+  `850.0 KB`, `1m 32s` and `7.0.15` are machine values, and a decimal comma in an artifact size
+  would be a change of meaning, not a translation.
 - **A cron is the one wall-clock time that is not the viewer's.** It names a time on the instance's
   clock (`SCHRODUMP_TZ`), so its reading says that zone out loud, and the instant it next fires
   comes from the server and renders like any other timestamp. Converting the expression to the

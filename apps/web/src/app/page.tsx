@@ -25,14 +25,8 @@ import { useArtifacts, useDestinations, useLivePollInterval } from "@/hooks/use-
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
 import { canRestore, type ArtifactState, type Role } from "@/lib/domain";
-import {
-  dayGroupOf,
-  formatBytes,
-  formatDate,
-  formatDateTime,
-  formatRelative,
-  formatServerVersion,
-} from "@/lib/format";
+import { dayGroupOf, formatBytes, formatServerVersion } from "@/lib/format";
+import { useFormat, type Format } from "@/lib/use-format";
 import type { Artifact } from "@/lib/types";
 
 // One grid for the header row and every summary row, so the columns line up without a table:
@@ -66,6 +60,7 @@ export function ArtifactRow({
   destinationName: string | null;
 }) {
   const t = useT();
+  const fmt = useFormat();
   const verify = useTriggerVerify();
   // How many times smaller the stored object is than the logical dump — a health signal at a
   // glance (a backup that "compressed" 1.0x is usually a backup of nothing). Guarded against a
@@ -104,10 +99,10 @@ export function ArtifactRow({
 
   const facts: Fact[] = [
     { label: t("artifacts.detail.destination"), value: destinationName ?? artifact.destinationId },
-    { label: t("artifacts.detail.created"), value: formatDateTime(artifact.createdAt) },
+    { label: t("artifacts.detail.created"), value: fmt.dateTime(artifact.createdAt) },
     {
       label: t("artifacts.detail.lastVerified"),
-      value: artifact.verifiedLevel !== null ? formatRelative(artifact.updatedAt) : null,
+      value: artifact.verifiedLevel !== null ? fmt.relative(artifact.updatedAt) : null,
       tone: verified ? "verified" : "plain",
     },
     { label: t("artifacts.detail.bucketKey"), value: artifact.bucketKey },
@@ -212,7 +207,7 @@ export function ArtifactRow({
           {formatBytes(artifact.sizeCompressedBytes)}
         </span>
         <span className="hidden font-mono text-xs text-subtle-foreground sm:block">
-          {formatRelative(artifact.createdAt)}
+          {fmt.relative(artifact.createdAt)}
         </span>
         <span className="flex justify-end gap-2">
           {mayVerify ? (
@@ -310,6 +305,7 @@ const STATE_FILL: Record<ArtifactState, string> = {
 
 export default function ArtifactsPage() {
   const t = useT();
+  const fmt = useFormat();
   const artifacts = useArtifacts();
   const destinations = useDestinations();
   const role = useCurrentRole();
@@ -360,7 +356,7 @@ export default function ArtifactsPage() {
                   <span>{t("artifacts.oldestUnverified")}</span>
                   <span className="rounded-sm border border-state-unobserved-border bg-state-unobserved-soft px-2 py-0.5 tracking-[0.04em] normal-case text-state-unobserved">
                     {t("artifacts.oldestValue", {
-                      age: formatRelative(data.oldestUnobserved.createdAt),
+                      age: fmt.relative(data.oldestUnobserved.createdAt),
                       target: data.oldestUnobserved.targetName ?? data.oldestUnobserved.id.slice(0, 8),
                       mode: t(`executionMode.${data.oldestUnobserved.executionMode}`),
                     })}
@@ -421,9 +417,9 @@ export default function ArtifactsPage() {
                 <ColumnHeaders columns={columns} gridClassName={ROW_GRID} />
               </div>
               {groups.map((group) => (
-                <section key={group.key} aria-label={groupLabel(group, t)}>
+                <section key={group.key} aria-label={groupLabel(group, t, fmt)}>
                   <GroupHeader
-                    label={groupLabel(group, t)}
+                    label={groupLabel(group, t, fmt)}
                     count={groupCountOf(t, group.items.length)}
                   />
                   {group.items.map((artifact) => (
@@ -448,8 +444,9 @@ export default function ArtifactsPage() {
 function groupLabel(
   group: { label: "today" | "yesterday" | null; sample: string },
   t: ReturnType<typeof useT>,
+  fmt: Format,
 ): string {
   if (group.label === "today") return t("group.today");
   if (group.label === "yesterday") return t("group.yesterday");
-  return formatDate(group.sample);
+  return fmt.date(group.sample);
 }

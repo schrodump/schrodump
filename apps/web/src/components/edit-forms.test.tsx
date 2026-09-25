@@ -311,7 +311,7 @@ describe("PolicyForm previews on the instance's clock", () => {
     await user.type(screen.getByLabelText("Schedule (cron)"), "0 2 * * *");
     const reading = screen.getByTestId("cron-reading");
     expect(reading).toHaveTextContent(new RegExp(`^every day at .+ ${ZONE} · next`));
-    expect(reading).toHaveTextContent(formatTime(NEXT));
+    expect(reading).toHaveTextContent(formatTime("en", NEXT));
   });
 
   it("names no clock time and no next run until the zone is known", async () => {
