@@ -286,6 +286,18 @@ function stripQuotes(value: string | undefined): string {
   return value !== undefined ? value.replace(/^"|"$/g, "") : "";
 }
 
+// "The object is not there" — the one storage failure that is a statement about the ARTIFACT
+// rather than about the link to the bucket. Everything else a driver can throw (a 503, a reset
+// socket, a timeout, an expired credential) says only that we could not look.
+//
+// Exported because the difference decides a verdict: a verify that cannot read the object must
+// answer INCONCLUSIVE and leave the artifact alone, while a verify that finds the object GONE has
+// learned something. `get` wraps its failures in a SchrodumpError, so the original is unwrapped
+// once before the check.
+export function isObjectMissing(err: unknown): boolean {
+  return isNotFound(err) || isNotFound((err as { cause?: unknown } | null)?.cause);
+}
+
 function isNotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const meta = (err as { $metadata?: { httpStatusCode?: number } }).$metadata;

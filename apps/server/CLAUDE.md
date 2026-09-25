@@ -104,6 +104,17 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   list, and while both were `FAILED` the only handle it had was grepping the reason string. Only
   VERIFY jobs use it; the smoke aborts on it by name, since a case block that only knew `FAILED`
   would let it wait out the clock.
+  **That law covers CHECKSUM too, and it did not.** `checksumMatches` returned a boolean and
+  streamed the object inside `runVerifyJob`'s `try`, so every failure of the DOWNLOAD — a 503 from
+  the bucket, a reset socket, an expired credential — landed in the catch and marked the artifact
+  `FAILED`: a good backup painted red because we could not look at it, with an `ARTIFACT_FAILED`
+  notification and an invitation to delete it. It is now `compareChecksum`, three-way like
+  `fullRestore`: `MATCHED`, `MISMATCHED` (the hash differs, or `isObjectMissing` — there are no
+  bytes at that key, which IS a verdict), `INCONCLUSIVE` for everything else. The outer catch is
+  `INCONCLUSIVE` as well, because every verdict path sets the artifact explicitly before it and a
+  database blip in `setJobState` after a green verdict used to flip a verified backup to red. The
+  outcome's `finalState` gained `UNCHANGED` for exactly this: an artifact a previous verify proved
+  good is still `VERIFIED`, and calling it `UNOBSERVED` would report a downgrade nobody made.
 - **A `FAILED` verify says what the restore said.** `fullRestore()` returns a `FullRestoreResult` —
   the proof plus a `cause` — because one FAILED proof covers two findings an operator acts on
   differently: a restore that completed and then counted nothing, and a restore that never

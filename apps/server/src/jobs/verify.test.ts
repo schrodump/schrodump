@@ -29,9 +29,9 @@ function makeHarness(over: Partial<VerifyPorts> = {}): Harness {
       artifactStates.push(state);
       return Promise.resolve();
     },
-    checksumMatches: () => {
-      calls.push("checksumMatches");
-      return Promise.resolve(true);
+    compareChecksum: () => {
+      calls.push("compareChecksum");
+      return Promise.resolve({ proof: "MATCHED" as const, cause: null });
     },
     fullRestore: () => {
       calls.push("fullRestore");
@@ -58,7 +58,7 @@ describe("runVerifyJob", () => {
   });
 
   it("marks FAILED and never deletes when verify fails", async () => {
-    const h = makeHarness({ checksumMatches: () => Promise.resolve(false) });
+    const h = makeHarness({ compareChecksum: () => Promise.resolve({ proof: "MISMATCHED" as const, cause: null }) });
     const outcome = await runVerifyJob(CTX, h.ports);
     expect(outcome.finalState).toBe("FAILED");
     expect(h.artifactStates).toEqual(["FAILED"]);
@@ -87,15 +87,54 @@ describe("runVerifyJob", () => {
     );
     expect(outcome.effectiveLevel).toBe("CHECKSUM");
     expect(outcome.degraded).toBe(true);
-    expect(h.calls).toContain("checksumMatches");
+    expect(h.calls).toContain("compareChecksum");
     expect(h.calls).not.toContain("fullRestore");
   });
 
-  it("marks the artifact FAILED (not deleted) when verify throws", async () => {
-    const h = makeHarness({ checksumMatches: () => Promise.reject(new Error("download failed")) });
+  // The defect: `checksumMatches` streamed the object inside the try, so a 503 from the bucket, a
+  // reset socket or an expired credential fell into the catch and marked the artifact FAILED. It
+  // condemned a backup because we could not look at it, fired ARTIFACT_FAILED, and invited the
+  // operator to delete the copy that was fine — the product's central claim, made backwards.
+  it("leaves the artifact alone when the object could not be READ, and says the check did not run", async () => {
+    const h = makeHarness({
+      compareChecksum: () =>
+        Promise.resolve({ proof: "INCONCLUSIVE" as const, cause: "s3 get failed: TimeoutError" }),
+    });
+    const outcome = await runVerifyJob(CTX, h.ports);
+    expect(outcome.finalState).toBe("UNCHANGED");
+    // Not touched at all: an artifact a previous verify proved good stays VERIFIED.
+    expect(h.artifactStates).toEqual([]);
+    expect(h.jobStates).toEqual(["RUNNING", "INCONCLUSIVE"]);
+    expect(h.jobReasons.at(-1)).toContain("TimeoutError");
+    expect(h.jobReasons.at(-1)).toContain("artifact unchanged");
+  });
+
+  // An object that is GONE is a verdict — there is no backup at that key.
+  it("condemns the artifact when the bytes are not what the manifest recorded", async () => {
+    const h = makeHarness({
+      compareChecksum: () =>
+        Promise.resolve({
+          proof: "MISMATCHED" as const,
+          cause: "the stored object is not in the bucket",
+        }),
+    });
     const outcome = await runVerifyJob(CTX, h.ports);
     expect(outcome.finalState).toBe("FAILED");
     expect(h.artifactStates).toEqual(["FAILED"]);
+    expect(h.jobReasons.at(-1)).toContain("not in the bucket");
+  });
+
+  // A port that rejects is OUR machinery, and every verdict path above has already set the
+  // artifact explicitly. This used to mark it FAILED — so a database blip in `setJobState` AFTER a
+  // green verdict flipped a verified backup to red.
+  it("does not condemn the artifact when a port throws on the way out", async () => {
+    const h = makeHarness({
+      compareChecksum: () => Promise.reject(new Error("download failed")),
+    });
+    const outcome = await runVerifyJob(CTX, h.ports);
+    expect(outcome.finalState).toBe("UNCHANGED");
+    expect(h.artifactStates).toEqual([]);
+    expect(h.jobStates).toEqual(["RUNNING", "INCONCLUSIVE"]);
   });
 
   it("marks the artifact FAILED when fullRestore proves it FAILED", async () => {
@@ -110,13 +149,15 @@ describe("runVerifyJob", () => {
   // one never got to look. The two were the same row state until the UI had to tell them apart —
   // "could not run" and "the backup is bad" read identically on a jobs list that only had FAILED,
   // and the only way to separate them was to grep the reason string.
-  it("leaves the artifact UNOBSERVED and marks the job INCONCLUSIVE when fullRestore is INCONCLUSIVE", async () => {
+  it("leaves the artifact UNCHANGED and marks the job INCONCLUSIVE when fullRestore is INCONCLUSIVE", async () => {
     const h = makeHarness({
       fullRestore: () =>
         Promise.resolve({ proof: "INCONCLUSIVE", cause: "no scratch directory configured" }),
     });
     const outcome = await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE" }, h.ports);
-    expect(outcome.finalState).toBe("UNOBSERVED");
+    // UNCHANGED, not UNOBSERVED: an artifact a previous verify proved good is still VERIFIED, and
+    // reporting the sandbox's failure as a downgrade would be a state change nobody made.
+    expect(outcome.finalState).toBe("UNCHANGED");
     expect(h.artifactStates).toEqual([]); // infra failure never touches the artifact's state
     expect(h.jobStates).toEqual(["RUNNING", "INCONCLUSIVE"]);
     // The reason still says what happened; the state is what a list can filter on.
@@ -169,7 +210,7 @@ describe("a verify that condemns an artifact says why", () => {
   });
 
   it("records why a checksum condemned it", async () => {
-    const h = makeHarness({ checksumMatches: () => Promise.resolve(false) });
+    const h = makeHarness({ compareChecksum: () => Promise.resolve({ proof: "MISMATCHED" as const, cause: null }) });
 
     const outcome = await runVerifyJob(CTX, h.ports);
 
@@ -180,7 +221,7 @@ describe("a verify that condemns an artifact says why", () => {
   it("keeps the downgrade alongside the failure, because they are different claims", async () => {
     // An artifact condemned by a CHECKSUM that only ran because FULL_RESTORE was unavailable is
     // not the same claim as one condemned by a restore. The row has to be able to say which.
-    const h = makeHarness({ checksumMatches: () => Promise.resolve(false) });
+    const h = makeHarness({ compareChecksum: () => Promise.resolve({ proof: "MISMATCHED" as const, cause: null }) });
 
     await runVerifyJob({ ...CTX, verifyLevel: "FULL_RESTORE", sealed: true }, h.ports);
 
