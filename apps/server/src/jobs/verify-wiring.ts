@@ -11,7 +11,8 @@
 import { createHash } from "node:crypto";
 import { SchrodumpError } from "@schrodump/core/errors";
 import type { StorageDriver } from "@schrodump/storage/driver";
-import type { FullRestoreResult, VerifyPorts, VerifyProof } from "./verify.js";
+import { isObjectMissing } from "@schrodump/storage/s3";
+import type { ChecksumResult, FullRestoreResult, VerifyPorts, VerifyProof } from "./verify.js";
 
 export interface VerifyWiringDeps {
   driver: StorageDriver;
@@ -49,13 +50,33 @@ export function createVerifyPorts(deps: VerifyWiringDeps): VerifyPorts {
   return {
     setJobState: deps.setJobState,
     setArtifactState: deps.setArtifactState,
-    checksumMatches: async () => {
-      const stream = await deps.driver.get(deps.bucketKey);
-      const hash = createHash("sha256");
-      for await (const chunk of stream) {
-        hash.update(chunk as Buffer);
+    compareChecksum: async (): Promise<ChecksumResult> => {
+      let digest: string;
+      try {
+        const stream = await deps.driver.get(deps.bucketKey);
+        const hash = createHash("sha256");
+        for await (const chunk of stream) {
+          hash.update(chunk as Buffer);
+        }
+        digest = hash.digest("hex");
+      } catch (err) {
+        // The object being GONE is a verdict — there is no backup at that key, and saying so is
+        // the honest answer. Every other failure is the bucket, the network or the credential, and
+        // condemning a backup because we could not fetch it is the one thing this product must
+        // never do. The driver wraps its errors, so the AWS name is one `cause` down.
+        if (isObjectMissing(err)) {
+          return { proof: "MISMATCHED", cause: "the stored object is not in the bucket" };
+        }
+        // SchrodumpError's message is already redacted ("s3 get failed: TimeoutError"); it names
+        // the operation and the AWS error class and carries no credential.
+        return {
+          proof: "INCONCLUSIVE",
+          cause: err instanceof Error ? err.message : "the stored object could not be read",
+        };
       }
-      return hash.digest("hex") === deps.manifestChecksum;
+      return digest === deps.manifestChecksum
+        ? { proof: "MATCHED", cause: null }
+        : { proof: "MISMATCHED", cause: null };
     },
     fullRestore: () => deps.runFullRestore(),
   };

@@ -14,6 +14,25 @@ export type VerifyProof = "VERIFIED" | "FAILED" | "INCONCLUSIVE";
 // the sandbox has no user for). Both condemn the artifact — the operator's next step is not the
 // same, and until `cause` existed the job reason was one fixed sentence for both, "the artifact
 // restored but produced no usable schema", written also when nothing had restored.
+// What a CHECKSUM attempt proved, in the same three-way shape as FullRestoreResult and for the
+// same reason. `checksumMatches` used to return a boolean and stream the object inside the try,
+// so ANY failure of the download — a 503 from the bucket, a reset socket, a timeout, an expired
+// credential — fell into the catch below and marked the artifact FAILED. That is the product's
+// central claim made backwards: it condemned a backup because we could not look at it, fired an
+// ARTIFACT_FAILED notification, and invited the operator to delete the copy that was fine.
+//
+// MISMATCHED and a missing object are verdicts: the bytes are not what the manifest recorded, or
+// there are no bytes. Everything else is INCONCLUSIVE, which is what "the check could not run"
+// has meant on the FULL_RESTORE path since it got its own job state.
+export type ChecksumProof = "MATCHED" | "MISMATCHED" | "INCONCLUSIVE";
+
+export interface ChecksumResult {
+  proof: ChecksumProof;
+  // Redacted words from the attempt, safe to persist as the job reason. Null when there is
+  // nothing to add beyond the proof.
+  cause: string | null;
+}
+
 export interface FullRestoreResult {
   proof: VerifyProof;
   // Built from the runner's redacted stderr (never driver prose), so it is safe to persist as the
@@ -41,14 +60,19 @@ export interface VerifyPorts {
   // The ONLY place an artifact reaches VERIFIED. The literal type forbids any other final state.
   setArtifactState(state: "VERIFIED" | "FAILED"): Promise<void>;
   // Downloads the stored object, recomputes its checksum, compares against the manifest.
-  checksumMatches(): Promise<boolean>;
+  // Three-way, like fullRestore: MATCHED/MISMATCHED are claims about the artifact, INCONCLUSIVE
+  // means we never got to compare.
+  compareChecksum(): Promise<ChecksumResult>;
   // Ephemeral container of the correct major, restore, assertions, then destroy — isolated network.
   fullRestore(): Promise<FullRestoreResult>;
 }
 
 export interface VerifyOutcome {
-  // UNOBSERVED only when verify is off (NONE); otherwise VERIFIED or FAILED.
-  finalState: "VERIFIED" | "FAILED" | "UNOBSERVED";
+  // UNOBSERVED when verify is off (NONE): nothing looked, and nothing ever will for this artifact.
+  // UNCHANGED when the check could not run: the artifact keeps whatever state it already had, which
+  // is UNOBSERVED for one nothing had looked at and VERIFIED for one a previous verify had proven.
+  // Calling the second case UNOBSERVED would report a downgrade that did not happen.
+  finalState: "VERIFIED" | "FAILED" | "UNOBSERVED" | "UNCHANGED";
   effectiveLevel: VerifyLevel;
   degraded: boolean;
 }
@@ -98,7 +122,7 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
           "verify inconclusive: the sandbox could not run — artifact unchanged",
         );
         return {
-          finalState: "UNOBSERVED",
+          finalState: "UNCHANGED",
           effectiveLevel: level,
           degraded: degradedReason !== null,
         };
@@ -119,11 +143,24 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       };
     }
 
-    const ok = await ports.checksumMatches();
+    const { proof, cause } = await ports.compareChecksum();
+    if (proof === "INCONCLUSIVE") {
+      // We could not read the object. That says nothing about the object, so the artifact is left
+      // exactly as it was — UNOBSERVED if nothing had looked, VERIFIED if something already had.
+      await ports.setJobState(
+        "INCONCLUSIVE",
+        `verify inconclusive: ${cause ?? "the stored object could not be read"} — artifact unchanged`,
+      );
+      return { finalState: "UNCHANGED", effectiveLevel: level, degraded: degradedReason !== null };
+    }
+    const ok = proof === "MATCHED";
     await ports.setArtifactState(ok ? "VERIFIED" : "FAILED");
     await ports.setJobState(
       ok ? "SUCCEEDED" : "FAILED",
-      verdict(ok, "verify failed: the stored object does not match the checksum in its manifest"),
+      verdict(
+        ok,
+        `verify failed: ${cause ?? "the stored object does not match the checksum in its manifest"}`,
+      ),
     );
     return {
       finalState: ok ? "VERIFIED" : "FAILED",
@@ -131,9 +168,15 @@ export async function runVerifyJob(ctx: VerifyContext, ports: VerifyPorts): Prom
       degraded: degradedReason !== null,
     };
   } catch (error) {
-    // A verify failure marks the artifact FAILED — it is NEVER deleted here.
-    await ports.setArtifactState("FAILED");
-    await ports.setJobState("FAILED", error instanceof Error ? error.message : "verify error");
-    return { finalState: "FAILED", effectiveLevel: level, degraded: degradedReason !== null };
+    // Reaching here means OUR machinery threw — a port rejected, a state write lost its connection
+    // — after every verdict path above has already set the artifact explicitly. It used to mark the
+    // artifact FAILED, which meant a database blip in `setJobState` AFTER a green verdict flipped a
+    // verified backup to red. An artifact is condemned by a verdict about the artifact, never by an
+    // exception on the way out.
+    await ports.setJobState(
+      "INCONCLUSIVE",
+      `verify inconclusive: ${error instanceof Error ? error.message : "verify error"} — artifact unchanged`,
+    );
+    return { finalState: "UNCHANGED", effectiveLevel: level, degraded: degradedReason !== null };
   }
 }

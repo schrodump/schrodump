@@ -29,6 +29,15 @@ Candidates publish to `:next`, and an exact version is what production should pi
   written by an earlier version are reclaimed as they age out rather than left behind. Objects
   already orphaned by a past prune have no row left to name them and are not reclaimed by this
   change (#172).
+- **A backup is no longer condemned because we could not read it.** A CHECKSUM verify streamed the
+  stored object inside the try that marks an artifact `FAILED`, so a 503 from the bucket, a reset
+  socket or an expired credential turned a good backup red — and fired an `ARTIFACT_FAILED`
+  notification inviting the operator to delete the copy that was fine. The comparison is now
+  three-way, exactly like the full-restore path: the hash differing is a verdict, an object that is
+  **gone** is a verdict, and everything else is `INCONCLUSIVE` — the job says the check could not
+  run and the artifact keeps the state it already had. The catch around the whole job answers the
+  same way, because every verdict is set explicitly before it and a database blip after a green one
+  used to flip a verified backup to red (#173).
 
 ## [0.1.0-rc.20] — 2026-09-25
 
