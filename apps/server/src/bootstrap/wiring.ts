@@ -24,20 +24,43 @@ async function createAdminUser(
   input: { email: string; password: string },
   mustChangePassword: boolean,
 ): Promise<void> {
-  const org = await prisma.organization.create({
-    data: { name: "Default", slug: "default", hidden: true },
+  // Every step is idempotent, because the three of them cannot share one transaction: Better-Auth
+  // writes the User and Account through its own adapter. A failure between them used to leave the
+  // organization behind, and the retry then died on the slug's unique constraint — a 500 on every
+  // subsequent attempt, with the setup token already spent. Now a half-finished bootstrap simply
+  // finishes on the next attempt.
+  const org = await prisma.organization.upsert({
+    where: { slug: "default" },
+    update: {},
+    create: { name: "Default", slug: "default", hidden: true },
   });
-  // Better-Auth hashes the password and creates the User + Account.
-  await auth.api.signUpEmail({
-    body: { email: input.email, password: input.password, name: "Admin" },
-  });
+  // Better-Auth hashes the password and creates the User + Account. Skipped when the address is
+  // already here, which means a previous attempt got this far; sign-up would answer "email in use"
+  // and strand the deployment. Safe only because the public sign-up endpoint is blocked
+  // (registerAuthHandler): otherwise a stranger could register the address an admin was about to
+  // claim and be handed the membership meant for its owner.
+  const existing = await prisma.user.findUnique({ where: { email: input.email } });
+  if (existing === null) {
+    await auth.api.signUpEmail({
+      body: { email: input.email, password: input.password, name: "Admin" },
+    });
+  }
   const user = await prisma.user.update({
     where: { email: input.email },
     data: { mustChangePassword },
   });
-  await prisma.membership.create({
-    data: { organizationId: org.id, userId: user.id, role: "admin" },
+  await prisma.membership.upsert({
+    where: { organizationId_userId: { organizationId: org.id, userId: user.id } },
+    update: { role: "admin" },
+    create: { organizationId: org.id, userId: user.id, role: "admin" },
   });
+}
+
+// One question, asked by the bootstrap and by /setup: does this deployment have an administrator?
+function adminExists(prisma: PrismaClient): Promise<boolean> {
+  return prisma.membership
+    .findFirst({ where: { role: "admin" }, select: { id: true } })
+    .then((row) => row !== null);
 }
 
 export interface BootstrapLog {
@@ -51,7 +74,7 @@ export function createBootstrapDeps(
   log: BootstrapLog,
 ): BootstrapDeps {
   return {
-    userCount: () => prisma.user.count(),
+    adminExists: () => adminExists(prisma),
     // The environment path: the password is in the process environment, so it owes a rotation.
     createAdmin: (input) => createAdminUser(prisma, auth, input, true),
     createSetupToken: async (input) => {
@@ -65,13 +88,19 @@ export function createBootstrapDeps(
 
 export function createSetupDeps(prisma: PrismaClient, auth: Auth): SetupDeps {
   return {
-    userExists: async () => (await prisma.user.count()) > 0,
+    adminExists: () => adminExists(prisma),
     findSetupToken: (tokenHash) => prisma.setupToken.findUnique({ where: { tokenHash } }),
     consumeAndCreateAdmin: async ({ tokenHash, email, password }) => {
-      await prisma.setupToken.update({ where: { tokenHash }, data: { consumedAt: new Date() } });
       // The setup-link path: the operator chose this password themselves, in a form. Nothing
       // about it is exposed, so there is nothing to rotate.
+      //
+      // The token is spent AFTER the admin exists. Spending it first meant a failure anywhere in
+      // creation burned the one link the deployment had, and the next boot issues a token only
+      // when there is no admin — which there still was not. Re-using a token that produced nothing
+      // is the lesser risk: it is single-use, 60 minutes old at most, and the window is one failed
+      // request wide.
       await createAdminUser(prisma, auth, { email, password }, false);
+      await prisma.setupToken.update({ where: { tokenHash }, data: { consumedAt: new Date() } });
     },
     now: () => new Date(),
   };

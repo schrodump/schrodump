@@ -146,7 +146,16 @@ docker run --rm --network "${PROJECT}_internal" \
   -e AWS_ACCESS_KEY_ID=minio -e AWS_SECRET_ACCESS_KEY=minio123 -e AWS_DEFAULT_REGION=us-east-1 \
   amazon/aws-cli:latest --endpoint-url "http://${PROJECT}-minio:9000" s3 mb s3://backups >/dev/null
 
-log "3/22  the one-time setup link"
+log "3/22  the one-time setup link, and no other way in"
+# Asked BEFORE the first admin exists, which is when a stranger claiming this deployment would be
+# worst. Better-Auth ships the endpoint; it is blocked in the forwarder, so nothing here reaches
+# the library. 404 rather than 403 — an endpoint that answers "forbidden" says it is there.
+signup="$(api -o /dev/null -w '%{http_code}' -X POST -H "$JSON" \
+  -d '{"email":"stranger@example.com","password":"'"${PASSWORD}"'","name":"Stranger"}' \
+  "${BASE}/api/auth/sign-up/email")"
+[ "$signup" = "404" ] || fail "public sign-up answered ${signup}; anyone can create an account"
+printf '   sign-up %s\n' "$signup"
+
 token="$(compose logs schrodump 2>&1 | grep -oE 'token=[A-Za-z0-9_-]+' | head -1 | cut -d= -f2)"
 [ -n "$token" ] || fail "no setup token was printed at boot"
 api -o /dev/null -w '   setup %{http_code}\n' -X POST -H "$JSON" \

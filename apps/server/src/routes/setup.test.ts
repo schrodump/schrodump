@@ -29,7 +29,7 @@ function baseDeps(over: Partial<SetupDeps> = {}): SetupDeps & Recorder {
   const rec: Recorder = { created: [] };
   return {
     ...rec,
-    userExists: () => Promise.resolve(false),
+    adminExists: () => Promise.resolve(false),
     findSetupToken: () => Promise.resolve(null),
     consumeAndCreateAdmin: (input) => {
       rec.created.push(input);
@@ -42,14 +42,14 @@ function baseDeps(over: Partial<SetupDeps> = {}): SetupDeps & Recorder {
 
 describe("/setup", () => {
   it("GET returns 404 once a user exists", async () => {
-    const app = await appWith(baseDeps({ userExists: () => Promise.resolve(true) }));
+    const app = await appWith(baseDeps({ adminExists: () => Promise.resolve(true) }));
     const res = await app.inject({ method: "GET", url: "/setup" });
     expect(res.statusCode).toBe(404);
     await app.close();
   });
 
   it("POST returns 404 once a user exists", async () => {
-    const app = await appWith(baseDeps({ userExists: () => Promise.resolve(true) }));
+    const app = await appWith(baseDeps({ adminExists: () => Promise.resolve(true) }));
     const res = await app.inject({
       method: "POST",
       url: "/setup",
