@@ -156,15 +156,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # MinIO is started here rather than declared under `services:` because it needs an explicit
-      # `server /data` command, and `services:` cannot override an image's command. The tag is
-      # pinned for the same reason the executor images are. From quay.io, not Docker Hub: on
-      # 2026-09-21 `minio/minio` stopped answering anonymous pulls ("pull access denied"), which
-      # turned every PR red at this step; MinIO still publishes the same tags on quay.io.
+      # `server` command, and `services:` cannot override an image's command.
+      #
+      # Pinned by DIGEST, and the registry has now moved twice. On 2026-09-21 `minio/minio` stopped
+      # answering anonymous pulls on Docker Hub and the repository is gone from its API entirely
+      # ("object not found"); #147 moved this to quay.io, where the same tags answered. On
+      # 2026-09-25 quay.io started returning `401 UNAUTHORIZED` for the same image — anonymously
+      # MinIO now publishes nowhere. Every branch went red at this step, twice, for a reason that
+      # had nothing to do with any of them.
+      #
+      # `cgr.dev/chainguard/minio` is the SAME upstream binary (it logs the MinIO release and
+      # AGPLv3 notice), rebuilt by Chainguard, multi-arch, and served anonymously. Its tags are only
+      # `latest`, so the digest is the version: read what it is with
+      # `docker run --rm <digest> --version`, and update it deliberately, never by moving a tag.
+      #
+      # It runs as uid 65532, so the data directory has to be somewhere that user can write —
+      # `/data` in the image is root-owned and the server exits before it listens.
+      #
+      # If this digest ever stops resolving, both fallbacks below were checked pullable on
+      # 2026-09-25 and either is a one-line swap here and in scripts/smoke-compose.sh:
+      #   docker.io/bitnamilegacy/minio@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20  (frozen 2025.7.23, archived but versioned)
+      #   ghcr.io/versity/versitygw:v1.8.0                                                                        (a different implementation — expect to re-verify the S3 suite)
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 \
+            server /tmp/data
           for _ in $(seq 1 30); do
             nc -z localhost 9000 && break
             sleep 1

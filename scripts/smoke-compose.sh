@@ -32,6 +32,14 @@ ORIGIN="http://localhost:8080"
 JSON="content-type: application/json"
 PASSWORD="smoke-password-not-a-secret"
 
+# The S3 server this smoke backs up TO. Pinned by digest, overridable so a swap is one variable
+# rather than a hunt. MinIO stopped answering anonymous pulls on Docker Hub (2026-09-21) and then
+# on quay.io (2026-09-25); this is the same upstream binary rebuilt by Chainguard, which still
+# does. The reasoning, and two fallbacks checked pullable on 2026-09-25, are in
+# .github/workflows/ci.yml next to the step that starts the same image for the integration suite —
+# keep the two in step. It runs as uid 65532, hence `server /tmp/data` and not `/data`.
+S3_IMAGE="${SMOKE_S3_IMAGE:-cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1}"
+
 log() { printf '\n== %s\n' "$1"; }
 fail() {
   printf '\nsmoke: %s\n' "$1" >&2
@@ -127,7 +135,7 @@ docker run -d --name "${PROJECT}-target" --network "${PROJECT}_targets" \
   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=apppw -e POSTGRES_DB=shop postgres:18-alpine >/dev/null
 docker run -d --name "${PROJECT}-minio" --network "${PROJECT}_internal" \
   -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data >/dev/null
+  "$S3_IMAGE" server /tmp/data >/dev/null
 for _ in $(seq 1 60); do
   docker exec "${PROJECT}-target" pg_isready -h 127.0.0.1 -U app -d shop >/dev/null 2>&1 && break
   sleep 2
