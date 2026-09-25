@@ -1,10 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 ARIERRAC DESENVOLVIMENTO DE SOFTWARE E SUPORTE LTDA
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { EngineKind } from "@/lib/domain";
 import type { CreatedMember, DiscoverResult, Member, NotificationChannel } from "@/lib/types";
+
+// Everything a mutation actually changed, invalidated together.
+//
+// A backup, a verify and a restore all write a job AND decide an artifact's state, but only
+// `["jobs"]` was ever invalidated — and the restore invalidated nothing at all. The catalog stayed
+// amber after the verify that had already turned it green, and the only way to see the truth was
+// F5. The same gap sat under the two checks: a canary and a test-connection are RECORDED, on the
+// destination and on the target, and the guided setup reads exactly those recorded results — so a
+// green "Canary passed" could sit directly above a row still reading "never checked".
+//
+// Nothing here flips a state locally. The verdict is the server's; invalidating is how the screen
+// asks for it again.
+function invalidate(client: QueryClient, ...keys: string[]): () => void {
+  return () => {
+    for (const key of keys) void client.invalidateQueries({ queryKey: [key] });
+  };
+}
 
 export function useCreateTarget() {
   const client = useQueryClient();
@@ -34,9 +51,14 @@ export function useDeleteTarget() {
   });
 }
 
+// The server records the probe on the target (`lastProbeOk`/`lastProbeAt`), so the very row this
+// verdict renders under, and the guided setup's "prove the target is reachable" step, both go stale
+// the moment it answers.
 export function useTestConnection() {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (targetId: string) => api.post<DiscoverResult>(`/targets/${targetId}/test-connection`),
+    onSuccess: invalidate(client, "targets"),
   });
 }
 
@@ -83,12 +105,16 @@ export function useDeleteDestination() {
   });
 }
 
+// Recorded on the destination (`lastCanaryOk`/`lastCanaryAt`), and read back both by the row's
+// `LastCheck` and by the guided setup's canary step.
 export function useCanary() {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (destinationId: string) =>
       api.post<{ ok: boolean; failedOperation: string | null }>(
         `/destinations/${destinationId}/canary`,
       ),
+    onSuccess: invalidate(client, "destinations"),
   });
 }
 
@@ -121,7 +147,7 @@ export function useTriggerBackup() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (policyId: string) => api.post<{ jobId: string }>(`/policies/${policyId}/backup`),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: invalidate(client, "jobs", "artifacts"),
   });
 }
 
@@ -130,17 +156,19 @@ export function useTriggerVerify() {
   return useMutation({
     mutationFn: (artifactId: string) =>
       api.post<{ jobId: string }>(`/artifacts/${artifactId}/verify`),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: invalidate(client, "jobs", "artifacts"),
   });
 }
 
 export function useTriggerRestore() {
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (input: { artifactId: string; target: string; confirmExistingDatabase: boolean }) =>
       api.post<{ jobId: string }>(`/artifacts/${input.artifactId}/restore`, {
         target: input.target,
         confirmExistingDatabase: input.confirmExistingDatabase,
       }),
+    onSuccess: invalidate(client, "jobs", "artifacts"),
   });
 }
 
@@ -154,7 +182,9 @@ export function useDeleteArtifact() {
       api.delete<void>(`/artifacts/${input.artifactId}`, {
         acknowledgeVerified: input.acknowledgeVerified,
       }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["artifacts"] }),
+    // And the jobs: every ledger row carries the verdict on the artifact it touched, so a deleted
+    // one must stop being painted beside the run that wrote it.
+    onSuccess: invalidate(client, "artifacts", "jobs"),
   });
 }
 

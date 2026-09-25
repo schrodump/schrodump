@@ -9,9 +9,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/i18n/provider";
+import type { Role } from "@/lib/domain";
 import type { Artifact } from "@/lib/types";
 import { ArtifactRow } from "./page";
 
@@ -45,16 +47,24 @@ const base: Artifact = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
-function renderRow(artifact: Artifact, destinationName: string | null = "Cloudflare R2"): ReactNode | void {
+function renderRow(
+  artifact: Artifact,
+  destinationName: string | null = "Cloudflare R2",
+  role: Role = "operator",
+): ReactNode | void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <I18nProvider>
-        <ArtifactRow artifact={artifact} role="operator" destinationName={destinationName} />
+        <ArtifactRow artifact={artifact} role={role} destinationName={destinationName} />
       </I18nProvider>
     </QueryClientProvider>,
   );
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // The whole point of #1: a green proven by a real restore must not look like one only checksummed,
 // and a checksum that was DOWNGRADED from a requested full restore (an unscoped replica-set dump)
@@ -215,5 +225,71 @@ describe("ArtifactRow enrichment", () => {
   it("shows 'last verified' once the artifact carries a verify level", () => {
     renderRow({ ...base, verifiedLevel: "FULL_RESTORE", updatedAt: base.createdAt });
     expect(screen.getByText(/last verified/i)).toBeInTheDocument();
+  });
+});
+
+// Clicking Verify used to do nothing visible: no confirmation, and `verify.isError` was never
+// rendered at all, so a refusal vanished. The operator was left to guess whether the click had
+// registered — and then pressed F5 to find out, which is the habit this whole change removes.
+describe("a triggered verify says what happened", () => {
+  function stubVerify(answer: { ok: boolean; body: unknown; status?: number }) {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: answer.ok,
+        status: answer.status ?? (answer.ok ? 200 : 403),
+        statusText: "Forbidden",
+        json: () => Promise.resolve(answer.body),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("confirms the queued job and links the ledger", async () => {
+    stubVerify({ ok: true, body: { jobId: "cmtqofm340015nv7icksk39yj" } });
+    renderRow({ ...base, state: "UNOBSERVED" });
+    await userEvent.click(screen.getByRole("button", { name: /^verify$/i }));
+
+    // The status node exists only once the mutation resolved — the data-dependent signal. Asserting
+    // on the text alone would pass on the render before the request ever answered.
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("cmtqofm");
+    expect(screen.getByRole("link", { name: /ledger/i })).toHaveAttribute("href", "/jobs");
+  });
+
+  it("keeps the artifact's state the server's — a queued verify is not a green", async () => {
+    stubVerify({ ok: true, body: { jobId: "job-1" } });
+    renderRow({ ...base, state: "UNOBSERVED" });
+    await userEvent.click(screen.getByRole("button", { name: /^verify$/i }));
+    await screen.findByRole("status");
+
+    const summary = document.querySelector("summary");
+    expect(summary).toHaveTextContent(/unobserved/i);
+    expect(summary).not.toHaveTextContent(/verified/i);
+  });
+
+  it("renders a refusal inline instead of dropping it", async () => {
+    stubVerify({ ok: false, body: { error: "operator role required" } });
+    renderRow({ ...base, state: "UNOBSERVED" });
+    await userEvent.click(screen.getByRole("button", { name: /^verify$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/operator role required/i);
+  });
+});
+
+// The same two-lock shape as restore and delete: the server requires operator+ on the verify route,
+// and a control whose only outcome is a 403 is worse than no control.
+describe("verify is operator+, and the button says so by not being there", () => {
+  it("offers Verify to an operator", () => {
+    renderRow({ ...base, state: "UNOBSERVED" }, "Cloudflare R2", "operator");
+    expect(screen.getByRole("button", { name: /^verify$/i })).toBeInTheDocument();
+  });
+
+  it("shows a viewer no verify control at all", () => {
+    renderRow({ ...base, state: "UNOBSERVED" }, "Cloudflare R2", "viewer");
+    expect(screen.queryByRole("button", { name: /verify/i })).toBeNull();
+    // The row is still fully readable — hiding the action never hides the evidence.
+    expect(document.querySelector("summary")).toHaveTextContent(/unobserved/i);
   });
 });

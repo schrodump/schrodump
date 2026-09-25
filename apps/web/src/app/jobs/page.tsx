@@ -7,13 +7,15 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { JobStateChip } from "@/components/job-state-chip";
+import { LiveIndicator } from "@/components/live-indicator";
 import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { StateGlyph } from "@/components/status-badge";
 import { DetailGrid, type Fact } from "@/components/ui/detail-grid";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { MetricTile } from "@/components/ui/metric-tile";
 import { Panel } from "@/components/ui/panel";
-import { useJobs } from "@/hooks/use-resources";
+import { workInFlight } from "@/hooks/use-live-refresh";
+import { useJobs, useLivePollInterval } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
 import { JOB_KINDS, type JobKind, type JobState } from "@/lib/domain";
@@ -65,6 +67,11 @@ function shortCorrelation(id: string): string {
 
 // The clock the timing column reads. It ticks only while something is live — a RUNNING elapsed
 // time or a PENDING wait — because a static "ran in 1m 32s" has nothing to tick.
+//
+// The clock alone was the defect: it counted seconds over a list fetched once, so a job that
+// finished at one minute went on reading "running 47m" until someone pressed F5. The clock is only
+// honest because the list under it is refetched while anything is in flight (`use-live-refresh.ts`)
+// — never one without the other.
 function useNow(live: boolean): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -555,15 +562,19 @@ export function JobsLedger({ list, now }: { list: JobList; now: Date }) {
 export default function JobsPage() {
   const t = useT();
   const jobs = useJobs();
-  const live =
-    jobs.data !== undefined && jobs.data.items.some((job) => job.state === "RUNNING" || job.state === "PENDING");
+  // From the server's counts over the whole table, not from `items.some(...)`: the page is capped
+  // at two hundred rows, and a running job that fell off it would stop the clock and the poll at
+  // the one moment both are wanted. Same rule as the tiles and the chips.
+  const live = workInFlight(jobs.data);
   const now = useNow(live);
+  const interval = useLivePollInterval();
 
   return (
     <AppShell>
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold">{t("jobs.title")}</h1>
         <p className="mt-2 text-sm text-muted-foreground text-pretty">{t("jobs.intro")}</p>
+        <LiveIndicator intervalMs={interval} className="mt-2" />
       </div>
 
       {jobs.isPending ? (

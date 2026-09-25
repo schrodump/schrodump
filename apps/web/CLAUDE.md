@@ -59,6 +59,12 @@ Next.js 16 (App Router) + React 19 + Tailwind v4 + shadcn/ui + TanStack Query + 
   the catalog: the object, its manifest and the postgres globals sidecar go too. See
   `DeleteArtifactDialog` and `docs/backup-restore.md`.
 - **Verify disabled on a policy is a persistent warning**, not a toast.
+- **Triggering a verify is operator+, and it says what happened.** The server requires operator+ on
+  `POST /artifacts/:id/verify`, so a viewer sees no button (`canRestore`) — the same two-lock shape
+  as restore and delete. The click answers: a `role="status"` line naming the queued job and
+  linking the ledger, or the server's refusal in a `role="alert"`. Both sit on the summary line, so
+  they are read with the row closed. The sentence says a job was QUEUED; it never says the artifact
+  is now green — the state below it stays the server's.
 - **An `INCONCLUSIVE` job is quiet, never the failed red.** It is a verify whose sandbox or runner
   never got to look; it says nothing about the artifact, which stays `UNOBSERVED`. Painting it like
   `FAILED` is the blur the server refuses to make on the artifact, applied one row over.
@@ -203,8 +209,11 @@ screens that follow:
 - **The jobs ledger** (`app/jobs/page.tsx`). A job state is a process outcome, so every row also
   shows the verdict on the data it touched — `job.artifact` with the artifact's own glyph and ink,
   never borrowed from the job palette. Timing reads from a clock the page hands down (`now`), which
-  ticks only while a RUNNING or PENDING row exists; the row itself owns no timer, which is what
-  keeps it testable. Five minutes is the one threshold (`LONG_WAIT_MS`) that turns a queue wait into
+  ticks only while something is in flight — read from the server's `counts.byState`, not from the
+  page's rows; the row itself owns no timer, which is what keeps it testable. **The clock is only
+  honest because the list under it is refetched at the same time** (see "The screen refreshes
+  itself" below): the clock alone WAS the defect, counting seconds over a list fetched once. Never
+  ship one without the other. Five minutes is the one threshold (`LONG_WAIT_MS`) that turns a queue wait into
   "workers behind" on the row, in the fact, and on the tile. A downgraded verify is recognised from
   the worker's reason sentence (`isDowngrade`, see `apps/server/src/jobs/verify.ts`) — the seam is
   in one place, waiting for a structured flag. A filter narrows the PAGE; the footer then says how
@@ -289,6 +298,39 @@ There is no CORS: `next.config.ts` rewrites `/api/auth/*` and `/backend/*` to `S
 Every fetch is same-origin with `credentials: "include"`. The value is baked at build time
 (`output: "standalone"`), not read at runtime — inside the image the API listens on
 `127.0.0.1:8081`.
+
+### The screen refreshes itself, and the cadence follows the work
+
+`hooks/use-live-refresh.ts` holds the policy; `providers.tsx` holds the client defaults. Nothing on
+these screens used to refresh: there was no `refetchInterval` anywhere and `refetchOnWindowFocus`
+was **off**, so the ledger ticked a one-second clock over a list fetched once (a job that finished
+at one minute went on reading "running 47m") and the catalog stayed amber after the verify that had
+already turned it green. Both looked broken, and a live clock over stale data is worse than no
+clock — it asserts a freshness the screen does not have.
+
+- **Fast while work is in flight, slow when it is not, off while nobody is looking.**
+  `pollInterval(visible, inFlight)` → `LIVE_POLL_MS` (4 s) / `IDLE_POLL_MS` (30 s) / `false`.
+  `false` tears the timer down; it is not a zero. `useDocumentVisible` is a `useSyncExternalStore`
+  over `visibilitychange`, and `refetchIntervalInBackground` stays false as a second belt.
+- **"In flight" comes from the server's counts over the whole table** (`counts.byState.RUNNING +
+  PENDING`), never from `items.some(...)`: the page is capped at two hundred rows, and a ledger
+  that went quiet because the running job fell off the page would go quiet at the one moment it
+  must not. The same law as the tiles and the chips.
+- **The catalog has no jobs of its own, so it subscribes to the ledger's** through
+  `useWorkInFlight` (one shared `["jobs"]` key — two subscribers, one request). That subscription
+  is what makes amber → green land on the home screen without an F5. `useLivePollInterval` returns
+  the cadence a screen is actually running at, and `LiveIndicator` states it out loud, including
+  "paused" — a page that refreshes itself and a page that is frozen look identical until something
+  changes, and freshness is this product's whole subject.
+- **A mutation invalidates what it actually changed.** Backup, verify and restore each write a job
+  AND decide an artifact → `["jobs"]` **and** `["artifacts"]`; deleting an artifact invalidates
+  both too, because every ledger row carries its artifact's verdict. The canary and the
+  test-connection are RECORDED (`lastCanaryOk`, `lastProbeOk`), so they invalidate
+  `["destinations"]` / `["targets"]` — the rows they render above, and the guided setup's two
+  check steps, which read exactly those fields. Only `["jobs"]` was invalidated before, the restore
+  invalidated nothing, and a green "Canary passed" could sit directly above a row reading "never
+  checked". Nothing is ever flipped optimistically: the verdict is the server's, and invalidating
+  is how the screen asks for it again.
 
 ## Domain and formatting
 

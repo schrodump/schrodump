@@ -3,11 +3,13 @@
 
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/feedback";
 import { GuidedSetup } from "@/components/guided-setup";
 import { DeleteArtifactButton } from "@/components/delete-artifact-dialog";
+import { LiveIndicator } from "@/components/live-indicator";
 import { RestoreButton } from "@/components/restore-dialog";
 import { ColumnHeaders, GroupHeader, ListFooter, RuledList } from "@/components/ruled-list";
 import { StatusBadge } from "@/components/status-badge";
@@ -19,10 +21,10 @@ import { FilterChip } from "@/components/ui/filter-chip";
 import { ProportionBar } from "@/components/ui/proportion-bar";
 import { useCurrentRole } from "@/hooks/use-current-role";
 import { useTriggerVerify } from "@/hooks/use-mutations";
-import { useArtifacts, useDestinations } from "@/hooks/use-resources";
+import { useArtifacts, useDestinations, useLivePollInterval } from "@/hooks/use-resources";
 import { useT } from "@/i18n/provider";
 import { cn } from "@/lib/cn";
-import type { ArtifactState, Role } from "@/lib/domain";
+import { canRestore, type ArtifactState, type Role } from "@/lib/domain";
 import {
   dayGroupOf,
   formatBytes,
@@ -72,6 +74,33 @@ export function ArtifactRow({
     artifact.sizeCompressedBytes > 0 ? artifact.sizeRawBytes / artifact.sizeCompressedBytes : null;
   const engineLine = `${t(`engine.${artifact.engine}`)} / ${t(`executionMode.${artifact.executionMode}`)}`;
   const verified = artifact.state === "VERIFIED";
+  // The same two-lock shape as restore and delete: the server requires operator+ on
+  // POST /artifacts/:id/verify, and a viewer whose only feedback was a 403 read the product as
+  // broken. The missing button is the second lock, never the only one.
+  const mayVerify = canRestore(role);
+
+  // A triggered verify used to say nothing at all: no confirmation, and `verify.isError` was never
+  // rendered, so a refusal vanished. It sits in the summary — not in the disclosure — because it
+  // answers a click made with the row closed, and the state under it stays the SERVER's: the
+  // sentence says a job was queued, never that the artifact is now green.
+  const queued =
+    verify.isError ? (
+      <span role="alert" className="font-mono text-[11.5px] text-destructive-text">
+        {t("common.errorDetail", { message: verify.error.message })}
+      </span>
+    ) : verify.isSuccess ? (
+      <>
+        <span role="status" className="font-mono text-[11.5px] text-muted-foreground">
+          {t("artifacts.verify.queued", { job: verify.data.jobId.slice(0, 8) })}
+        </span>
+        <Link
+          href="/jobs"
+          className="font-mono text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          {t("artifacts.verify.openLedger")}
+        </Link>
+      </>
+    ) : null;
 
   const facts: Fact[] = [
     { label: t("artifacts.detail.destination"), value: destinationName ?? artifact.destinationId },
@@ -186,23 +215,25 @@ export function ArtifactRow({
           {formatRelative(artifact.createdAt)}
         </span>
         <span className="flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant={verified ? "quiet" : "accent"}
-            onClick={(event) => {
-              // The actions live inside the summary so they are reachable without opening the row.
-              // Stopping the default keeps a click on them from toggling the disclosure underneath.
-              event.preventDefault();
-              verify.mutate(artifact.id);
-            }}
-            disabled={verify.isPending}
-          >
-            {verify.isPending
-              ? t("common.loading")
-              : verified
-                ? t("artifacts.reverify")
-                : t("artifacts.verify")}
-          </Button>
+          {mayVerify ? (
+            <Button
+              size="sm"
+              variant={verified ? "quiet" : "accent"}
+              onClick={(event) => {
+                // The actions live inside the summary so they are reachable without opening the row.
+                // Stopping the default keeps a click on them from toggling the disclosure underneath.
+                event.preventDefault();
+                verify.mutate(artifact.id);
+              }}
+              disabled={verify.isPending}
+            >
+              {verify.isPending
+                ? t("common.loading")
+                : verified
+                  ? t("artifacts.reverify")
+                  : t("artifacts.verify")}
+            </Button>
+          ) : null}
           <span onClick={(event) => event.preventDefault()}>
             <RestoreButton artifact={artifact} role={role} />
           </span>
@@ -210,6 +241,15 @@ export function ArtifactRow({
             <DeleteArtifactButton artifact={artifact} role={role} />
           </span>
         </span>
+
+        {queued !== null ? (
+          <span
+            className="col-span-full flex flex-wrap items-center gap-x-2 gap-y-1 pt-1"
+            onClick={(event) => event.preventDefault()}
+          >
+            {queued}
+          </span>
+        ) : null}
       </summary>
 
       <div className="bg-muted px-[18px] pt-2 pb-4 sm:pl-12">
@@ -273,6 +313,7 @@ export default function ArtifactsPage() {
   const artifacts = useArtifacts();
   const destinations = useDestinations();
   const role = useCurrentRole();
+  const interval = useLivePollInterval();
   const [filter, setFilter] = useState<ArtifactState | "ALL">("ALL");
 
   // id -> name, so a row shows "Cloudflare R2" rather than a cuid. Resolved here (the page holds
@@ -299,6 +340,8 @@ export default function ArtifactsPage() {
           until the deployment can answer it at all, the guided card comes first. */}
       <GuidedSetup />
       <h1 className="text-2xl font-semibold">{t("artifacts.title")}</h1>
+      {/* The catalog is where a verify is watched, so it says it is watching. */}
+      <LiveIndicator intervalMs={interval} className="mt-2" />
 
       {data !== undefined ? (
         <div className="mt-5 space-y-3 [&>*:first-child]:mb-6">
