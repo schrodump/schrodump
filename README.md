@@ -49,6 +49,17 @@ three states**, and the colour is content, not decoration:
 There is no "OK". The dashboard leads with the number of **unobserved** backups — the open
 questions — not the number of jobs that succeeded. That inversion is the whole product.
 
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/artifact-catalog-en-dark.png">
+  <img alt="The Schrodump artifact catalog. Three unobserved artifacts lead the screen at display size; five verified and one failed sit beside them, smaller. Below, every artifact is listed by day with its state, the verify level that earned it, its size and its age." src="docs/assets/artifact-catalog-en-light.png" width="900">
+</picture>
+
+<sub>The catalog is the home screen, and the number it leads with is the one nobody has checked.</sub>
+
+</div>
+
 ## Features
 
 - **Verified restore** — by default every backup is restored into a throwaway database and

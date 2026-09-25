@@ -51,6 +51,17 @@ artefacto está en **uno de tres estados**, y el color es contenido, no decoraci
 No existe "OK". El panel encabeza con el número de copias **no observadas** — las preguntas
 abiertas — no con el número de trabajos que tuvieron éxito. Esa inversión es el producto entero.
 
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/artifact-catalog-es-dark.png">
+  <img alt="El catálogo de artefactos de Schrodump. Tres artefactos no observados encabezan la pantalla en tamaño grande; cinco verificados y uno fallido quedan al lado, más pequeños. Debajo, cada artefacto aparece agrupado por día con su estado, el nivel de verificación que lo consiguió, su tamaño y su antigüedad." src="docs/assets/artifact-catalog-es-light.png" width="900">
+</picture>
+
+<sub>El catálogo es la pantalla de inicio, y el número que encabeza es el que nadie ha comprobado.</sub>
+
+</div>
+
 ## Características
 
 - **Restauración verificada** — por defecto cada copia se restaura en una base desechable y se

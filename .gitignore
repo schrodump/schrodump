@@ -21,6 +21,10 @@ coverage/
 .vscode/
 *.log
 
+# Agent tooling scratch (Claude Code sessions, Playwright MCP captures)
+.claude/
+.playwright-mcp/
+
 # Local scratch
 scratch/
 .ds-sync/

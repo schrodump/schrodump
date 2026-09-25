@@ -49,6 +49,17 @@ está em **um de três estados**, e a cor é conteúdo, não decoração:
 Não existe "OK". O painel lidera pelo número de backups **não observados** — as perguntas em aberto
 — não pelo número de jobs que tiveram sucesso. Essa inversão é o produto inteiro.
 
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/artifact-catalog-pt-BR-dark.png">
+  <img alt="O catálogo de artefatos do Schrodump. Três artefatos não observados lideram a tela em tamanho grande; cinco verificados e um que falhou ficam ao lado, menores. Abaixo, cada artefato aparece agrupado por dia com seu estado, o nível de verificação que o conquistou, o tamanho e a idade." src="docs/assets/artifact-catalog-pt-BR-light.png" width="900">
+</picture>
+
+<sub>O catálogo é a tela inicial, e o número que ele lidera é o que ninguém conferiu.</sub>
+
+</div>
+
 ## Recursos
 
 - **Restore verificado** — por padrão todo backup é restaurado num banco descartável e conferido; um
