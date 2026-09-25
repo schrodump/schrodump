@@ -9,6 +9,7 @@ import type { ObjectMeta, Page, PutResult, StorageDriver } from "./driver.js";
 import {
   artifactKey,
   manifestKey,
+  objectKey,
   readManifest,
   scanManifests,
   writeManifest,
@@ -102,6 +103,28 @@ describe("key construction", () => {
   it("normalizes surrounding slashes and an empty prefix", () => {
     expect(manifestKey("/schrodump/", "org1", "job1")).toBe("schrodump/org1/job1/manifest.json");
     expect(manifestKey("", "org1", "job1")).toBe("org1/job1/manifest.json");
+  });
+
+  // The defect: the write path built `${prefix}/${org}/${job}/${name}` with a template literal
+  // while everything that read or deleted used these helpers. With the destination form's default
+  // prefix of "" the two disagree by one character, and S3 treats `/a/b` and `a/b` as different
+  // keys — so the artifact was written where retention would never look. `objectKey` exists so
+  // there is one answer to "where does this object live", and this is the case that proves it.
+  it("gives an empty prefix no leading slash — the one character the two paths disagreed on", () => {
+    expect(objectKey("", "org1", "job1", "artifact.bin")).toBe("org1/job1/artifact.bin");
+    expect(objectKey("", "org1", "job1", "artifact.bin").startsWith("/")).toBe(false);
+    expect(objectKey("", "org1", "job1", "globals.bin")).toBe("org1/job1/globals.bin");
+  });
+
+  it("is the same answer the artifact and manifest helpers give, for every prefix shape", () => {
+    for (const prefix of ["schrodump", "", "/", "/schrodump/", "a/b"]) {
+      expect(objectKey(prefix, "org1", "job1", "artifact.bin")).toBe(
+        artifactKey(prefix, "org1", "job1"),
+      );
+      expect(objectKey(prefix, "org1", "job1", "manifest.json")).toBe(
+        manifestKey(prefix, "org1", "job1"),
+      );
+    }
   });
 });
 

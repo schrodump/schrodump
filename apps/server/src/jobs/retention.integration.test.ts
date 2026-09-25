@@ -93,6 +93,13 @@ describe.skipIf(!enabled)("retention integration (real S3-compatible bucket)", (
       organizationId: ORG,
       artifactJobIds: () => Promise.resolve([...rows]),
       newestVerifiedJobId: () => Promise.resolve(null),
+      // The real wiring reads these off the Artifact row; this suite drives the bucket directly, so
+      // the keys it wrote ARE the computed ones.
+      recordedKeys: (jobId: string) =>
+        Promise.resolve({
+          bucketKey: artifactKey(PREFIX, ORG, jobId),
+          manifestKey: manifestKey(PREFIX, ORG, jobId),
+        }),
       deleteArtifactRow: (jobId) => {
         rows.delete(jobId);
         return Promise.resolve();

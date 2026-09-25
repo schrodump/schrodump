@@ -6,7 +6,7 @@
 
 import type { PrismaClient } from "@prisma/client";
 import type { StorageDriver } from "@schrodump/storage/driver";
-import { scanManifests } from "@schrodump/storage/manifest-sidecar";
+import { artifactKey, manifestKey, scanManifests } from "@schrodump/storage/manifest-sidecar";
 import { scopedPrisma } from "../data/scope.js";
 import type { CatalogRebuildPorts } from "./catalog-rebuild.js";
 import { dumpIsMultiDatabaseFor } from "./restore.js";
@@ -64,8 +64,8 @@ export function createCatalogRebuildPorts(deps: CatalogRebuildWiringDeps): Catal
           jobId: manifest.jobId,
           destinationId: deps.destinationId,
           state: "UNOBSERVED",
-          bucketKey: `${deps.prefix}/${deps.organizationId}/${manifest.jobId}/artifact.bin`,
-          manifestKey: `${deps.prefix}/${deps.organizationId}/${manifest.jobId}/manifest.json`,
+          bucketKey: artifactKey(deps.prefix, deps.organizationId, manifest.jobId),
+          manifestKey: manifestKey(deps.prefix, deps.organizationId, manifest.jobId),
           engine: manifest.engine,
           // From the manifest, not from the column default: a STAGED artifact is a tar, and the
           // restore pipeline only unpacks it when the row says so. Omitting this left every staged

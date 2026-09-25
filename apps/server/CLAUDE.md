@@ -82,6 +82,21 @@ only place where those four meet. Takes precedence over the root `CLAUDE.md` her
   ordinary "kept 7, deleted 1". `runRetention` now asks `RetentionPorts.newestVerifiedJobId` (an
   organization-scoped query in `worker-wiring.ts`) and passes it to the resolver as `alwaysKeep`;
   when the window alone would have deleted it, `retentionSummary` names it in the job's reason.
+- **There is ONE key builder, and retention deletes the key the ROW records.** Every object a
+  backup writes goes through `objectKey` in `@schrodump/storage/manifest-sidecar`, never a template
+  literal. It used to be both: `createBackupPorts` interpolated `${prefix}/${org}/${job}/${name}`
+  while the manifest and every delete used the builder — which strips surrounding slashes. The two
+  agree for every prefix except the one the destination form supplies by default, `""`, where the
+  literal writes `/<org>/<job>/artifact.bin` and the builder computes `<org>/<job>/artifact.bin`.
+  Those are different S3 keys. So the manifest was deletable and the artifact was not: retention
+  removed the sidecar and the row, reported "kept 7, deleted 1", and left `artifact.bin` and
+  `globals.bin` in the bucket permanently — storage outside the configured window, holding the role
+  password hashes `pg_dumpall --globals-only` writes. Observed on a real instance, where one
+  `Artifact` row carried `bucketKey = "/cmtq…"` beside `manifestKey = "cmtq…"`. The shared builder
+  stops new ones; `RetentionPorts.recordedKeys` reclaims the old ones, because only the row knows
+  where an artifact written by an earlier version actually went. Both spellings are passed to
+  `delete` — `DeleteObjects` treats an absent key as a successful delete, so naming one that was
+  never written costs nothing and naming the one that was is the entire point.
 - **A verify that could not run is `INCONCLUSIVE`, not `FAILED`.** `FAILED` is a process that ran
   and broke; `INCONCLUSIVE` is `runVerifyJob` reporting that our own sandbox or runner never got to
   look — the artifact stays `UNOBSERVED`, which was always true. It became its own `JobState`

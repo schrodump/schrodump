@@ -15,6 +15,7 @@ import type { PrismaClient } from "@prisma/client";
 import { resolveAdapter } from "@schrodump/engines/registry";
 import type { Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
+import { objectKey } from "@schrodump/storage/manifest-sidecar";
 import { encryptStream } from "../crypto/artifact.js";
 import {
   selectSelfBackupRecipients,
@@ -132,9 +133,11 @@ export function createSelfBackupPorts(
   context: SelfBackupContext,
   rowId: string,
 ): SelfBackupPorts {
-  const base = `${context.prefix}/_self/${rowId}`;
-  const bucketKey = `${base}/metadata.bin`;
-  const manifestKey = `${base}/self-backup.json`;
+  // `_self` stands where an organizationId does for a policy backup: one key builder, so a
+  // deployment that took the destination form's default prefix of "" does not write
+  // `/_self/<id>/metadata.bin` and then look for `_self/<id>/metadata.bin`.
+  const bucketKey = objectKey(context.prefix, "_self", rowId, "metadata.bin");
+  const manifestKey = objectKey(context.prefix, "_self", rowId, "self-backup.json");
 
   return {
     setState: async (state, reason) => {

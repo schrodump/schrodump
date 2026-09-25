@@ -12,7 +12,23 @@ Candidates publish to `:next`, and an exact version is what production should pi
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Retention deletes the artifact, not just its manifest and its row.** Every object a backup
+  writes now goes through one key builder. It used to be two: the write path interpolated
+  `${prefix}/${org}/${job}/${name}` while the manifest and every delete used
+  `@schrodump/storage`'s builder, which strips surrounding slashes. They agree for every prefix
+  except the one the destination form supplies by default — `""` — where one writes
+  `/<org>/<job>/artifact.bin` and the other computes `<org>/<job>/artifact.bin`. Those are
+  different S3 keys, so retention removed the sidecar and the catalog row, reported
+  `retention kept 7, deleted 1`, and left `artifact.bin` and `globals.bin` in the bucket for good:
+  storage outside the configured window, holding the role password hashes
+  `pg_dumpall --globals-only` writes. **This was live.** It was found on a running instance whose
+  `Artifact` rows carried `bucketKey = "/cmtq…"` next to `manifestKey = "cmtq…"` — the two paths,
+  side by side, in one row. Retention now also deletes the key the row records, so artifacts
+  written by an earlier version are reclaimed as they age out rather than left behind. Objects
+  already orphaned by a past prune have no row left to name them and are not reclaimed by this
+  change (#172).
 
 ## [0.1.0-rc.20] — 2026-09-25
 

@@ -16,7 +16,7 @@ import { buildArchiveStaging } from "@schrodump/engines/staging";
 import type { Manifest } from "@schrodump/core/manifest";
 import type { RunMount, Runner } from "@schrodump/runner/runner";
 import type { StorageDriver } from "@schrodump/storage/driver";
-import { manifestKey, writeManifest } from "@schrodump/storage/manifest-sidecar";
+import { manifestKey, objectKey as bucketObjectKey, writeManifest } from "@schrodump/storage/manifest-sidecar";
 import { encryptStream } from "../crypto/artifact.js";
 import type { ExecutionMode } from "./execution-mode.js";
 import { describeToolFailure } from "./restore-executor.js";
@@ -79,8 +79,12 @@ export interface BackupWiringDeps {
 }
 
 export function createBackupPorts(deps: BackupWiringDeps): BackupPorts {
+  // Through the shared builder, never a template literal. `manifestKey` below already used it, so
+  // with the form's default prefix of "" these two lines produced `/org/job/artifact.bin` and
+  // `org/job/manifest.json` — one artifact, two spellings, and only the manifest was ever
+  // deletable. See objectKey in @schrodump/storage/manifest-sidecar.
   const objectKey = (name: string): string =>
-    `${deps.prefix}/${deps.organizationId}/${deps.jobId}/${name}`;
+    bucketObjectKey(deps.prefix, deps.organizationId, deps.jobId, name);
 
   // Every key this backup has started writing and not yet deleted. Recorded BEFORE each write, not
   // after it succeeds: a failed multipart upload or a put that rejected late can still have left an
